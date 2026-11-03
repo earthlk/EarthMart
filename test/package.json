@@ -1,0 +1,11 @@
+{
+  "name": "earthmart-pos-tests",
+  "private": true,
+  "scripts": {
+    "test": "node server.test.js && node ui.test.js",
+    "test:server": "node server.test.js"
+  },
+  "devDependencies": {
+    "qrcode-generator": "1.4.4"
+  }
+}

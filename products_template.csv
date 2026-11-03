@@ -1,0 +1,7 @@
+sku,name,category,type,unit,cost,price,minStock,openingStock,barcode,barcodeUnit,multiplier,barcodePrice,quickKey,quickKeyGroup,openPrice,plu
+W0001,น้ำดื่ม 600 มล.,เครื่องดื่ม,barcode,ขวด,4.2,7,48,186,8851234567890,ชิ้น,1,,,,,
+W0001,,,,,,,,,8851234567906,แพ็ค,12,80,,,,
+W0001,,,,,,,,,8851234567913,ลัง,24,,,,,
+D0101,น้ำแข็งแก้ว,เครื่องดื่มชง,nobarcode,แก้ว,1.65,5,0,,,,,,y,น้ำแข็ง,,101
+D0102,กาแฟเย็น,เครื่องดื่มชง,nobarcode,แก้ว,9,30,0,,,,,,y,เครื่องดื่มชง,,102
+F0201,ข้าวเหนียวหมูปิ้ง,อาหาร,nobarcode,ห่อ,12,0,0,,,,,,y,อาหาร,y,201

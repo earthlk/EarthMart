@@ -1,0 +1,46 @@
+# Runs the server tests, then pushes gas/ to Apps Script with clasp and updates the existing
+# web app deployment, so the /exec URL never changes.
+#
+# Repo secrets (Settings › Secrets and variables › Actions):
+#   CLASPRC_JSON           contents of ~/.clasprc.json after `npx @google/clasp@2.4.2 login` on your PC
+#   GAS_SCRIPT_ID          Apps Script › Project Settings › Script ID
+#   GAS_DEPLOYMENT_ID      Apps Script › Deploy › Manage deployments › Deployment ID (the web app)
+name: Deploy Apps Script API
+
+on:
+  push:
+    branches: [main]
+    paths: ['gas/**', 'test/server.test.js', 'test/gasmock.js', '.github/workflows/gas-deploy.yml']
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node test/server.test.js
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Write clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+        run: |
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          printf '{"scriptId":"%s","rootDir":"gas"}' "$GAS_SCRIPT_ID" > .clasp.json
+      - name: Push code
+        run: npx --yes @google/clasp@2.4.2 push --force
+      - name: Update web app deployment
+        env:
+          GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+        run: npx --yes @google/clasp@2.4.2 deploy --deploymentId "$GAS_DEPLOYMENT_ID" --description "${GITHUB_SHA::7}"
