@@ -27,11 +27,27 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Check secrets
+        id: check
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+          GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+        run: |
+          if [ -n "$CLASPRC_JSON" ] && [ -n "$GAS_SCRIPT_ID" ] && [ -n "$GAS_DEPLOYMENT_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped Apps Script deploy — add CLASPRC_JSON, GAS_SCRIPT_ID and GAS_DEPLOYMENT_ID secrets to enable it (README step 4)."
+          fi
+      - if: steps.check.outputs.ready == 'true'
+        uses: actions/checkout@v4
+      - if: steps.check.outputs.ready == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: Write clasp credentials
+        if: steps.check.outputs.ready == 'true'
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
           GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
@@ -39,8 +55,10 @@ jobs:
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           printf '{"scriptId":"%s","rootDir":"gas"}' "$GAS_SCRIPT_ID" > .clasp.json
       - name: Push code
+        if: steps.check.outputs.ready == 'true'
         run: npx --yes @google/clasp@2.4.2 push --force
       - name: Update web app deployment
+        if: steps.check.outputs.ready == 'true'
         env:
           GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
         run: npx --yes @google/clasp@2.4.2 deploy --deploymentId "$GAS_DEPLOYMENT_ID" --description "${GITHUB_SHA::7}"
