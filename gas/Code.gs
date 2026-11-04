@@ -293,6 +293,7 @@ function api_status() {
     var users = readAll_('Users').filter(function (u) { return bool_(u.active); });
     return {
       ready: users.some(function (u) { return u.role === 'owner'; }),
+      apiVersion: Number(SCHEMA_VERSION),
       users: users.map(function (u) { return { userId: u.userId, name: u.name, role: u.role }; }),
       settings: publicSettings_()
     };

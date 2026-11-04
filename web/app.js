@@ -272,6 +272,9 @@ function start() {
   });
 }
 
+/** Apps Script schema version this page needs (api_status.apiVersion). */
+var API_NEEDED = 5;
+
 /** A setup link looks like  https://<site>/#connect=<base64 of {"url":"...","key":"..."}>  */
 function readConnectLink() {
   var m = /#connect=([^&]+)/.exec(location.hash || '');
@@ -448,7 +451,10 @@ function frame(inner) {
   }).join('');
   var shiftTxt = S.shift ? 'กะเปิด ' + timeOf(S.shift.openedAt) : (S.isCounter ? 'ยังไม่เปิดกะ' : 'ไม่ใช่เครื่องหน้าร้าน');
   var role = S.user && S.user.role === 'owner' ? 'เจ้าของ' : 'แคชเชียร์';
-  var banner = !S.isCounter ? '<div class="banner">เครื่องนี้ยังไม่ได้ลงทะเบียนเป็นเครื่องหน้าร้าน — ขายและเปิดกะไม่ได้' +
+  var old = S.status && !(Number(S.status.apiVersion) >= API_NEEDED);
+  var banner = old ? '<div class="banner warn">Apps Script ที่ใช้อยู่เป็นเวอร์ชันเก่า — ฟีเจอร์ใหม่ (ล็อต FIFO, รับสินค้า, หมดอายุ, เบิกใช้, แบ่งจ่าย, คืนสินค้า) ยังใช้ไม่ได้ · ' +
+    'วางไฟล์ EarthMart-AppsScript.gs ล่าสุดทับโค้ดเดิม แล้ว Deploy › Manage deployments › New version</div>' : '';
+  banner += !S.isCounter ? '<div class="banner">เครื่องนี้ยังไม่ได้ลงทะเบียนเป็นเครื่องหน้าร้าน — ขายและเปิดกะไม่ได้' +
     (S.user && S.user.role === 'owner' ? ' · <a href="#" data-act="go" data-v="settings">ลงทะเบียนในหน้าตั้งค่า</a>' : ' · ให้เจ้าของลงทะเบียนในหน้าตั้งค่า') + '</div>' : '';
   return '<header class="topbar"><span class="brand">' + esc(S.settings.shopName || 'EarthMart') + '</span><nav>' + nav + '</nav>' +
     '<span class="grow"></span><span class="meta">' + shiftTxt + ' · ' + role + ': ' + esc(S.user ? S.user.name : '') + '</span>' +
@@ -1320,13 +1326,17 @@ function billDetail(no) {
           ' <span class="muted">(' + (x.refundMethod === 'cash' ? 'เงินสด' : 'โอน') + (x.restock ? '' : ' · ไม่คืนสต็อก') + ' · ' + esc(x.user) + ')</span></span><b class="num warn-text">−฿' + money(x.total) + '</b></div>';
       }).join('') + '</div>' : '') +
       '</div><footer><button class="btn" data-x="print">พิมพ์ซ้ำ</button>' +
-      (rc.status !== 'VOID' && S.isCounter && rc.lines.some(function (l) { return l.qty > l.returnedQty; }) ? '<button class="btn" data-x="return">คืนสินค้า</button>' : '') +
+      (rc.status === 'VOID' ? '' : !S.isCounter ? '<button class="btn" disabled title="คืนสินค้าได้เฉพาะเครื่องหน้าร้าน">คืนสินค้า</button>'
+        : rc.lines.some(function (l) { return l.qty > (l.returnedQty || 0); }) ? '<button class="btn" data-x="return">คืนสินค้า</button>' : '') +
       (rc.status !== 'VOID' && S.isCounter && !rc.returnedTotal ? '<button class="btn warn" data-x="void">ยกเลิกบิล</button>' : '') +
       '<button class="btn primary" data-x="close">ปิด</button></footer>', { wide: false });
     $('[data-x=print]', m).onclick = function () { printReceipt(rc); };
     $('[data-x=close]', m).onclick = function () { closeModal(); };
     var rb = $('[data-x=return]', m);
-    if (rb) rb.onclick = function () { closeModal(); returnModal(rc); };
+    if (rb) rb.onclick = function () {
+      if (rc.lines[0] && rc.lines[0].lineNo === undefined) return toast('ต้องอัปเดต Apps Script เป็นเวอร์ชันล่าสุดก่อน จึงจะคืนสินค้าได้', true);
+      closeModal(); returnModal(rc);
+    };
     var vb = $('[data-x=void]', m);
     if (vb) vb.onclick = function () {
       prompt2('ยกเลิกบิล ' + rc.billNo, 'เหตุผล (บังคับ)', '', { ok: 'ถัดไป' }).then(function (reason) {
