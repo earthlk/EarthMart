@@ -285,6 +285,27 @@ a{color:var(--brand-text)}
 /* ===== Receipt (80mm thermal) ===== */
 #print{display:none}
 
+/* Pay dialog with touch keypad */
+.modal.pay{width:860px}
+.modal .body.pay-grid,.pay-grid{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:18px;align-items:start}
+.modal .body.pay-grid.nokp,.pay-grid.nokp{grid-template-columns:minmax(0,1fr)}
+.pay-left{display:flex;flex-direction:column;gap:14px;min-width:0}
+.pay-in{height:56px;font-size:28px;font-weight:700;text-align:right;border:1px solid var(--line-strong);border-radius:10px;padding:0 12px;width:100%;box-sizing:border-box;caret-color:transparent}
+#recv.pay-in{height:64px;font-size:32px}
+.pay-in.active{border:2px solid var(--brand-line);box-shadow:0 0 0 3px var(--brand-soft)}
+.keypad{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.keypad button{height:62px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);color:var(--ink);font-size:24px;font-weight:600;cursor:pointer;touch-action:manipulation}
+.keypad button:active{background:var(--surface-muted)}
+.keypad button.wide{grid-column:span 2}
+.keypad button[data-k=del],.keypad button[data-k=clr]{background:var(--surface-muted);font-size:20px}
+.sp-part{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.sp-row{display:flex;gap:10px;align-items:center}
+.sp-row .seg-sm{flex:1}
+.sp-row .pay-in{width:150px;flex:0 0 150px;height:50px;font-size:24px}
+.sp-h{font-size:13px;font-weight:600;color:var(--muted)}
+.sp-part .seg-sm button{height:38px;font-size:14px}
+@media (max-width:820px){ .modal .body.pay-grid{grid-template-columns:1fr} }
+
 /* Store use modal */
 .su-lines{border:1px solid var(--line);border-radius:10px;max-height:260px;overflow:auto}
 .su-line{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line-soft)}

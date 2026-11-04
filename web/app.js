@@ -911,103 +911,165 @@ function openPay(initial) {
   var quick = [t.total];
   [20, 50, 100, 500, 1000].forEach(function (n) { var v = Math.ceil(t.total / n) * n; if (v > t.total && quick.indexOf(v) < 0) quick.push(v); });
   quick = quick.slice(0, 5);
+  var PM = { cash: 'เงินสด', qr: 'QR พร้อมเพย์', transfer: 'โอน' };
+  var numIn = function (id, extra) {
+    return '<input id="' + id + '" class="num pay-in" type="text" inputmode="none" autocomplete="off"' + (extra || '') + '>';
+  };
   var m = openModal('<header><h1>ชำระเงิน</h1><span class="muted">' + t.items + ' ชิ้น</span><span class="grow"></span>' +
     '<span style="font-size:28px;font-weight:700" class="brand-text num">฿' + money(t.total) + '</span></header>' +
-    '<div class="body"><div class="seg" id="pm">' +
+    '<div class="body pay-grid"><div class="pay-left"><div class="seg" id="pm">' +
     '<button data-m="cash" class="on">เงินสด</button><button data-m="qr">QR พร้อมเพย์</button><button data-m="transfer">โอน</button><button data-m="split">แบ่งจ่าย</button></div>' +
-    '<div id="pm-cash" class="col" style="gap:10px"><label for="recv">รับเงินมา</label><input id="recv" class="big-input num" type="number" inputmode="decimal" step="0.25" autofocus>' +
+    // cash
+    '<div id="pm-cash" class="col" style="gap:10px"><label for="recv">รับเงินมา</label>' + numIn('recv', ' autofocus') +
     '<div class="row" style="flex-wrap:wrap">' + quick.map(function (q) { return '<button class="btn" data-q="' + q + '">' + (q === t.total ? 'พอดี' : '฿' + money(q)) + '</button>'; }).join('') + '</div>' +
     '<div class="row" style="justify-content:space-between;align-items:baseline"><span class="muted">เงินทอน</span><span id="chg" class="num brand-text" style="font-size:40px;font-weight:700">฿0.00</span></div></div>' +
+    // qr
     '<div id="pm-qr" class="col hidden" style="align-items:center;gap:8px">' +
     (hasPP ? '<div class="qr" id="qrbox"></div><div class="muted">พร้อมเพย์ ' + esc(maskPP(S.settings.promptPayId)) + ' · ยอดอยู่ใน QR แล้ว</div><div class="muted" style="font-size:13px">ตรวจยอดเข้าในแอปธนาคาร แล้วกด "ได้รับเงินแล้ว"</div>'
       : '<div class="banner" style="border-radius:8px">ยังไม่ได้ตั้งเบอร์พร้อมเพย์ (ตั้งค่า › ร้าน)</div>') + '</div>' +
+    // transfer
     '<div id="pm-transfer" class="col hidden"><div class="muted">ตรวจยอดโอนในแอปธนาคารก่อน แล้วกด "ได้รับเงินแล้ว"</div></div>' +
-    '<div id="pm-split" class="col hidden" style="gap:10px"><div class="row" style="gap:10px;align-items:flex-end">' +
-    '<div class="field" style="flex:1"><label>อีกส่วนจ่ายด้วย</label><div class="seg-sm" id="sp-m"><button data-o="qr" class="on">QR พร้อมเพย์</button><button data-o="transfer">โอน</button></div></div>' +
-    '<div class="field" style="flex:1"><label for="sp-o">ยอด QR / โอน</label><input id="sp-o" class="num" type="number" inputmode="decimal" step="0.25" style="height:44px;font-size:20px;font-weight:700;text-align:right"></div></div>' +
-    '<div class="row" style="justify-content:space-between;padding:10px 12px;background:var(--bg);border-radius:8px"><span>ส่วนเงินสด</span><b class="num" id="sp-c" style="font-size:20px">฿0.00</b></div>' +
-    '<div class="row" style="gap:10px;align-items:flex-end"><div class="field" style="flex:1"><label for="sp-r">รับเงินสดมา</label><input id="sp-r" class="num" type="number" inputmode="decimal" step="0.25" style="height:44px;font-size:20px;text-align:right"></div>' +
-    '<div style="flex:1;text-align:right"><div class="muted" style="font-size:13px">เงินทอน</div><div id="sp-chg" class="num brand-text" style="font-size:30px;font-weight:700">฿0.00</div></div></div>' +
-    '<div id="sp-qrwrap" class="col" style="align-items:center;gap:6px"><div class="qr" id="spqr" style="width:170px;height:170px"></div><div class="muted" style="font-size:13px" id="sp-qrnote">ใส่ยอด QR ก่อน แล้ว QR จะขึ้นที่นี่และที่จอลูกค้า</div></div></div>' +
-    '<label class="row" style="color:var(--ink);font-size:15px"><input type="checkbox" id="autoprint" ' + (store('em_autoprint') === '0' ? '' : 'checked') + '> พิมพ์ใบเสร็จ</label>' +
+    // split
+    '<div id="pm-split" class="col hidden" style="gap:12px">' +
+    '<div class="sp-part"><div class="sp-h">ส่วนที่ 1 · เลือกช่องทาง แล้วใส่ยอดที่รับมา</div><div class="sp-row"><div class="seg-sm" id="s1m"></div>' +
+    '<label class="sr" for="s1">ยอดส่วนที่ 1</label>' + numIn('s1') + '</div></div>' +
+    '<div class="sp-part"><div class="sp-h">ส่วนที่ 2 · ที่เหลือจ่ายด้วย <span class="muted" style="font-weight:400" id="s2hint"></span></div><div class="sp-row"><div class="seg-sm" id="s2m"></div>' +
+    '<label class="sr" for="s2">ยอดส่วนที่ 2</label>' + numIn('s2') + '</div></div>' +
+    '<div class="row" style="gap:14px;align-items:center"><div class="grow"><div id="sp-lab" class="muted">เงินทอน</div><div id="sp-res" class="num brand-text" style="font-size:34px;font-weight:700">฿0.00</div>' +
+    '<div class="muted" style="font-size:12px;margin-top:4px" id="sp-qrnote"></div></div>' +
+    '<div id="sp-qrwrap" class="hidden"><div class="qr" id="spqr" style="width:128px;height:128px"></div></div></div></div>' +
+    '<label class="row" style="color:var(--ink);font-size:15px"><input type="checkbox" id="autoprint" ' + (store('em_autoprint') === '0' ? '' : 'checked') + '> พิมพ์ใบเสร็จ</label></div>' +
+    // keypad
+    '<div class="keypad" id="kp">' + ['7', '8', '9', 'del', '4', '5', '6', 'clr', '1', '2', '3', '00', '0', '.'].map(function (k) {
+      return '<button type="button" data-k="' + k + '"' + (k === '0' ? ' class="wide"' : '') + ' aria-label="' + (k === 'del' ? 'ลบ' : k === 'clr' ? 'ล้าง' : k) + '">' +
+        (k === 'del' ? '⌫' : k === 'clr' ? 'C' : k) + '</button>';
+    }).join('') + '</div>' +
     '</div><footer><button class="btn" data-x="cancel">ยกเลิก (Esc)</button><button class="btn primary lg" data-x="ok" style="height:52px;font-size:17px">ยืนยัน (Enter)</button></footer>',
     { onClose: function () { if (!paid) cdPublish(); } });
+  m.querySelector('.modal').classList.add('pay');
   var paid = false;
   cdPublish('pay', { method: 'cash' });
 
-  var recv = $('#recv', m);
-  var update = function () {
-    var r = Number(recv.value || 0);
-    var c = round2(r - t.total);
+  var recv = $('#recv', m), s1 = $('#s1', m), s2 = $('#s2', m);
+  var val = function (el) { return round2(Number(el.value || 0)); };
+
+  // ---- keypad: types into whichever amount box was focused last
+  var target = recv;
+  var setTarget = function (el) { target = el; $all('.pay-in', m).forEach(function (x) { x.classList.toggle('active', x === el); }); };
+  $all('.pay-in', m).forEach(function (el) { el.addEventListener('focus', function () { setTarget(el); }); });
+  $all('#kp button', m).forEach(function (b) {
+    b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    b.onclick = function () {
+      var k = b.getAttribute('data-k'), v = target.value;
+      if (k === 'del') v = v.slice(0, -1);
+      else if (k === 'clr') v = '';
+      else if (k === '.') { if (v.indexOf('.') < 0) v = (v || '0') + '.'; }
+      else if (!/\.\d\d$/.test(v)) v = (v === '0' ? '' : v) + k;
+      target.value = v;
+      target.dispatchEvent(new Event('input'));
+      target.focus();
+    };
+  });
+  $all('.pay-in', m).forEach(function (el) {
+    el.addEventListener('input', function () { var c = el.value.replace(/[^\d.]/g, ''); if (c !== el.value) el.value = c; });
+  });
+
+  // ---- cash
+  var updateCash = function () {
+    var c = round2(val(recv) - t.total);
     $('#chg', m).textContent = '฿' + money(Math.max(0, c));
     $('#chg', m).className = 'num ' + (c < 0 ? 'warn-text' : 'brand-text');
-    $('[data-x=ok]', m).textContent = method === 'cash' ? 'ยืนยัน (Enter)' : 'ได้รับเงินแล้ว (Enter)';
-    if (method === 'split') updateSplit();
   };
-  // Split: one non-cash part (QR or transfer) + the rest in cash.
-  var spOther = 'qr', spQrFor = -1;
-  var spParts = function () {
-    var o = round2(Number($('#sp-o', m).value || 0));
-    return { other: o, cash: round2(t.total - o), recv: round2(Number($('#sp-r', m).value || 0)) };
+  recv.addEventListener('input', updateCash);
+  $all('[data-q]', m).forEach(function (b) { b.onclick = function () { recv.value = b.getAttribute('data-q'); updateCash(); recv.focus(); }; });
+
+  // ---- split: part 1 any of 3 methods + amount received; part 2 one of the other 2, auto = total − part 1 (editable)
+  var m1 = 'cash', m2 = 'qr', s2Manual = false, qrFor = null;
+  var drawSeg = function () {
+    $('#s1m', m).innerHTML = ['cash', 'qr', 'transfer'].map(function (k) { return '<button type="button" data-s1="' + k + '" class="' + (k === m1 ? 'on' : '') + '">' + PM[k] + '</button>'; }).join('');
+    $('#s2m', m).innerHTML = ['cash', 'qr', 'transfer'].filter(function (k) { return k !== m1; }).map(function (k) {
+      return '<button type="button" data-s2="' + k + '" class="' + (k === m2 ? 'on' : '') + '">' + PM[k] + '</button>';
+    }).join('');
+  };
+  var split = function () {
+    var a = val(s1), b = val(s2), sum = round2(a + b);
+    var cashGiven = (m1 === 'cash' ? a : 0) + (m2 === 'cash' ? b : 0);
+    var over = round2(sum - t.total);
+    var parts = { cash: 0, qr: 0, transfer: 0 };
+    parts[m1] += a; parts[m2] += b;
+    if (over > 0) parts.cash = round2(parts.cash - over);   // change comes back from the cash part
+    return { a: a, b: b, sum: sum, over: over, cashGiven: round2(cashGiven), parts: parts };
   };
   var updateSplit = function () {
-    var p = spParts();
-    $('#sp-c', m).textContent = '฿' + money(Math.max(0, p.cash));
-    var c = round2(p.recv - p.cash);
-    $('#sp-chg', m).textContent = '฿' + money(Math.max(0, c));
-    $('#sp-chg', m).className = 'num ' + (c < 0 ? 'warn-text' : 'brand-text');
-    var showQr = spOther === 'qr' && hasPP && p.other > 0 && p.other < t.total;
-    $('#sp-qrwrap', m).classList.toggle('hidden', spOther !== 'qr');
-    if (showQr && spQrFor !== p.other) {
-      spQrFor = p.other;
-      drawQr($('#spqr', m), promptPayPayload(S.settings.promptPayId, p.other));
-      $('#sp-qrnote', m).textContent = 'QR ยอด ฿' + money(p.other) + ' · ตรวจยอดเข้าในแอปธนาคารก่อนยืนยัน';
-      cdPublish('pay', { method: 'qr', qr: promptPayPayload(S.settings.promptPayId, p.other), split: { qr: p.other, cash: p.cash } });
-    } else if (!showQr && spQrFor !== -1) {
-      spQrFor = -1; $('#spqr', m).innerHTML = '';
-      $('#sp-qrnote', m).textContent = hasPP ? 'ใส่ยอด QR ก่อน แล้ว QR จะขึ้นที่นี่และที่จอลูกค้า' : 'ยังไม่ได้ตั้งเบอร์พร้อมเพย์';
-      cdPublish('pay', { method: 'cash' });
+    if (!s2Manual) s2.value = val(s1) > 0 && val(s1) < t.total ? String(round2(t.total - val(s1))) : '';
+    var p = split();
+    var lab = $('#sp-lab', m), res = $('#sp-res', m);
+    if (p.over < 0) { lab.textContent = 'ยังขาด'; res.textContent = '฿' + money(-p.over); res.className = 'num warn-text'; }
+    else if (p.over > 0 && p.cashGiven < p.over) { lab.textContent = 'เกินยอด (ทอนได้เฉพาะเงินสด)'; res.textContent = '฿' + money(p.over); res.className = 'num warn-text'; }
+    else { lab.textContent = 'เงินทอน'; res.textContent = '฿' + money(Math.max(0, p.over)); res.className = 'num brand-text'; }
+    $('#s2hint', m).textContent = s2Manual ? '· แก้ยอดเองแล้ว' : '· คิดให้ = ยอดรวม − ส่วนที่ 1 (แก้ได้)';
+    var qrAmt = p.parts.qr;
+    var showQr = (m1 === 'qr' || m2 === 'qr');
+    $('#sp-qrwrap', m).classList.toggle('hidden', !showQr);
+    if (showQr && hasPP && qrAmt > 0) {
+      if (qrFor !== qrAmt) {
+        qrFor = qrAmt;
+        drawQr($('#spqr', m), promptPayPayload(S.settings.promptPayId, qrAmt));
+        var restK = m1 === 'qr' ? m2 : m1;
+        cdPublish('pay', { method: 'qr', qr: promptPayPayload(S.settings.promptPayId, qrAmt), split: { qr: qrAmt, other: round2(t.total - qrAmt), otherName: PM[restK] } });
+      }
+      $('#sp-qrnote', m).textContent = 'QR ยอด ฿' + money(qrAmt) + ' ขึ้นที่จอลูกค้าด้วย · ตรวจยอดเข้าก่อนยืนยัน';
+    } else {
+      if (qrFor !== null) { qrFor = null; $('#spqr', m).innerHTML = ''; cdPublish('pay', { method: m1 === 'transfer' || m2 === 'transfer' ? 'transfer' : 'cash' }); }
+      $('#sp-qrnote', m).textContent = !showQr ? '' : hasPP ? 'ใส่ยอดแล้ว QR จะขึ้นที่นี่และที่จอลูกค้า' : 'ยังไม่ได้ตั้งเบอร์พร้อมเพย์';
     }
   };
-  $('#sp-o', m).oninput = update;
-  $('#sp-r', m).oninput = update;
-  $all('#sp-m button', m).forEach(function (b) {
-    b.onclick = function () {
-      spOther = b.getAttribute('data-o'); spQrFor = -2;
-      $all('#sp-m button', m).forEach(function (x) { x.classList.toggle('on', x === b); });
-      if (spOther !== 'qr') cdPublish('pay', { method: 'cash' });
-      update();
-    };
+  s1.addEventListener('input', function () { s2Manual = false; updateSplit(); });
+  s2.addEventListener('input', function () { s2Manual = true; updateSplit(); });
+  s2.addEventListener('blur', function () { if (s2.value === '') { s2Manual = false; updateSplit(); } });
+  $('#pm-split', m).addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    if (b.hasAttribute('data-s1')) {
+      m1 = b.getAttribute('data-s1');
+      if (m2 === m1) m2 = ['cash', 'qr', 'transfer'].filter(function (k) { return k !== m1; })[m1 === 'cash' ? 0 : 0];
+      drawSeg(); qrFor = -1; updateSplit(); s1.focus();
+    } else if (b.hasAttribute('data-s2')) { m2 = b.getAttribute('data-s2'); drawSeg(); qrFor = -1; updateSplit(); }
   });
-  recv.oninput = update;
-  $all('[data-q]', m).forEach(function (b) { b.onclick = function () { recv.value = b.getAttribute('data-q'); update(); recv.focus(); }; });
-  $all('#pm button', m).forEach(function (b) {
-    b.onclick = function () {
-      method = b.getAttribute('data-m');
-      $all('#pm button', m).forEach(function (x) { x.classList.toggle('on', x === b); });
-      ['cash', 'qr', 'transfer', 'split'].forEach(function (k) { $('#pm-' + k, m).classList.toggle('hidden', k !== method); });
-      if (method === 'qr' && hasPP) drawQr($('#qrbox', m), promptPayPayload(S.settings.promptPayId, t.total));
-      cdPublish('pay', { method: method, qr: method === 'qr' && hasPP ? promptPayPayload(S.settings.promptPayId, t.total) : '' });
-      if (method === 'cash') recv.focus();
-      if (method === 'split') { spQrFor = -2; $('#sp-o', m).focus(); }
-      update();
-    };
-  });
+  drawSeg();
+
+  var setMethod = function (k) {
+    method = k;
+    $all('#pm button', m).forEach(function (x) { x.classList.toggle('on', x.getAttribute('data-m') === k); });
+    ['cash', 'qr', 'transfer', 'split'].forEach(function (x) { $('#pm-' + x, m).classList.toggle('hidden', x !== k); });
+    $('#kp', m).classList.toggle('hidden', k === 'qr' || k === 'transfer');
+    m.querySelector('.pay-grid').classList.toggle('nokp', k === 'qr' || k === 'transfer');
+    if (k === 'qr' && hasPP) drawQr($('#qrbox', m), promptPayPayload(S.settings.promptPayId, t.total));
+    if (k === 'split') { qrFor = -1; updateSplit(); setTarget(s1); s1.focus(); }
+    else cdPublish('pay', { method: k, qr: k === 'qr' && hasPP ? promptPayPayload(S.settings.promptPayId, t.total) : '' });
+    if (k === 'cash') { setTarget(recv); recv.focus(); }
+    $('[data-x=ok]', m).textContent = k === 'cash' ? 'ยืนยัน (Enter)' : 'ได้รับเงินแล้ว (Enter)';
+  };
+  $all('#pm button', m).forEach(function (b) { b.onclick = function () { setMethod(b.getAttribute('data-m')); }; });
+
   var submitting = false;
   var submit = function () {
     if (submitting) return;
-    var received = method === 'cash' ? round2(Number(recv.value || 0)) : t.total;
+    var received = method === 'cash' ? val(recv) : t.total;
     if (method === 'cash' && received < t.total) { toast('รับเงินไม่พอ', true); recv.focus(); return; }
+    if (method === 'qr' && !hasPP) { toast('ตั้งเบอร์พร้อมเพย์ก่อน', true); return; }
     var payments;
     if (method === 'split') {
-      var sp = spParts();
-      if (!(sp.other > 0) || sp.other >= t.total) { toast('ใส่ยอด QR / โอน ให้น้อยกว่ายอดรวม', true); $('#sp-o', m).focus(); return; }
-      if (sp.recv < sp.cash) { toast('รับเงินสดไม่พอ', true); $('#sp-r', m).focus(); return; }
-      if (spOther === 'qr' && !hasPP) { toast('ตั้งเบอร์พร้อมเพย์ก่อน', true); return; }
-      payments = [{ method: 'cash', amount: sp.cash }, { method: spOther, amount: sp.other }];
-      received = sp.recv;
+      var p = split();
+      if (!(p.a > 0)) { toast('ใส่ยอดส่วนที่ 1', true); s1.focus(); return; }
+      if (!(p.b > 0)) { toast('ใส่ยอดส่วนที่ 2', true); s2.focus(); return; }
+      if (p.over < 0) { toast('ยังขาดอีก ฿' + money(-p.over), true); return; }
+      if (p.over > 0 && p.cashGiven <= p.over) { toast('ยอดเกิน — ทอนได้เฉพาะส่วนที่เป็นเงินสด', true); return; }
+      if (p.parts.qr > 0 && !hasPP) { toast('ตั้งเบอร์พร้อมเพย์ก่อน', true); return; }
+      payments = ['cash', 'qr', 'transfer'].filter(function (k) { return p.parts[k] > 0; }).map(function (k) { return { method: k, amount: p.parts[k] }; });
+      if (payments.length < 2) { toast('แบ่งจ่ายต้องมี 2 ช่องทาง', true); return; }
+      received = p.cashGiven;
     }
-    if (method === 'qr' && !hasPP) { toast('ตั้งเบอร์พร้อมเพย์ก่อน', true); return; }
     submitting = true;
     store('em_autoprint', $('#autoprint', m).checked ? '1' : '0');
     var sale = {
@@ -1033,8 +1095,7 @@ function openPay(initial) {
   $('[data-x=ok]', m).onclick = submit;
   $('[data-x=cancel]', m).onclick = function () { closeModal(); };
   m.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
-  update();
-  if (initial === 'qr') { var qb = $('#pm button[data-m=qr]', m); if (qb) qb.click(); }
+  setMethod(initial === 'qr' ? 'qr' : 'cash');
 }
 
 function maskPP(id) { id = String(id || ''); return id.length > 4 ? id.slice(0, 3) + 'x'.repeat(id.length - 6) + id.slice(-3) : id; }

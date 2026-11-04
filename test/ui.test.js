@@ -162,7 +162,9 @@ call('importProducts', T, [
   await page.click('nav button[data-v=sale]');
   await page.click('.key:has-text("กาแฟเย็น")');
   await page.keyboard.press('F12');
-  await page.fill('#recv', '30');
+  await page.click('#kp [data-k="3"]'); await page.click('#kp [data-k="0"]');   // touch keypad
+  await shot('04b-pay-cash');
+  assert.strictEqual(await page.inputValue('#recv'), '30');
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__serialWrites.length === 2);
   await page.keyboard.press('Escape');
@@ -205,7 +207,7 @@ call('importProducts', T, [
   await page.click('[data-act=woReason][data-r="เสียหาย"]');
   await page.click('[data-act=woCommit]');
   await page.click('[data-x=yes]');
-  await page.waitForFunction(() => /ของเสียเดือนนี้/.test(document.querySelector('#skpi').textContent) && /฿18\.00/.test(document.querySelectorAll('#skpi .kpi')[2].textContent));
+  await page.waitForFunction(() => /ของเสียเดือนนี้/.test(document.querySelector('#skpi').textContent) && /฿18\.00/.test((document.querySelectorAll('#skpi .kpi')[2] || {}).textContent));
   assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'D0102').onHand, 3, 'written off 2');
   await page.click('[data-act=stockTab][data-t=moves]');
   await page.waitForSelector('#stab td:has-text("ตัดเสีย")');
@@ -406,7 +408,7 @@ call('importProducts', T, [
   await page.waitForSelector('.toast:has-text("เบิกแล้ว 1 รายการ")');
   assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'W0001').onHand, waterBefore - 2, 'water - 2');
   await page.click('nav button[data-v=stock]');
-  await page.waitForFunction(() => /฿8\.40/.test(document.querySelectorAll('#skpi .kpi')[3].textContent));
+  await page.waitForFunction(() => /฿8\.40/.test((document.querySelectorAll('#skpi .kpi')[3] || {}).textContent));
   assert.match(await page.textContent('#skpi .kpi:nth-child(3)'), /฿18\.00/, 'store use not counted as loss');
 
   // 9x. Expiry page: one lot near expiry (markdown), one expired (write off); markdown used at the till
@@ -468,7 +470,7 @@ call('importProducts', T, [
   await page.keyboard.press('F12');
   await page.fill('#recv', '20');
   await page.keyboard.press('Enter');
-  await page.waitForSelector('.modal h1:has-text("ใบเสร็จ"), .modal :text("ทอน")');
+  await page.waitForSelector('.modal h1:has-text("บันทึกแล้ว")');
   await page.keyboard.press('Escape');
   assert.deepStrictEqual(call('bootstrap', T).markdowns.map(m => m.left), [2], 'quota used');
 
@@ -480,9 +482,13 @@ call('importProducts', T, [
   await page.waitForFunction(() => document.querySelector('.line .qty .n') && document.querySelector('.line .qty .n').textContent === '2');
   await page.keyboard.press('F12');
   await page.click('#pm [data-m=split]');
-  await page.fill('#sp-o', '10');
-  await page.fill('#sp-r', '50');
-  await page.waitForFunction(() => document.querySelector('#sp-chg').textContent === '฿30.00' && document.querySelector('#spqr svg, #spqr img, #spqr canvas'));
+  // part 1: QR 10 via keypad -> part 2 defaults to cash 20; customer hands 50 cash -> change 30
+  await page.click('#s1m [data-s1=qr]');
+  await page.click('#kp [data-k="1"]'); await page.click('#kp [data-k="0"]');
+  await page.waitForFunction(() => document.querySelector('#s2').value === '20' && document.querySelector('#s2m .on').dataset.s2 === 'cash');
+  await page.click('#s2');
+  await page.click('#kp [data-k=clr]'); await page.click('#kp [data-k="5"]'); await page.click('#kp [data-k="0"]');
+  await page.waitForFunction(() => document.querySelector('#sp-res').textContent === '฿30.00' && document.querySelector('#spqr svg, #spqr img, #spqr canvas'));
   await shot('06s-split');
   await page.click('[data-x=ok]');
   await page.waitForSelector('.modal h1:has-text("บันทึกแล้ว")');
