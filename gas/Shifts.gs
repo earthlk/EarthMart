@@ -60,8 +60,15 @@ function shiftSummary_(shiftId) {
     if (b.shiftId !== shiftId) return;
     if (b.status === 'VOID') { voidCount++; return; }
     billCount++;
-    sum[b.payMethod] = (sum[b.payMethod] || 0) + num_(b.total);
+    var pp = payParts_(b);
+    sum.cash += pp.cash; sum.qr += pp.qr; sum.transfer += pp.transfer;
     discount += num_(b.discount);
+  });
+  var cashRefunds = 0, otherRefunds = 0, returnCount = 0;
+  readAll_('Returns').forEach(function (r) {
+    if (r.shiftId !== shiftId) return;
+    returnCount++;
+    if (r.refundMethod === 'cash') cashRefunds += num_(r.total); else otherRefunds += num_(r.total);
   });
   var cashIn = 0, cashOut = 0;
   var moves = readAll_('CashMoves').filter(function (m) { return m.shiftId === shiftId; });
@@ -72,7 +79,8 @@ function shiftSummary_(shiftId) {
     cashSales: round2_(sum.cash), qrSales: round2_(sum.qr), transferSales: round2_(sum.transfer),
     totalSales: round2_(sum.cash + sum.qr + sum.transfer), discount: round2_(discount),
     cashIn: round2_(cashIn), cashOut: round2_(cashOut),
-    expectedCash: round2_(opening + sum.cash + cashIn - cashOut),
+    cashRefunds: round2_(cashRefunds), otherRefunds: round2_(otherRefunds), returnCount: returnCount,
+    expectedCash: round2_(opening + sum.cash + cashIn - cashOut - cashRefunds),
     billCount: billCount, voidCount: voidCount,
     cashMoves: moves.map(function (m) { return { type: m.type, amount: num_(m.amount), reason: m.reason, createdAt: m.createdAt }; })
   };
@@ -106,6 +114,8 @@ function api_closeShift(token, countedCash, note) {
       shift.transferSales = sum.transferSales;
       shift.cashIn = sum.cashIn;
       shift.cashOut = sum.cashOut;
+      shift.cashRefunds = sum.cashRefunds;
+      shift.otherRefunds = sum.otherRefunds;
       shift.expectedCash = sum.expectedCash;
       shift.countedCash = counted;
       shift.diff = round2_(counted - sum.expectedCash);

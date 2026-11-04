@@ -5,15 +5,26 @@
  * accepted for products marked openPrice. Discounts need an owner approval.
  */
 
-var PAY_METHODS = ['cash', 'qr', 'transfer'];
+var PAY_METHODS = ['cash', 'qr', 'transfer', 'split'];
+var PAY_PARTS = ['cash', 'qr', 'transfer'];
+
+/** Amount paid by each method for one bill (older bills only have payMethod + total). */
+function payParts_(h) {
+  var out = { cash: 0, qr: 0, transfer: 0 };
+  if (h.cashPaid !== '' && h.cashPaid !== undefined || h.qrPaid !== '' && h.qrPaid !== undefined || h.transferPaid !== '' && h.transferPaid !== undefined) {
+    out.cash = num_(h.cashPaid); out.qr = num_(h.qrPaid); out.transfer = num_(h.transferPaid);
+  } else if (out[h.payMethod] !== undefined) out[h.payMethod] = num_(h.total);
+  return out;
+}
 
 /**
  * sale = {
  *   saleUid: string (client-generated, makes retries safe),
  *   lines: [{ sku, barcode, qty, unitPrice? (open price only), lineDiscount? }],
  *   billDiscount: number,
- *   payMethod: 'cash' | 'qr' | 'transfer',
- *   received: number (cash),
+ *   payMethod: 'cash' | 'qr' | 'transfer' | 'split',
+ *   payments: [{ method: 'cash'|'qr'|'transfer', amount }] (split only; must add up to the total),
+ *   received: number (cash handed over; for split, covers the cash part),
  *   approvalId: string (when any discount)
  * }
  */
@@ -51,11 +62,24 @@ function api_commitSale(token, sale) {
       manual = round2_(manual + billDiscount);
       if (manual > 0) approver = consumeApproval_(s, sale.approvalId, 'DISCOUNT');
 
+      var parts = { cash: 0, qr: 0, transfer: 0 };
+      if (sale.payMethod === 'split') {
+        (sale.payments || []).forEach(function (p) {
+          if (PAY_PARTS.indexOf(p.method) < 0) throw new Error('ช่องทางชำระไม่ถูกต้อง');
+          var a = round2_(num_(p.amount));
+          if (a < 0) throw new Error('ยอดชำระติดลบไม่ได้');
+          parts[p.method] = round2_(parts[p.method] + a);
+        });
+        var used = PAY_PARTS.filter(function (m) { return parts[m] > 0; });
+        if (used.length < 2) throw new Error('แบ่งจ่ายต้องมีอย่างน้อย 2 ช่องทาง');
+        if (round2_(parts.cash + parts.qr + parts.transfer) !== total) throw new Error('ยอดแบ่งจ่ายรวมต้องเท่ากับ ' + total + ' บาท');
+      } else parts[sale.payMethod] = total;
       var received = total, change = 0;
-      if (sale.payMethod === 'cash') {
+      if (parts.cash > 0) {
         received = round2_(num_(sale.received));
-        if (received < total) throw new Error('รับเงินไม่พอ');
-        change = round2_(received - total);
+        if (received < parts.cash) throw new Error('รับเงินสดไม่พอ');
+        change = round2_(received - parts.cash);
+        if (sale.payMethod === 'split') received = round2_(received + parts.qr + parts.transfer);
       }
 
       var billNo = nextBillNo_();
@@ -64,7 +88,8 @@ function api_commitSale(token, sale) {
         billNo: billNo, saleUid: sale.saleUid, createdAt: stamp, shiftId: shift.shiftId, deviceId: s.deviceId,
         userId: s.userId, itemsCount: priced.reduce(function (a, l) { return a + l.qty; }, 0),
         subtotal: subtotal, discount: discount, total: total, payMethod: sale.payMethod,
-        received: received, change: change, status: 'PAID'
+        received: received, change: change, status: 'PAID',
+        cashPaid: parts.cash, qrPaid: parts.qr, transferPaid: parts.transfer, returnedTotal: 0
       };
       // FIFO: each line costs what its pieces (or its recipe components) cost in the oldest lots.
       var ctx = fifoOpen_(), rec = recipesMap_(), prodBySku = {};
@@ -185,10 +210,11 @@ function receipt_(h, lines) {
   return {
     billNo: h.billNo, createdAt: h.createdAt, payMethod: h.payMethod, subtotal: num_(h.subtotal),
     discount: num_(h.discount), total: num_(h.total), received: num_(h.received), change: num_(h.change),
-    status: h.status,
+    status: h.status, payments: payParts_(h), returnedTotal: num_(h.returnedTotal),
     lines: lines.map(function (l) {
-      return { name: l.name, unitName: l.unitName, qty: num_(l.qty), unitPrice: num_(l.unitPrice),
-               lineDiscount: num_(l.lineDiscount), lineTotal: num_(l.lineTotal) };
+      return { lineNo: num_(l.lineNo), sku: String(l.sku), name: l.name, unitName: l.unitName, multiplier: num_(l.multiplier) || 1,
+               qty: num_(l.qty), unitPrice: num_(l.unitPrice), lineDiscount: num_(l.lineDiscount), lineTotal: num_(l.lineTotal),
+               returnedQty: num_(l.returnedQty) };
     })
   };
 }
@@ -208,7 +234,8 @@ function api_listBills(token, day) {
       return b.createdAt instanceof Date && fmtDate_(b.createdAt, 'yyyy-MM-dd') === d;
     }).reverse().map(function (b) {
       return { billNo: b.billNo, createdAt: b.createdAt, itemsCount: num_(b.itemsCount), total: num_(b.total),
-               payMethod: b.payMethod, status: b.status, cashier: users[b.userId] || '', shiftId: b.shiftId };
+               payMethod: b.payMethod, status: b.status, cashier: users[b.userId] || '', shiftId: b.shiftId,
+               returnedTotal: num_(b.returnedTotal) };
     });
   });
 }
@@ -220,6 +247,12 @@ function api_billDetail(token, billNo) {
     if (!h) throw new Error('ไม่พบบิล');
     var r = receipt_(h, linesOf_(billNo));
     r.voidReason = h.voidReason;
+    var users = {};
+    readAll_('Users').forEach(function (u) { users[u.userId] = u.name; });
+    r.returns = readAll_('Returns').filter(function (x) { return x.billNo === billNo; }).map(function (x) {
+      return { returnNo: x.returnNo, createdAt: x.createdAt, total: num_(x.total), refundMethod: x.refundMethod,
+               restock: bool_(x.restock), reason: x.reason, user: users[x.userId] || '' };
+    });
     return r;
   });
 }
@@ -238,6 +271,7 @@ function api_voidSale(token, billNo, reason, approvalId) {
       var h = readAll_('Sales').filter(function (b) { return b.billNo === billNo; })[0];
       if (!h) throw new Error('ไม่พบบิล');
       if (h.status === 'VOID') throw new Error('บิลนี้ถูกยกเลิกแล้ว');
+      if (num_(h.returnedTotal) > 0) throw new Error('บิลนี้มีการคืนสินค้าแล้ว — คืนรายการที่เหลือแทนการยกเลิกทั้งบิล');
       var shift = readAll_('Shifts').filter(function (x) { return x.shiftId === h.shiftId; })[0];
       if (!shift || shift.status !== 'OPEN') throw new Error('ยกเลิกได้เฉพาะบิลในกะที่ยังเปิดอยู่');
       h.status = 'VOID';
@@ -253,6 +287,91 @@ function api_voidSale(token, billNo, reason, approvalId) {
       addStockMoves_(s, explodeMoves_(lines, 1, 'VOID', billNo, reason));
       log_(s, 'VOID', billNo, num_(h.total) + ' บาท · ' + reason, approver);
       return { billNo: billNo, status: 'VOID' };
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Partial returns (คืนสินค้าบางรายการ)                                */
+/* ------------------------------------------------------------------ */
+
+var REFUND_METHODS = ['cash', 'transfer'];
+
+/**
+ * ret = { returnUid, billNo, lines: [{ lineNo, qty }], refundMethod: 'cash'|'transfer', restock: bool, reason, approvalId }
+ * Any bill (also from closed shifts). A cash refund comes out of this device's open shift drawer.
+ * Refund per piece = line total less its share of the bill discount. Restocked goods go back as a new
+ * FIFO lot at the cost they were sold at; recipe items are never restocked. Owner approval 'RETURN'.
+ */
+function api_returnSale(token, ret) {
+  return respond_(function () {
+    var s = session_(token);
+    requireCounter_(s);
+    if (!ret || !ret.returnUid || !ret.billNo) throw new Error('ข้อมูลไม่ครบ');
+    if (REFUND_METHODS.indexOf(ret.refundMethod) < 0) throw new Error('เลือกวิธีคืนเงิน');
+    if (!String(ret.reason || '').trim()) throw new Error('ต้องใส่เหตุผล');
+    var want = (ret.lines || []).filter(function (l) { return num_(l.qty) > 0; });
+    if (!want.length) throw new Error('เลือกรายการที่จะคืน');
+    var dupRet = readAll_('Returns').filter(function (x) { return x.returnUid === ret.returnUid; })[0];
+    if (dupRet) return { returnNo: dupRet.returnNo, total: num_(dupRet.total), duplicate: true };
+    var approver = consumeApproval_(s, ret.approvalId, 'RETURN');
+    return withLock_(function () {
+      var h = readAll_('Sales').filter(function (b) { return b.billNo === ret.billNo; })[0];
+      if (!h) throw new Error('ไม่พบบิล');
+      if (h.status === 'VOID') throw new Error('บิลนี้ถูกยกเลิกแล้ว');
+      var shift = openShiftForDevice_(s.deviceId);
+      if (ret.refundMethod === 'cash' && !shift) throw new Error('คืนเป็นเงินสดต้องเปิดกะก่อน');
+      var all = linesOf_(h.billNo);
+      var sumLT = all.reduce(function (a, l) { return a + num_(l.lineTotal); }, 0);
+      var billDisc = round2_(num_(h.discount) - all.reduce(function (a, l) { return a + num_(l.lineDiscount); }, 0));
+      var rec = recipesMap_();
+      var returnNo = nextDocNo_('RT');
+      var ctx = fifoOpen_();
+      var moves = [], rlines = [], total = 0, pieces = 0;
+      want.forEach(function (w) {
+        var l = all.filter(function (x) { return num_(x.lineNo) === num_(w.lineNo); })[0];
+        if (!l) throw new Error('ไม่พบรายการที่ ' + w.lineNo);
+        var q = num_(w.qty);
+        var left = num_(l.qty) - num_(l.returnedQty);
+        if (Math.round(q) !== q || q > left) throw new Error(l.name + ' คืนได้อีก ' + left + ' ' + (l.unitName || ''));
+        var lt = num_(l.lineTotal);
+        var net = sumLT ? lt - billDisc * lt / sumLT : 0;
+        var refund = round2_(net * q / num_(l.qty));
+        var mult = num_(l.multiplier) || 1;
+        var cost = round2_(num_(l.cost) * q / num_(l.qty));
+        var isRecipe = !!(rec[String(l.sku)] && rec[String(l.sku)].length);
+        var restocked = !!ret.restock && !isRecipe;
+        if (restocked) {
+          var pcs = q * mult;
+          fifoAddLot_(ctx, { sku: l.sku, qtyIn: pcs, unitCost: pcs ? cost / pcs : 0, receiptNo: returnNo, note: 'คืนจากบิล ' + h.billNo });
+          moves.push({ sku: String(l.sku), qtyPieces: pcs, type: 'RETURN', refNo: returnNo, note: 'คืนจากบิล ' + h.billNo });
+        }
+        l.returnedQty = num_(l.returnedQty) + q;
+        writeRow_('SaleLines', l);
+        rlines.push({ returnNo: returnNo, billNo: h.billNo, lineNo: num_(l.lineNo), sku: String(l.sku), name: l.name, qty: q,
+                      multiplier: mult, refund: refund, cost: cost, restocked: restocked });
+        total += refund;
+        pieces += q;
+      });
+      // Last items of the bill: refund exactly what is left so the bill nets to zero.
+      var fully = all.every(function (l) { return num_(l.returnedQty) >= num_(l.qty); });
+      total = round2_(total);
+      if (fully) {
+        var rest = round2_(num_(h.total) - num_(h.returnedTotal));
+        rlines[rlines.length - 1].refund = round2_(rlines[rlines.length - 1].refund + rest - total);
+        total = rest;
+      }
+      fifoFlush_(ctx);
+      if (moves.length) addStockMoves_(s, moves);
+      appendMany_('ReturnLines', rlines);
+      append_('Returns', { returnNo: returnNo, returnUid: ret.returnUid, createdAt: now_(), billNo: h.billNo,
+        shiftId: shift ? shift.shiftId : '', deviceId: s.deviceId, userId: s.userId, itemsCount: pieces, total: total,
+        refundMethod: ret.refundMethod, restock: !!ret.restock, reason: String(ret.reason).trim(), approvedBy: approver });
+      h.returnedTotal = round2_(num_(h.returnedTotal) + total);
+      writeRow_('Sales', h);
+      log_(s, 'RETURN', returnNo, 'บิล ' + h.billNo + ' · คืน ' + total + ' บาท (' + (ret.refundMethod === 'cash' ? 'เงินสด' : 'โอน') + ') · ' +
+        rlines.map(function (r) { return r.name + ' ' + r.qty; }).join(', ') + ' · ' + ret.reason, approver);
+      return { returnNo: returnNo, billNo: h.billNo, total: total, refundMethod: ret.refundMethod, lines: rlines, fullyReturned: fully };
     });
   });
 }

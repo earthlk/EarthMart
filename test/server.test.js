@@ -487,4 +487,69 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(ex.stats.lossMonth, 73, 'expiry loss this month = 33 + 40');
 }
 
+
+// ===================== Split payment + partial returns =====================
+{
+  const h = makeContext({ now: '2026-11-05T03:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c7 = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m7 = (fn, ...a) => { const r = c7(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  const f7 = (re, fn, ...a) => { const r = c7(fn, ...a); ok(!r.ok && re.test(r.error), fn + ' should fail ' + re + ' got ' + JSON.stringify(r)); };
+  h.createOwner('O', '1111');
+  const DEV = 'Dcounter7xxxxxxxxxx';
+  const T = m7('login', m7('status').users[0].userId, '1111', DEV).token;
+  m7('registerDevice', T, DEV, 'เครื่อง');
+  m7('addUser', T, 'แคช', 'cashier', '2222');
+  const C = m7('login', m7('listUsers', T).find(u => u.name === 'แคช').userId, '2222', DEV).token;
+  m7('importProducts', T, ['sku,name,category,type,unit,cost,price,minStock,openingStock',
+    'A1,น้ำ,เครื่องดื่ม,nobarcode,ขวด,4,10,0,50', 'B1,ขนม,ขนม,nobarcode,ห่อ,12,20,0,50'].join('\n'));
+  const onH = sku => m7('bootstrap', T).products.find(p => p.sku === sku).onHand;
+  m7('openShift', C, 500, '');
+
+  // split: 100 bill = 60 cash (customer gives 100) + 40 QR
+  const lines = [{ sku: 'A1', qty: 4 }, { sku: 'B1', qty: 3 }];   // 40 + 60
+  f7(/อย่างน้อย 2/, 'commitSale', C, { saleUid: 'SP0', payMethod: 'split', received: 100, lines, payments: [{ method: 'cash', amount: 100 }] });
+  f7(/ต้องเท่ากับ 100/, 'commitSale', C, { saleUid: 'SP0', payMethod: 'split', received: 100, lines, payments: [{ method: 'cash', amount: 50 }, { method: 'qr', amount: 40 }] });
+  f7(/เงินสดไม่พอ/, 'commitSale', C, { saleUid: 'SP0', payMethod: 'split', received: 50, lines, payments: [{ method: 'cash', amount: 60 }, { method: 'qr', amount: 40 }] });
+  const sp = m7('commitSale', C, { saleUid: 'SP1', payMethod: 'split', received: 100, lines, payments: [{ method: 'cash', amount: 60 }, { method: 'qr', amount: 40 }] });
+  eq([sp.total, sp.change, sp.payments], [100, 40, { cash: 60, qr: 40, transfer: 0 }], 'split: change only on the cash part');
+  let sum = m7('shiftSummary', C);
+  eq([sum.cashSales, sum.qrSales, sum.expectedCash], [60, 40, 560], 'shift counts each part');
+
+  // bill with a bill discount: 2 A1 (20) + 1 B1 (20) = 40, bill discount 4 -> 36 cash
+  const b2 = m7('commitSale', T, { saleUid: 'SP2', payMethod: 'cash', received: 36, billDiscount: 4, lines: [{ sku: 'A1', qty: 2 }, { sku: 'B1', qty: 1 }] });
+  eq(b2.total, 36, 'discounted bill');
+  const a1 = onH('A1');
+
+  // partial return: cashier needs approval; 1 water back to stock, cash refund = 10 - 10% share = 9
+  f7(/อนุมัติ/, 'returnSale', C, { returnUid: 'R1', billNo: b2.billNo, refundMethod: 'cash', restock: true, reason: 'ลูกค้าซื้อเกิน', lines: [{ lineNo: 1, qty: 1 }] });
+  const ap = m7('approve', C, '1111', 'RETURN');
+  f7(/เหตุผล/, 'returnSale', C, { returnUid: 'R1', billNo: b2.billNo, refundMethod: 'cash', restock: true, reason: '', lines: [{ lineNo: 1, qty: 1 }], approvalId: ap.approvalId });
+  const r1 = m7('returnSale', C, { returnUid: 'R1', billNo: b2.billNo, refundMethod: 'cash', restock: true, reason: 'ลูกค้าซื้อเกิน', lines: [{ lineNo: 1, qty: 1 }], approvalId: ap.approvalId });
+  eq(r1.total, 9, 'refund keeps the bill-discount share');
+  eq(m7('returnSale', C, { returnUid: 'R1', billNo: b2.billNo, refundMethod: 'cash', restock: true, reason: 'x', lines: [{ lineNo: 1, qty: 1 }] }).duplicate, true, 'return idempotent');
+  eq(onH('A1'), a1 + 1, 'restocked');
+  ok(m7('lots', T, 'A1').some(l => l.receiptNo === r1.returnNo && l.unitCost === 4), 'returned goods back as a lot at sold cost');
+  f7(/คืนได้อีก 1/, 'returnSale', T, { returnUid: 'R2', billNo: b2.billNo, refundMethod: 'cash', restock: true, reason: 'x', lines: [{ lineNo: 1, qty: 2 }] });
+  f7(/คืนรายการที่เหลือ/, 'voidSale', T, b2.billNo, 'x', '');
+  // rest of the bill by transfer, not restocked (damaged): total refunds = bill total exactly
+  const r2 = m7('returnSale', T, { returnUid: 'R3', billNo: b2.billNo, refundMethod: 'transfer', restock: false, reason: 'ของเสีย', lines: [{ lineNo: 1, qty: 1 }, { lineNo: 2, qty: 1 }] });
+  eq([r2.total, r2.fullyReturned], [27, true], 'last return closes the bill: 36 - 9');
+  eq(onH('B1'), 50 - 3 - 1, 'not restocked');
+  const det = m7('billDetail', T, b2.billNo);
+  eq([det.returnedTotal, det.returns.length, det.lines.map(l => l.returnedQty)], [36, 2, [2, 1]], 'bill detail shows returns');
+  ok(m7('listBills', T).find(b => b.billNo === b2.billNo).returnedTotal === 36, 'bill list shows returned total');
+
+  sum = m7('shiftSummary', C);
+  eq([sum.cashRefunds, sum.otherRefunds, sum.expectedCash, sum.returnCount], [9, 27, 500 + 60 + 36 - 9, 2], 'cash refund leaves the drawer');
+  const rep = m7('dailyReport', T, '2026-11-05');
+  eq([rep.grossSales, rep.refundTotal, rep.total, rep.byPay], [136, 36, 100, { cash: 87, qr: 40, transfer: -27 }], 'daily report net of returns');
+  ok(rep.exceptions.some(x => x.action === 'RETURN'), 'return logged');
+  const closed = m7('closeShift', C, 587, '');
+  eq(closed.diff, 0, 'drawer balances after split + refund');
+  f7(/เปิดกะ/, 'returnSale', T, { returnUid: 'R4', billNo: sp.billNo, refundMethod: 'cash', restock: true, reason: 'x', lines: [{ lineNo: 1, qty: 1 }] });
+  ok(m7('returnSale', T, { returnUid: 'R5', billNo: sp.billNo, refundMethod: 'transfer', restock: true, reason: 'x', lines: [{ lineNo: 1, qty: 1 }] }).total === 10, 'return from a closed shift by transfer');
+}
+
 console.log('server tests passed:', pass);

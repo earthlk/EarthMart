@@ -3,7 +3,7 @@
  */
 
 var EXCEPTION_ACTIONS = ['VOID', 'DISCOUNT', 'OPEN_PRICE', 'CASH_IN', 'CASH_OUT', 'STOCK_ADJUST',
-                         'PRICE_CHANGE', 'APPROVE_FAIL', 'NO_SALE', 'WRITEOFF', 'STOCK_COUNT', 'MARKDOWN', 'EXPIRY_CLOSE', 'STORE_USE'];
+                         'PRICE_CHANGE', 'APPROVE_FAIL', 'NO_SALE', 'WRITEOFF', 'STOCK_COUNT', 'MARKDOWN', 'EXPIRY_CLOSE', 'STORE_USE', 'RETURN'];
 
 /** day: 'yyyy-MM-dd' in the shop time zone. Defaults to today. */
 function api_dailyReport(token, day) {
@@ -26,7 +26,8 @@ function api_dailyReport(token, day) {
       var t = num_(b.total);
       total += t;
       discount += num_(b.discount);
-      byPay[b.payMethod] = (byPay[b.payMethod] || 0) + t;
+      var pp = payParts_(b);
+      byPay.cash += pp.cash; byPay.qr += pp.qr; byPay.transfer += pp.transfer;
       hourly[Number(fmtDate_(b.createdAt, 'H'))] += t;
     });
 
@@ -40,6 +41,16 @@ function api_dailyReport(token, day) {
       items[k].pieces += num_(l.qty) * (num_(l.multiplier) || 1);
       items[k].revenue += num_(l.lineTotal);
     });
+    // Returns on this day lower the day's sales (by refund method) and give back the cost of restocked goods.
+    var grossSales = total, refundTotal = 0, retNos = {};
+    var rets = readAll_('Returns').filter(function (r) { return sameDay(r.createdAt); });
+    rets.forEach(function (r) {
+      refundTotal += num_(r.total);
+      byPay[r.refundMethod === 'cash' ? 'cash' : 'transfer'] -= num_(r.total);
+      retNos[r.returnNo] = true;
+    });
+    readAll_('ReturnLines').forEach(function (l) { if (retNos[l.returnNo] && bool_(l.restocked)) cost -= num_(l.cost); });
+    total -= refundTotal;
     // Bill-level discounts are not spread over lines; profit uses bill totals.
     var top = Object.keys(items).map(function (k) { return items[k]; })
       .sort(function (a, b) { return b.revenue - a.revenue; }).slice(0, 10)
@@ -60,7 +71,7 @@ function api_dailyReport(token, day) {
 
     return {
       day: d,
-      total: round2_(total),
+      total: round2_(total), grossSales: round2_(grossSales), refundTotal: round2_(refundTotal), returnCount: rets.length,
       billCount: paid.length,
       avgBill: paid.length ? round2_(total / paid.length) : 0,
       discount: round2_(discount),

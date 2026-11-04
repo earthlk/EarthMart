@@ -914,7 +914,7 @@ function openPay(initial) {
   var m = openModal('<header><h1>ชำระเงิน</h1><span class="muted">' + t.items + ' ชิ้น</span><span class="grow"></span>' +
     '<span style="font-size:28px;font-weight:700" class="brand-text num">฿' + money(t.total) + '</span></header>' +
     '<div class="body"><div class="seg" id="pm">' +
-    '<button data-m="cash" class="on">เงินสด</button><button data-m="qr">QR พร้อมเพย์</button><button data-m="transfer">โอน</button></div>' +
+    '<button data-m="cash" class="on">เงินสด</button><button data-m="qr">QR พร้อมเพย์</button><button data-m="transfer">โอน</button><button data-m="split">แบ่งจ่าย</button></div>' +
     '<div id="pm-cash" class="col" style="gap:10px"><label for="recv">รับเงินมา</label><input id="recv" class="big-input num" type="number" inputmode="decimal" step="0.25" autofocus>' +
     '<div class="row" style="flex-wrap:wrap">' + quick.map(function (q) { return '<button class="btn" data-q="' + q + '">' + (q === t.total ? 'พอดี' : '฿' + money(q)) + '</button>'; }).join('') + '</div>' +
     '<div class="row" style="justify-content:space-between;align-items:baseline"><span class="muted">เงินทอน</span><span id="chg" class="num brand-text" style="font-size:40px;font-weight:700">฿0.00</span></div></div>' +
@@ -922,6 +922,13 @@ function openPay(initial) {
     (hasPP ? '<div class="qr" id="qrbox"></div><div class="muted">พร้อมเพย์ ' + esc(maskPP(S.settings.promptPayId)) + ' · ยอดอยู่ใน QR แล้ว</div><div class="muted" style="font-size:13px">ตรวจยอดเข้าในแอปธนาคาร แล้วกด "ได้รับเงินแล้ว"</div>'
       : '<div class="banner" style="border-radius:8px">ยังไม่ได้ตั้งเบอร์พร้อมเพย์ (ตั้งค่า › ร้าน)</div>') + '</div>' +
     '<div id="pm-transfer" class="col hidden"><div class="muted">ตรวจยอดโอนในแอปธนาคารก่อน แล้วกด "ได้รับเงินแล้ว"</div></div>' +
+    '<div id="pm-split" class="col hidden" style="gap:10px"><div class="row" style="gap:10px;align-items:flex-end">' +
+    '<div class="field" style="flex:1"><label>อีกส่วนจ่ายด้วย</label><div class="seg-sm" id="sp-m"><button data-o="qr" class="on">QR พร้อมเพย์</button><button data-o="transfer">โอน</button></div></div>' +
+    '<div class="field" style="flex:1"><label for="sp-o">ยอด QR / โอน</label><input id="sp-o" class="num" type="number" inputmode="decimal" step="0.25" style="height:44px;font-size:20px;font-weight:700;text-align:right"></div></div>' +
+    '<div class="row" style="justify-content:space-between;padding:10px 12px;background:var(--bg);border-radius:8px"><span>ส่วนเงินสด</span><b class="num" id="sp-c" style="font-size:20px">฿0.00</b></div>' +
+    '<div class="row" style="gap:10px;align-items:flex-end"><div class="field" style="flex:1"><label for="sp-r">รับเงินสดมา</label><input id="sp-r" class="num" type="number" inputmode="decimal" step="0.25" style="height:44px;font-size:20px;text-align:right"></div>' +
+    '<div style="flex:1;text-align:right"><div class="muted" style="font-size:13px">เงินทอน</div><div id="sp-chg" class="num brand-text" style="font-size:30px;font-weight:700">฿0.00</div></div></div>' +
+    '<div id="sp-qrwrap" class="col" style="align-items:center;gap:6px"><div class="qr" id="spqr" style="width:170px;height:170px"></div><div class="muted" style="font-size:13px" id="sp-qrnote">ใส่ยอด QR ก่อน แล้ว QR จะขึ้นที่นี่และที่จอลูกค้า</div></div></div>' +
     '<label class="row" style="color:var(--ink);font-size:15px"><input type="checkbox" id="autoprint" ' + (store('em_autoprint') === '0' ? '' : 'checked') + '> พิมพ์ใบเสร็จ</label>' +
     '</div><footer><button class="btn" data-x="cancel">ยกเลิก (Esc)</button><button class="btn primary lg" data-x="ok" style="height:52px;font-size:17px">ยืนยัน (Enter)</button></footer>',
     { onClose: function () { if (!paid) cdPublish(); } });
@@ -935,17 +942,54 @@ function openPay(initial) {
     $('#chg', m).textContent = '฿' + money(Math.max(0, c));
     $('#chg', m).className = 'num ' + (c < 0 ? 'warn-text' : 'brand-text');
     $('[data-x=ok]', m).textContent = method === 'cash' ? 'ยืนยัน (Enter)' : 'ได้รับเงินแล้ว (Enter)';
+    if (method === 'split') updateSplit();
   };
+  // Split: one non-cash part (QR or transfer) + the rest in cash.
+  var spOther = 'qr', spQrFor = -1;
+  var spParts = function () {
+    var o = round2(Number($('#sp-o', m).value || 0));
+    return { other: o, cash: round2(t.total - o), recv: round2(Number($('#sp-r', m).value || 0)) };
+  };
+  var updateSplit = function () {
+    var p = spParts();
+    $('#sp-c', m).textContent = '฿' + money(Math.max(0, p.cash));
+    var c = round2(p.recv - p.cash);
+    $('#sp-chg', m).textContent = '฿' + money(Math.max(0, c));
+    $('#sp-chg', m).className = 'num ' + (c < 0 ? 'warn-text' : 'brand-text');
+    var showQr = spOther === 'qr' && hasPP && p.other > 0 && p.other < t.total;
+    $('#sp-qrwrap', m).classList.toggle('hidden', spOther !== 'qr');
+    if (showQr && spQrFor !== p.other) {
+      spQrFor = p.other;
+      drawQr($('#spqr', m), promptPayPayload(S.settings.promptPayId, p.other));
+      $('#sp-qrnote', m).textContent = 'QR ยอด ฿' + money(p.other) + ' · ตรวจยอดเข้าในแอปธนาคารก่อนยืนยัน';
+      cdPublish('pay', { method: 'qr', qr: promptPayPayload(S.settings.promptPayId, p.other), split: { qr: p.other, cash: p.cash } });
+    } else if (!showQr && spQrFor !== -1) {
+      spQrFor = -1; $('#spqr', m).innerHTML = '';
+      $('#sp-qrnote', m).textContent = hasPP ? 'ใส่ยอด QR ก่อน แล้ว QR จะขึ้นที่นี่และที่จอลูกค้า' : 'ยังไม่ได้ตั้งเบอร์พร้อมเพย์';
+      cdPublish('pay', { method: 'cash' });
+    }
+  };
+  $('#sp-o', m).oninput = update;
+  $('#sp-r', m).oninput = update;
+  $all('#sp-m button', m).forEach(function (b) {
+    b.onclick = function () {
+      spOther = b.getAttribute('data-o'); spQrFor = -2;
+      $all('#sp-m button', m).forEach(function (x) { x.classList.toggle('on', x === b); });
+      if (spOther !== 'qr') cdPublish('pay', { method: 'cash' });
+      update();
+    };
+  });
   recv.oninput = update;
   $all('[data-q]', m).forEach(function (b) { b.onclick = function () { recv.value = b.getAttribute('data-q'); update(); recv.focus(); }; });
   $all('#pm button', m).forEach(function (b) {
     b.onclick = function () {
       method = b.getAttribute('data-m');
       $all('#pm button', m).forEach(function (x) { x.classList.toggle('on', x === b); });
-      ['cash', 'qr', 'transfer'].forEach(function (k) { $('#pm-' + k, m).classList.toggle('hidden', k !== method); });
+      ['cash', 'qr', 'transfer', 'split'].forEach(function (k) { $('#pm-' + k, m).classList.toggle('hidden', k !== method); });
       if (method === 'qr' && hasPP) drawQr($('#qrbox', m), promptPayPayload(S.settings.promptPayId, t.total));
       cdPublish('pay', { method: method, qr: method === 'qr' && hasPP ? promptPayPayload(S.settings.promptPayId, t.total) : '' });
       if (method === 'cash') recv.focus();
+      if (method === 'split') { spQrFor = -2; $('#sp-o', m).focus(); }
       update();
     };
   });
@@ -954,11 +998,20 @@ function openPay(initial) {
     if (submitting) return;
     var received = method === 'cash' ? round2(Number(recv.value || 0)) : t.total;
     if (method === 'cash' && received < t.total) { toast('รับเงินไม่พอ', true); recv.focus(); return; }
+    var payments;
+    if (method === 'split') {
+      var sp = spParts();
+      if (!(sp.other > 0) || sp.other >= t.total) { toast('ใส่ยอด QR / โอน ให้น้อยกว่ายอดรวม', true); $('#sp-o', m).focus(); return; }
+      if (sp.recv < sp.cash) { toast('รับเงินสดไม่พอ', true); $('#sp-r', m).focus(); return; }
+      if (spOther === 'qr' && !hasPP) { toast('ตั้งเบอร์พร้อมเพย์ก่อน', true); return; }
+      payments = [{ method: 'cash', amount: sp.cash }, { method: spOther, amount: sp.other }];
+      received = sp.recv;
+    }
     if (method === 'qr' && !hasPP) { toast('ตั้งเบอร์พร้อมเพย์ก่อน', true); return; }
     submitting = true;
     store('em_autoprint', $('#autoprint', m).checked ? '1' : '0');
     var sale = {
-      saleUid: S.cart.saleUid, payMethod: method, received: received, billDiscount: S.cart.billDiscount,
+      saleUid: S.cart.saleUid, payMethod: method, received: received, payments: payments, billDiscount: S.cart.billDiscount,
       approvalId: S.cart.approvalId,
       lines: S.cart.lines.map(function (l) {
         return { sku: l.sku, barcode: l.barcode, qty: l.qty, unitPrice: l.openPrice ? l.unitPrice : undefined, lineDiscount: l.lineDiscount,
@@ -967,12 +1020,13 @@ function openPay(initial) {
     };
     api('commitSale', S.token, sale).then(function (rc) {
       paid = true;
-      cdPublish('done', { method: rc.payMethod, total: rc.total, received: rc.received, change: rc.change });
+      var cashIn = rc.payMethod === 'split' ? round2(rc.received - rc.payments.qr - rc.payments.transfer) : rc.received;
+      cdPublish('done', { method: rc.payMethod === 'split' ? (rc.payments.cash > 0 ? 'cash' : 'qr') : rc.payMethod, total: rc.total, received: cashIn, change: rc.change, split: rc.payMethod === 'split' ? rc.payments : null });
       closeModal();
       var print = $('#autoprint', m).checked;
       newCart();
       renderCartOnly();
-      if (rc.payMethod === 'cash') openDrawer(true);
+      if (rc.payMethod === 'cash' || rc.payMethod === 'split' && rc.payments.cash > 0) openDrawer(true);
       showReceipt(rc, print);
     }).catch(function (e) { submitting = false; fail(e); });
   };
@@ -987,8 +1041,9 @@ function maskPP(id) { id = String(id || ''); return id.length > 4 ? id.slice(0, 
 
 function showReceipt(rc, autoPrint) {
   var m = openModal('<header><h1>บันทึกแล้ว · ' + esc(rc.billNo) + '</h1></header><div class="body">' +
-    (rc.payMethod === 'cash' ? '<div class="row" style="justify-content:space-between;align-items:baseline"><span>เงินทอน</span><span class="num brand-text" style="font-size:44px;font-weight:700">฿' + money(rc.change) + '</span></div>' +
-      '<div class="muted">รับมา ฿' + money(rc.received) + ' · ยอด ฿' + money(rc.total) + '</div>' : '<div>ชำระด้วย ' + payName(rc.payMethod) + ' ฿' + money(rc.total) + '</div>') +
+    (rc.payMethod === 'cash' || rc.payMethod === 'split' && rc.payments.cash > 0 ? '<div class="row" style="justify-content:space-between;align-items:baseline"><span>เงินทอน</span><span class="num brand-text" style="font-size:44px;font-weight:700">฿' + money(rc.change) + '</span></div>' +
+      '<div class="muted">' + (rc.payMethod === 'split' ? payText(rc) + ' · รับเงินสดมา ฿' + money(round2(rc.received - rc.payments.qr - rc.payments.transfer)) : 'รับมา ฿' + money(rc.received)) + ' · ยอด ฿' + money(rc.total) + '</div>'
+      : '<div>ชำระด้วย ' + payText(rc) + ' ฿' + money(rc.total) + '</div>') +
     '</div><footer><button class="btn" data-x="print">พิมพ์ใบเสร็จ</button><button class="btn primary" data-x="next" autofocus>บิลใหม่ (Enter)</button></footer>');
   $('[data-x=print]', m).onclick = function () { printReceipt(rc); };
   $('[data-x=next]', m).onclick = function () { closeModal(); };
@@ -1093,7 +1148,15 @@ function noSale() {
   openDrawer().then(function (ok) { if (ok) api('logDrawer', S.token, 'เปิดลิ้นชักโดยไม่ขาย').catch(function () {}); });
 }
 
-function payName(m) { return { cash: 'เงินสด', qr: 'QR พร้อมเพย์', transfer: 'โอน' }[m] || m; }
+function payName(m) { return { cash: 'เงินสด', qr: 'QR พร้อมเพย์', transfer: 'โอน', split: 'แบ่งจ่าย' }[m] || m; }
+
+/** "เงินสด 60 + QR 40" for split bills; plain name otherwise. */
+function payText(rc) {
+  if (rc.payMethod !== 'split' || !rc.payments) return payName(rc.payMethod);
+  return ['cash', 'qr', 'transfer'].filter(function (k) { return rc.payments[k] > 0; }).map(function (k) {
+    return payName(k).replace(' พร้อมเพย์', '') + ' ' + money(rc.payments[k]);
+  }).join(' + ');
+}
 
 function printReceipt(rc) {
   var st = S.settings;
@@ -1109,8 +1172,10 @@ function printReceipt(rc) {
     '<table>' + lines + '</table><hr><table>' +
     (rc.discount ? '<tr><td>รวม</td><td style="text-align:right">' + money(rc.subtotal) + '</td></tr><tr><td>ส่วนลด</td><td style="text-align:right">-' + money(rc.discount) + '</td></tr>' : '') +
     '<tr><td class="big">ยอดสุทธิ</td><td class="big" style="text-align:right">' + money(rc.total) + '</td></tr>' +
-    '<tr><td>' + payName(rc.payMethod) + '</td><td style="text-align:right">' + money(rc.received) + '</td></tr>' +
-    (rc.payMethod === 'cash' ? '<tr><td>เงินทอน</td><td style="text-align:right">' + money(rc.change) + '</td></tr>' : '') +
+    (rc.payMethod === 'split' ? ['cash', 'qr', 'transfer'].filter(function (k) { return rc.payments[k] > 0; }).map(function (k) {
+      return '<tr><td>' + payName(k) + '</td><td style="text-align:right">' + money(k === 'cash' ? round2(rc.received - rc.payments.qr - rc.payments.transfer) : rc.payments[k]) + '</td></tr>';
+    }).join('') : '<tr><td>' + payName(rc.payMethod) + '</td><td style="text-align:right">' + money(rc.received) + '</td></tr>') +
+    (rc.payMethod === 'cash' || rc.payMethod === 'split' && rc.change > 0 ? '<tr><td>เงินทอน</td><td style="text-align:right">' + money(rc.change) + '</td></tr>' : '') +
     '</table><hr><div class="c">' + esc(st.receiptFooter || '') + '</div>';
   window.print();
 }
@@ -1165,11 +1230,14 @@ function loadBills() {
     var tb = $('#bills');
     if (!tb) return;
     var paid = rows.filter(function (r) { return r.status !== 'VOID'; });
-    $('#bsum').textContent = paid.length + ' บิล · ฿' + money(paid.reduce(function (a, r) { return a + r.total; }, 0));
+    var ret = paid.reduce(function (a, r) { return a + (r.returnedTotal || 0); }, 0);
+    $('#bsum').textContent = paid.length + ' บิล · ฿' + money(paid.reduce(function (a, r) { return a + r.total; }, 0)) + (ret ? ' · คืน ฿' + money(ret) : '');
     tb.innerHTML = rows.length ? rows.map(function (r) {
       return '<tr class="click" data-act="billDetail" data-no="' + esc(r.billNo) + '"><td class="num">' + esc(r.billNo) + '</td><td>' + timeOf(r.createdAt) +
         '</td><td class="r num">' + r.itemsCount + '</td><td class="r num">' + money(r.total) + '</td><td>' + payName(r.payMethod) +
-        '</td><td>' + esc(r.cashier) + '</td><td>' + (r.status === 'VOID' ? '<span class="tag warn">ยกเลิก</span>' : '<span class="tag green">ปกติ</span>') + '</td></tr>';
+        '</td><td>' + esc(r.cashier) + '</td><td>' + (r.status === 'VOID' ? '<span class="tag warn">ยกเลิก</span>'
+          : r.returnedTotal >= r.total && r.total > 0 ? '<span class="tag gray">คืนทั้งบิล</span>'
+          : r.returnedTotal > 0 ? '<span class="tag amber">คืนบางส่วน −' + money(r.returnedTotal) + '</span>' : '<span class="tag green">ปกติ</span>') + '</td></tr>';
     }).join('') : '<tr><td colspan="7" class="muted">ไม่มีบิล</td></tr>';
   }).catch(fail);
 }
@@ -1179,17 +1247,25 @@ function billDetail(no) {
     var m = openModal('<header><h1>บิล ' + esc(rc.billNo) + '</h1><span class="muted">' + dateTime(rc.createdAt) + '</span><span class="grow"></span>' +
       (rc.status === 'VOID' ? '<span class="tag warn">ยกเลิก</span>' : '') + '</header><div class="body"><table class="table"><tbody>' +
       rc.lines.map(function (l) {
-        return '<tr><td>' + esc(l.name) + ' <span class="muted">' + esc(l.unitName) + '</span></td><td class="r num">' + l.qty + ' × ' + money(l.unitPrice) +
+        return '<tr><td>' + esc(l.name) + ' <span class="muted">' + esc(l.unitName) + '</span>' +
+          (l.returnedQty ? ' <span class="tag amber">คืนแล้ว ' + l.returnedQty + '</span>' : '') + '</td><td class="r num">' + l.qty + ' × ' + money(l.unitPrice) +
           '</td><td class="r num">' + money(l.lineTotal) + '</td></tr>';
       }).join('') + '</tbody></table>' +
       '<div class="row" style="justify-content:space-between"><span>ยอดสุทธิ (' + payName(rc.payMethod) + ')' + (rc.discount ? ' · ลด ' + money(rc.discount) : '') +
       '</span><b class="num" style="font-size:20px">฿' + money(rc.total) + '</b></div>' +
       (rc.voidReason ? '<div class="warn-text">เหตุผลยกเลิก: ' + esc(rc.voidReason) + '</div>' : '') +
+      (rc.returns && rc.returns.length ? '<div class="hintbox" style="color:var(--ink)">' + rc.returns.map(function (x) {
+        return '<div class="row" style="justify-content:space-between"><span>' + esc(x.returnNo) + ' · ' + dateTime(x.createdAt) + ' · ' + esc(x.reason) +
+          ' <span class="muted">(' + (x.refundMethod === 'cash' ? 'เงินสด' : 'โอน') + (x.restock ? '' : ' · ไม่คืนสต็อก') + ' · ' + esc(x.user) + ')</span></span><b class="num warn-text">−฿' + money(x.total) + '</b></div>';
+      }).join('') + '</div>' : '') +
       '</div><footer><button class="btn" data-x="print">พิมพ์ซ้ำ</button>' +
-      (rc.status !== 'VOID' && S.isCounter ? '<button class="btn warn" data-x="void">ยกเลิกบิล</button>' : '') +
+      (rc.status !== 'VOID' && S.isCounter && rc.lines.some(function (l) { return l.qty > l.returnedQty; }) ? '<button class="btn" data-x="return">คืนสินค้า</button>' : '') +
+      (rc.status !== 'VOID' && S.isCounter && !rc.returnedTotal ? '<button class="btn warn" data-x="void">ยกเลิกบิล</button>' : '') +
       '<button class="btn primary" data-x="close">ปิด</button></footer>', { wide: false });
     $('[data-x=print]', m).onclick = function () { printReceipt(rc); };
     $('[data-x=close]', m).onclick = function () { closeModal(); };
+    var rb = $('[data-x=return]', m);
+    if (rb) rb.onclick = function () { closeModal(); returnModal(rc); };
     var vb = $('[data-x=void]', m);
     if (vb) vb.onclick = function () {
       prompt2('ยกเลิกบิล ' + rc.billNo, 'เหตุผล (บังคับ)', '', { ok: 'ถัดไป' }).then(function (reason) {
@@ -1203,6 +1279,75 @@ function billDetail(no) {
       }).catch(fail);
     };
   }).catch(fail);
+}
+
+var RETURN_REASONS = ['ลูกค้าเปลี่ยนใจ', 'สินค้าชำรุด', 'คิดเงินผิด', 'หมดอายุ'];
+
+/** Partial return: pick quantities per line, refund by cash (from this shift's drawer) or transfer. */
+function returnModal(rc) {
+  var st = { uid: 'R' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), q: {}, method: S.shift ? 'cash' : 'transfer', restock: true, busy: false };
+  var sumLT = rc.lines.reduce(function (a, l) { return a + l.lineTotal; }, 0);
+  var billDisc = round2(rc.discount - rc.lines.reduce(function (a, l) { return a + l.lineDiscount; }, 0));
+  var refundOf = function (l, q) { var net = sumLT ? l.lineTotal - billDisc * l.lineTotal / sumLT : 0; return round2(net * q / l.qty); };
+  var m = openModal('<header><h1>คืนสินค้า · บิล ' + esc(rc.billNo) + '</h1><span class="muted">' + dateTime(rc.createdAt) + '</span></header>' +
+    '<div class="body" style="gap:12px"><div class="su-lines" id="rt-lines"></div>' +
+    (billDisc > 0 ? '<div class="muted" style="font-size:13px">บิลนี้มีส่วนลดท้ายบิล ฿' + money(billDisc) + ' — เงินคืนหักส่วนลดตามสัดส่วนแล้ว</div>' : '') +
+    '<div class="field"><label>คืนเงินเป็น</label><div class="seg-sm" id="rt-m"><button data-m="cash"' + (S.shift ? '' : ' disabled title="ต้องเปิดกะก่อน"') + '>เงินสด (จากลิ้นชัก)</button><button data-m="transfer">โอนคืน</button></div></div>' +
+    '<label class="checkrow"><input type="checkbox" id="rt-restock" checked> นำของกลับเข้าสต็อก (ของยังขายได้) — เครื่องดื่มชง/สูตรผสมไม่คืนสต็อก</label>' +
+    '<div class="field"><label for="rt-why">เหตุผล</label><input id="rt-why" maxlength="100" autocomplete="off" placeholder="เช่น ลูกค้าซื้อเกิน">' +
+    '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">' + RETURN_REASONS.map(function (r) {
+      return '<button type="button" class="chip" data-why="' + r + '" style="height:32px;font-size:13px;padding:0 12px">' + r + '</button>';
+    }).join('') + '</div></div></div>' +
+    '<footer><span class="grow"><span class="muted" style="font-size:13px">คืนเงิน</span> <b class="num warn-text" id="rt-total" style="font-size:22px">฿0.00</b></span>' +
+    '<button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">บันทึกคืนสินค้า</button></footer>');
+  var draw = function () {
+    $('#rt-lines', m).innerHTML = rc.lines.map(function (l) {
+      var left = l.qty - l.returnedQty, q = st.q[l.lineNo] || 0;
+      return '<div class="su-line"><div><b>' + esc(l.name) + '</b> <span class="muted">' + esc(l.unitName) + '</span><div class="muted" style="font-size:12px">ซื้อ ' + l.qty +
+        (l.returnedQty ? ' · คืนแล้ว ' + l.returnedQty : '') + ' · ' + money(l.lineTotal) + ' บาท</div></div>' +
+        (left > 0 ? '<div class="row" style="gap:10px"><span class="num muted" style="font-size:13px">' + (q ? '−' + money(refundOf(l, q)) : '') + '</span><div class="qty"><button type="button" data-l="' + l.lineNo + '" data-d="-1" aria-label="ลด">−</button>' +
+          '<span class="n num">' + q + '</span><button type="button" data-l="' + l.lineNo + '" data-d="1" aria-label="เพิ่ม">+</button></div></div>' : '<span class="tag gray">คืนครบแล้ว</span>') + '</div>';
+    }).join('');
+    var total = rc.lines.reduce(function (a, l) { return a + (st.q[l.lineNo] ? refundOf(l, st.q[l.lineNo]) : 0); }, 0);
+    var all = rc.lines.every(function (l) { return (st.q[l.lineNo] || 0) + l.returnedQty >= l.qty; });
+    if (all) total = round2(rc.total - (rc.returnedTotal || 0));
+    $('#rt-total', m).textContent = '฿' + money(total);
+    $all('#rt-m button', m).forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-m') === st.method); });
+  };
+  m.addEventListener('click', function (e) {
+    var t = e.target.closest('button');
+    if (!t || t.disabled) return;
+    if (t.hasAttribute('data-l')) {
+      var n = Number(t.getAttribute('data-l')), l = rc.lines.filter(function (x) { return x.lineNo === n; })[0];
+      st.q[n] = Math.max(0, Math.min(l.qty - l.returnedQty, (st.q[n] || 0) + Number(t.getAttribute('data-d'))));
+      draw();
+    } else if (t.hasAttribute('data-m')) { st.method = t.getAttribute('data-m'); draw(); }
+    else if (t.hasAttribute('data-why')) {
+      $('#rt-why', m).value = t.getAttribute('data-why');
+      $all('[data-why]', m).forEach(function (c) { c.classList.toggle('on', c === t); });
+      if (t.getAttribute('data-why') === 'สินค้าชำรุด' || t.getAttribute('data-why') === 'หมดอายุ') $('#rt-restock', m).checked = false;
+    } else if (t.getAttribute('data-x') === 'no') closeModal();
+    else if (t.getAttribute('data-x') === 'ok') save();
+  });
+  var save = function () {
+    if (st.busy) return;
+    var lines = rc.lines.filter(function (l) { return st.q[l.lineNo] > 0; }).map(function (l) { return { lineNo: l.lineNo, qty: st.q[l.lineNo] }; });
+    if (!lines.length) return toast('กด + ที่รายการที่จะคืน', true);
+    var why = $('#rt-why', m).value.trim();
+    if (!why) { toast('ใส่เหตุผล', true); $('#rt-why', m).focus(); return; }
+    approval('RETURN', 'อนุมัติคืนสินค้า ' + $('#rt-total', m).textContent).then(function (id) {
+      if (id === null) return;
+      st.busy = true;
+      return api('returnSale', S.token, { returnUid: st.uid, billNo: rc.billNo, lines: lines, refundMethod: st.method,
+        restock: $('#rt-restock', m).checked, reason: why, approvalId: id }).then(function (r) {
+        closeModal();
+        if (r.refundMethod === 'cash') openDrawer(true);
+        toast('คืนสินค้าแล้ว ' + r.returnNo + ' · คืนเงิน ฿' + money(r.total) + (r.refundMethod === 'cash' ? ' (เงินสด)' : ' (โอน)'));
+        loadBills(); reloadCatalog();
+      });
+    }).catch(function (e) { st.busy = false; fail(e); });
+  };
+  draw();
 }
 
 /* =================================================================== */
@@ -2314,9 +2459,11 @@ function drawShiftSum(s) {
   var row = function (k, v, strong) { return '<div class="row" style="justify-content:space-between' + (strong ? ';font-weight:700' : '') + '"><span>' + k + '</span><span class="num">' + v + '</span></div>'; };
   box.innerHTML = '<h2>สรุปจากระบบ</h2>' + row('เปิดกะ', dateTime(s.openedAt)) + row('เงินทอนตั้งต้น', money(s.openingCash)) + row('ขายเงินสด', money(s.cashSales)) +
     row('เงินเข้า', money(s.cashIn)) + row('เงินออก', '−' + money(s.cashOut)) +
+    (s.cashRefunds ? row('คืนเงินลูกค้า (เงินสด)', '−' + money(s.cashRefunds)) : '') +
     '<hr style="border:0;border-top:1px solid var(--line)">' + row('ต้องมีในลิ้นชัก', money(s.expectedCash), true) +
     '<div class="muted" style="font-size:14px;margin-top:6px">QR ' + money(s.qrSales) + ' · โอน ' + money(s.transferSales) + ' · รวมขาย ' + money(s.totalSales) +
-    '<br>' + s.billCount + ' บิล · ยกเลิก ' + s.voidCount + ' · ส่วนลด ' + money(s.discount) + '</div>';
+    '<br>' + s.billCount + ' บิล · ยกเลิก ' + s.voidCount + ' · ส่วนลด ' + money(s.discount) +
+    (s.returnCount ? '<br>คืนสินค้า ' + s.returnCount + ' ครั้ง · เงินสด ' + money(s.cashRefunds) + ' · โอนคืน ' + money(s.otherRefunds) : '') + '</div>';
 }
 
 function openShift() {
@@ -2351,7 +2498,7 @@ function printShift(s) {
   $('#print').innerHTML = '<div class="c big">' + esc(S.settings.shopName || '') + '</div><div class="c">สรุปปิดกะ</div><hr>' +
     '<div>' + dateTime(s.openedAt) + ' – ' + timeOf(s.closedAt) + '<br>ปิดโดย ' + esc(s.closedBy) + '</div><hr><table>' +
     r('เงินทอนตั้งต้น', money(s.openingCash)) + r('ขายเงินสด', money(s.cashSales)) + r('ขาย QR', money(s.qrSales)) + r('ขายโอน', money(s.transferSales)) +
-    r('เงินเข้า', money(s.cashIn)) + r('เงินออก', money(s.cashOut)) + r('ต้องมีในลิ้นชัก', money(s.expectedCash)) + r('นับได้', money(s.countedCash)) +
+    r('เงินเข้า', money(s.cashIn)) + r('เงินออก', money(s.cashOut)) + (s.cashRefunds ? r('คืนเงินสด', money(s.cashRefunds)) : '') + r('ต้องมีในลิ้นชัก', money(s.expectedCash)) + r('นับได้', money(s.countedCash)) +
     r('ส่วนต่าง', money(s.diff)) + r('จำนวนบิล', s.billCount) + r('ยกเลิก', s.voidCount) + '</table>';
   window.print();
 }
@@ -2382,7 +2529,8 @@ function loadReport() {
       }).join('') + '</div><div class="row muted" style="justify-content:space-between;font-size:12px"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div></div>' +
       '<div class="card pad"><h2>ช่องทางชำระ</h2>' + ['cash', 'qr', 'transfer'].map(function (k) {
         return '<div class="row" style="justify-content:space-between"><span>' + payName(k) + '</span><b class="num">฿' + money(r.byPay[k]) + '</b></div>';
-      }).join('') + '<div class="muted" style="margin-top:8px">ส่วนลดรวม ฿' + money(r.discount) + ' · ยกเลิก ' + r.voidCount + ' บิล (฿' + money(r.voidTotal) + ')</div></div>' +
+      }).join('') + '<div class="muted" style="margin-top:8px">ส่วนลดรวม ฿' + money(r.discount) + ' · ยกเลิก ' + r.voidCount + ' บิล (฿' + money(r.voidTotal) + ')' +
+        (r.returnCount ? ' · คืนสินค้า ' + r.returnCount + ' ครั้ง (฿' + money(r.refundTotal) + ') — ยอดขายหักคืนแล้ว' : '') + '</div></div>' +
       '<div class="card pad"><h2>สินค้าขายดี</h2><table class="table"><tbody>' + (r.top.map(function (t, i) {
         return '<tr><td class="muted">' + (i + 1) + '</td><td>' + esc(t.name) + '</td><td class="r num">' + t.pieces + ' ชิ้น</td><td class="r num">฿' + money(t.revenue) + '</td></tr>';
       }).join('') || '<tr><td class="muted">ยังไม่มีการขาย</td></tr>') + '</tbody></table></div>' +

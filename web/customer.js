@@ -119,6 +119,7 @@
         '<div class="cd-muted" style="font-size:.9em">ยอดที่ต้องชำระ</div><div class="cd-num" style="font-size:3em;font-weight:700;color:#1F6B45;line-height:1.05">฿' + money(st.total) + '</div></section>' +
         '<section style="flex:1;padding:1.4em 1.6em 1.4em 0;display:flex"><div class="cd-card" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.7em;padding:1.2em;text-align:center">' +
         (qr ? '<b style="font-size:1.3em">สแกนจ่ายด้วยแอปธนาคาร</b><div class="cd-qr" id="cdqr"></div>' +
+          (st.split ? '<div class="cd-num" style="font-size:1.6em;font-weight:700;color:#1F6B45">QR ฿' + money(st.split.qr) + '</div><div class="cd-muted">+ เงินสด ฿' + money(st.split.cash) + '</div>' : '') +
           '<div><b>PromptPay' + (st.ppName ? ' · ' + esc(st.ppName) : '') + '</b><div class="cd-muted" style="font-size:.8em">ยอดถูกใส่ใน QR แล้ว ไม่ต้องพิมพ์เอง</div></div>'
           : '<b style="font-size:1.4em">' + (st.method === 'transfer' ? 'โอนเงิน' : 'ชำระด้วยเงินสด') + '</b><div class="cd-num" style="font-size:4em;font-weight:700;color:#1F6B45">฿' + money(st.total) + '</div>') +
         '</div></section>';

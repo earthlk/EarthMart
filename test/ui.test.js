@@ -472,10 +472,43 @@ call('importProducts', T, [
   await page.keyboard.press('Escape');
   assert.deepStrictEqual(call('bootstrap', T).markdowns.map(m => m.left), [2], 'quota used');
 
+  // 9y. Split payment (cash + QR) then a partial return from the bills page
+  await page.click('nav button[data-v=sale]');
+  await page.click('.chip:has-text("ขนม")');
+  await page.click('.key:has-text("ขนมปัง")');
+  await page.click('.key:has-text("ขนมปัง")');
+  await page.waitForFunction(() => document.querySelector('.line .qty .n') && document.querySelector('.line .qty .n').textContent === '2');
+  await page.keyboard.press('F12');
+  await page.click('#pm [data-m=split]');
+  await page.fill('#sp-o', '10');
+  await page.fill('#sp-r', '50');
+  await page.waitForFunction(() => document.querySelector('#sp-chg').textContent === '฿30.00' && document.querySelector('#spqr svg, #spqr img, #spqr canvas'));
+  await shot('06s-split');
+  await page.click('[data-x=ok]');
+  await page.waitForSelector('.modal h1:has-text("บันทึกแล้ว")');
+  assert.match(await page.textContent('.modal .body'), /เงินสด 20\.00 \+ QR 10\.00/);
+  await page.keyboard.press('Escape');
+  await page.click('nav button[data-v=bills]');
+  await page.waitForSelector('#bills tr.click');
+  await page.click('#bills tr.click >> nth=0');
+  await page.click('.modal [data-x=return]');
+  await page.click('.modal [data-l="1"][data-d="1"]');
+  await page.click('.modal [data-why="ลูกค้าเปลี่ยนใจ"]');
+  assert.strictEqual(await page.textContent('#rt-total'), '฿15.00');
+  await shot('07r-return');
+  await page.click('.modal [data-x=ok]');
+  await page.waitForSelector('.toast:has-text("คืนสินค้าแล้ว")');
+  await page.waitForSelector('#bills .tag:has-text("คืนบางส่วน")');
+  await page.click('#bills tr.click >> nth=0');
+  await page.waitForSelector('.modal .tag:has-text("คืนแล้ว 1")');
+  assert.ok(!(await page.$('.modal [data-x=void]')), 'no whole-bill void after a return');
+  await shot('07s-bill-returned');
+  await page.keyboard.press('Escape');
+
   // 10. Close shift
   await page.click('nav button[data-v=shift]');
   await page.waitForSelector('#shiftsum h2');
-  await page.fill('#c1000', '0'); await page.fill('#c500', '1'); await page.fill('#c100', '1'); await page.fill('#ccoin', '100.80');
+  await page.fill('#c1000', '0'); await page.fill('#c500', '1'); await page.fill('#c100', '1'); await page.fill('#ccoin', '105.80');
   await page.click('[data-act=closeShift]');
   await page.click('[data-x=yes]');
   await page.waitForSelector('.modal h1:has-text("ปิดกะแล้ว")');

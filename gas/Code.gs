@@ -32,13 +32,17 @@ var SCHEMA = {
                'total', 'note'],
   Barcodes:   ['barcode', 'sku', 'unitName', 'multiplier', 'price'],
   Sales:      ['billNo', 'saleUid', 'createdAt', 'shiftId', 'deviceId', 'userId', 'itemsCount', 'subtotal',
-               'discount', 'total', 'payMethod', 'received', 'change', 'status', 'voidReason', 'voidBy', 'voidAt'],
+               'discount', 'total', 'payMethod', 'received', 'change', 'status', 'voidReason', 'voidBy', 'voidAt',
+               'cashPaid', 'qrPaid', 'transferPaid', 'returnedTotal'],
   SaleLines:  ['billNo', 'lineNo', 'sku', 'name', 'barcode', 'unitName', 'multiplier', 'qty', 'unitPrice',
-               'lineDiscount', 'lineTotal', 'cost', 'markdownLotId', 'markdownQty', 'markdown'],
+               'lineDiscount', 'lineTotal', 'cost', 'markdownLotId', 'markdownQty', 'markdown', 'returnedQty'],
+  Returns:    ['returnNo', 'returnUid', 'createdAt', 'billNo', 'shiftId', 'deviceId', 'userId', 'itemsCount', 'total',
+               'refundMethod', 'restock', 'reason', 'approvedBy'],
+  ReturnLines: ['returnNo', 'billNo', 'lineNo', 'sku', 'name', 'qty', 'multiplier', 'refund', 'cost', 'restocked'],
   StockMoves: ['moveId', 'createdAt', 'sku', 'qtyPieces', 'type', 'refNo', 'userId', 'note'],
   Shifts:     ['shiftId', 'deviceId', 'userId', 'openedAt', 'openingCash', 'closedAt', 'closedBy', 'cashSales',
                'qrSales', 'transferSales', 'cashIn', 'cashOut', 'expectedCash', 'countedCash', 'diff', 'billCount',
-               'voidCount', 'note', 'status'],
+               'voidCount', 'note', 'status', 'cashRefunds', 'otherRefunds'],
   CashMoves:  ['moveId', 'shiftId', 'createdAt', 'type', 'amount', 'reason', 'userId'],
   AuditLog:   ['logId', 'createdAt', 'userId', 'action', 'ref', 'detail', 'approvedBy', 'deviceId']
 };
@@ -249,7 +253,7 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '4';
+var SCHEMA_VERSION = '5';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {
