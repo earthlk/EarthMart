@@ -1,5 +1,6 @@
 // Browser smoke test: real web/ files in Chromium, API calls routed into the mocked Apps Script backend.
 'use strict';
+let errorsRef = [];
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -32,7 +33,7 @@ call('importProducts', T, [
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1366, height: 800 } });
-  const errors = [];
+  const errors = []; errorsRef = errors;
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 
@@ -198,8 +199,37 @@ call('importProducts', T, [
   await page.click('.key:has-text("ขนมปัง")');
   await page.fill('#scan', '8850999111239'); await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.querySelectorAll('.line').length === 2);
-  await page.click('[data-act=editQty]');
+  // tap the quantity number to type a quantity
+  await page.click('.line:has-text("แพ็ค") [data-act=editQty]');
   await page.fill('#p2', '2'); await page.keyboard.press('Enter');
+  // swipe a line to the right -> confirm -> removed
+  await page.click('.key:has-text("ขนมปัง")');
+  await page.waitForFunction(() => document.querySelector('.line .qty .n').textContent === '2');
+  const box = await page.locator('.swipe').first().boundingBox();
+  await page.mouse.move(box.x + 60, box.y + box.height / 2);
+  await page.mouse.down();
+  for (let dx = 0; dx <= 200; dx += 20) await page.mouse.move(box.x + 60 + dx, box.y + box.height / 2);
+  await shot('09d-swipe');
+  await page.mouse.up();
+  await page.waitForSelector('.modal h1:has-text("ลบรายการ")');
+  await page.click('[data-x=yes]');
+  await page.waitForFunction(() => document.querySelectorAll('.line').length === 1);
+  await page.click('.key:has-text("ขนมปัง")');
+  // minus at qty 1 asks before removing
+  await page.click('.line:has-text("ชิ้น ·") [data-d="-1"]');
+  await page.waitForSelector('.modal h1:has-text("ลบรายการ")');
+  await page.click('[data-x=no]');
+  await page.waitForFunction(() => document.querySelectorAll('.line').length === 2);
+  // hold the bill, sell something else, recall it
+  await page.click('[data-act=holdBill]');
+  await page.fill('#p2', 'ลูกค้าเสื้อแดง'); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelectorAll('.line').length === 0);
+  assert.match(await page.textContent('[data-act=holdBill]'), /พักบิล \(1\)/);
+  await page.click('[data-act=holdBill]');
+  await page.waitForSelector('.modal:has-text("ลูกค้าเสื้อแดง")');
+  await shot('09e-held');
+  await page.click('[data-x=recall]');
+  await page.waitForFunction(() => document.querySelectorAll('.line').length === 2);
   assert.match(await page.textContent('#totalbar .amt'), /185\.00/, '15 + 2 x 85');
   await shot('09c-sale-icons');
   await page.click('[data-act=payQr]');
@@ -230,4 +260,4 @@ call('importProducts', T, [
   assert.deepStrictEqual(errors, [], 'console errors: ' + errors.join('\n'));
   await browser.close();
   console.log('UI smoke test passed');
-})().catch(e => { console.error(e); process.exit(1); });
+})().catch(e => { console.error(e); console.error('page errors:', errorsRef); process.exit(1); });

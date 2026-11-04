@@ -113,11 +113,19 @@ a{color:var(--brand-text)}
 .scan-hint{font-size:12px;color:var(--muted);margin-top:6px}
 .line{display:grid;grid-template-columns:1fr 124px 86px;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line-soft)}
 .line.sel{background:var(--brand-soft)}
+.swipe{position:relative;overflow:hidden;touch-action:pan-y;user-select:none}
+.swipe-bg{position:absolute;inset:0;background:var(--warn-soft);color:var(--warn);display:flex;align-items:center;padding-left:18px;font-weight:700;opacity:0;transition:background .15s}
+.swipe.dragging .swipe-bg{opacity:1}
+.swipe.armed .swipe-bg{background:var(--warn);color:#fff}
+.swipe .line{position:relative;background:var(--surface);transition:transform .18s ease}
+.swipe .line.sel{background:var(--brand-soft)}
+.swipe.dragging .line{transition:none;box-shadow:-4px 0 10px rgba(0,0,0,.08)}
 .line .name{font-weight:500}
 .line .sub{font-size:12px;color:var(--muted)}
 .qty{display:flex;align-items:center;gap:4px;justify-content:center}
 .qty button{width:32px;height:32px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);cursor:pointer}
-.qty span{min-width:28px;text-align:center;font-weight:600}
+.qty .n{min-width:34px;height:32px;border:0;background:transparent;text-align:center;font-weight:600;font-size:15px;cursor:pointer;border-radius:6px;padding:0 4px}
+.qty .n:hover{background:var(--surface-muted)}
 .cart-actions{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
 .cart-actions .btn{flex:1;height:42px;font-size:14px;padding:0 8px}
 .empty{padding:40px 16px;text-align:center;color:var(--muted)}

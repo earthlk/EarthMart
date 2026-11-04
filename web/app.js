@@ -384,7 +384,7 @@ function boot() {
 }
 
 function logout() {
-  if (S.cart && S.cart.lines.length) return toast('มีบิลค้างอยู่ — ชำระหรือล้างบิลก่อนออก', true);
+  if (S.cart && S.cart.lines.length) return toast('มีบิลค้างอยู่ — ชำระ พัก หรือล้างบิลก่อนออก', true);
   var t = S.token;
   forceLogin();
   if (t) api('logout', t).catch(function () {});
@@ -570,8 +570,8 @@ function renderSale() {
     '<div class="scan-hint">พิมพ์จำนวนแล้วกด * ก่อนสแกน เช่น 6* = 6 ชิ้น</div><div id="suggest"></div></div>' +
     '<div class="cart-head"><div>รายการ</div><div style="text-align:center">จำนวน</div><div class="r">รวม</div></div>' +
     '<div class="lines" id="lines"></div>' +
-    '<div class="cart-actions"><button class="btn" data-act="editQty">แก้จำนวน</button><button class="btn" data-act="delLine">ลบรายการ</button>' +
-    '<button class="btn" data-act="discount">ส่วนลด</button><button class="btn" data-act="noSale">เปิดลิ้นชัก</button><button class="btn warn" data-act="clearCart">ล้างบิล</button></div></section>' +
+    '<div class="cart-actions"><button class="btn" data-act="discount">ส่วนลด</button><button class="btn" data-act="holdBill">พักบิล</button>' +
+    '<button class="btn" data-act="noSale">เปิดลิ้นชัก</button><button class="btn warn" data-act="clearCart">ล้างบิล</button></div></section>' +
     '<section class="sell"><div class="row" style="flex-wrap:wrap">' + chips + '</div><div class="keys">' + keys + '</div>' +
     '<div class="card total" id="totalbar"></div></section></div></div>';
 }
@@ -581,13 +581,15 @@ function renderCartOnly() {
   if (!box) return;
   if (!S.cart.lines.length) box.innerHTML = '<div class="empty">สแกนสินค้าหรือแตะปุ่มด้านขวาเพื่อเริ่มบิล</div>';
   else box.innerHTML = S.cart.lines.map(function (l, i) {
-    return '<div class="line ' + (i === S.cart.sel ? 'sel' : '') + '" data-act="selLine" data-i="' + i + '">' +
+    return '<div class="swipe" data-i="' + i + '"><div class="swipe-bg">ลบ</div><div class="line ' + (i === S.cart.sel ? 'sel' : '') + '" data-act="selLine" data-i="' + i + '">' +
       '<div><div class="name">' + esc(l.name) + '</div><div class="sub">' + esc(l.unitName) + (l.multiplier > 1 ? ' (' + l.multiplier + ' ชิ้น)' : '') +
       ' · ฿' + money(l.unitPrice) + (l.lineDiscount ? ' · ลด ' + money(l.lineDiscount) : '') + '</div></div>' +
-      '<div class="qty"><button data-act="qty" data-i="' + i + '" data-d="-1" aria-label="ลด">−</button><span class="num">' + l.qty +
-      '</span><button data-act="qty" data-i="' + i + '" data-d="1" aria-label="เพิ่ม">+</button></div>' +
-      '<div class="r num"><b>' + money(l.qty * l.unitPrice - l.lineDiscount) + '</b></div></div>';
+      '<div class="qty"><button data-act="qty" data-i="' + i + '" data-d="-1" aria-label="ลด">−</button><button class="n num" data-act="editQty" data-i="' + i + '" aria-label="พิมพ์จำนวน">' + l.qty +
+      '</button><button data-act="qty" data-i="' + i + '" data-d="1" aria-label="เพิ่ม">+</button></div>' +
+      '<div class="r num"><b>' + money(l.qty * l.unitPrice - l.lineDiscount) + '</b></div></div></div>';
   }).join('');
+  var hb = $('[data-act=holdBill]');
+  if (hb) hb.textContent = 'พักบิล' + (heldBills().length ? ' (' + heldBills().length + ')' : '');
   var t = cartTotals();
   var bar = $('#totalbar');
   if (bar) bar.innerHTML = '<div class="grow"><div class="muted">' + t.items + ' ชิ้น' + (t.discount ? ' · ส่วนลด ฿' + money(t.discount) : '') +
@@ -612,11 +614,134 @@ function renderSuggest() {
 function changeQty(i, d) {
   var l = S.cart.lines[i];
   if (!l) return;
+  if (l.qty + d <= 0) return askRemoveLine(i);
   l.qty += d;
   if (l.qty <= 0) S.cart.lines.splice(i, 1);
   if (l.lineDiscount > l.qty * l.unitPrice) l.lineDiscount = 0;
   S.cart.sel = Math.min(i, S.cart.lines.length - 1);
   renderCartOnly();
+}
+
+function askRemoveLine(i) {
+  var l = S.cart.lines[i];
+  if (!l) return Promise.resolve(false);
+  return confirm2('ลบรายการ', l.name + ' × ' + l.qty + ' (฿' + money(l.qty * l.unitPrice - l.lineDiscount) + ')', 'ลบรายการ', true).then(function (ok) {
+    if (ok) {
+      S.cart.lines.splice(i, 1);
+      S.cart.sel = Math.min(i, S.cart.lines.length - 1);
+    }
+    renderCartOnly();
+    return ok;
+  });
+}
+
+/* Swipe a cart line to the right to delete it (touch, pen or mouse drag). */
+(function () {
+  var sw = null;
+  var TH = 90;
+  document.addEventListener('pointerdown', function (e) {
+    var w = e.target.closest('.swipe');
+    if (!w || e.target.closest('.qty') || e.button > 0) return;
+    sw = { w: w, line: $('.line', w), x: e.clientX, y: e.clientY, dx: 0, on: false, id: e.pointerId };
+  });
+  document.addEventListener('pointermove', function (e) {
+    if (!sw || e.pointerId !== sw.id) return;
+    var dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+    if (!sw.on) {
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { sw = null; return; }   // vertical scroll
+      if (dx < 12) return;
+      sw.on = true;
+      sw.w.classList.add('dragging');
+      try { sw.w.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    }
+    sw.dx = Math.max(0, dx);
+    sw.line.style.transform = 'translateX(' + sw.dx + 'px)';
+    sw.w.classList.toggle('armed', sw.dx > TH);
+  });
+  function end(e) {
+    if (!sw || e.pointerId !== sw.id) return;
+    var s2 = sw; sw = null;
+    if (!s2.on) return;
+    s2.w.classList.remove('dragging');
+    var stop = function (ev) { ev.stopPropagation(); ev.preventDefault(); };
+    s2.w.addEventListener('click', stop, true);           // the drag must not also select the line
+    setTimeout(function () { s2.w.removeEventListener('click', stop, true); }, 60);
+    if (s2.dx > TH) {
+      s2.line.style.transform = 'translateX(100%)';
+      askRemoveLine(Number(s2.w.getAttribute('data-i')));
+    } else {
+      s2.line.style.transform = '';
+      s2.w.classList.remove('armed');
+    }
+  }
+  document.addEventListener('pointerup', end);
+  document.addEventListener('pointercancel', end);
+})();
+
+/* --------------------------- Held bills --------------------------- */
+/* Kept in this browser only (per counter), so a refresh or re-login does not lose them. */
+
+function heldBills() {
+  try { return JSON.parse(store('em_held') || '[]'); } catch (e) { return []; }
+}
+function saveHeld(list) { store('em_held', JSON.stringify(list)); }
+
+function holdBill() {
+  var held = heldBills();
+  if (!S.cart.lines.length && !held.length) return toast('ยังไม่มีบิลที่พักไว้', true);
+  if (S.cart.lines.length && !held.length) return parkCurrent();
+  var t = S.cart.lines.length ? cartTotals() : null;
+  var m = openModal('<header><h1>พักบิล</h1><span class="muted">' + held.length + ' บิลที่พักไว้</span></header><div class="body">' +
+    (t ? '<button class="btn primary" data-x="park" style="height:52px">พักบิลนี้ (฿' + money(t.total) + ') แล้วเริ่มบิลใหม่</button>' : '') +
+    '<div class="col" style="gap:8px">' + held.map(function (h, i) {
+      var tot = h.lines.reduce(function (a, l) { return a + l.qty * l.unitPrice - l.lineDiscount; }, 0) - (h.billDiscount || 0);
+      return '<div class="card row" style="padding:10px 12px;gap:10px"><div class="grow"><b>' + esc(h.note || ('บิลพัก ' + timeOf(h.at))) + '</b>' +
+        '<div class="muted" style="font-size:13px">' + timeOf(h.at) + ' · ' + h.lines.length + ' รายการ · ' + esc(h.lines.slice(0, 3).map(function (l) { return l.name; }).join(', ')) + (h.lines.length > 3 ? '…' : '') + '</div></div>' +
+        '<b class="num">฿' + money(tot) + '</b><button class="btn sm" data-x="recall" data-i="' + i + '">เรียกคืน</button>' +
+        '<button class="btn sm ghost" data-x="drop" data-i="' + i + '" aria-label="ทิ้งบิลพัก">ทิ้ง</button></div>';
+    }).join('') + '</div></div><footer><button class="btn" data-x="close">ปิด</button></footer>', { wide: false });
+  m.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-x]');
+    if (!b) return;
+    var x = b.getAttribute('data-x'), i = Number(b.getAttribute('data-i'));
+    if (x === 'close') closeModal();
+    if (x === 'park') { closeModal(); parkCurrent(); }
+    if (x === 'recall') { closeModal(); recallHeld(i); }
+    if (x === 'drop') {
+      confirm2('ทิ้งบิลพัก', 'ลบบิลพักนี้ทิ้ง (ไม่กระทบสต็อก)', 'ทิ้งบิล', true).then(function (ok) {
+        if (!ok) return;
+        var l = heldBills(); l.splice(i, 1); saveHeld(l);
+        closeModal(); renderCartOnly(); if (l.length) holdBill();
+      });
+    }
+  });
+}
+
+function parkCurrent() {
+  prompt2('พักบิล', 'ชื่อ / หมายเหตุ (ไม่ใส่ก็ได้)', '', { hint: 'เช่น ลูกค้าเสื้อแดง, รถกระบะขาว', ok: 'พักบิล' }).then(function (note) {
+    if (note === null) return;
+    var l = heldBills();
+    l.push({ at: new Date().toISOString(), note: note.trim(), lines: S.cart.lines, billDiscount: S.cart.billDiscount, approvalId: S.cart.approvalId });
+    saveHeld(l);
+    newCart(); renderCartOnly();
+    toast('พักบิลแล้ว · มี ' + l.length + ' บิลรออยู่');
+  });
+}
+
+function recallHeld(i) {
+  var l = heldBills();
+  var h = l[i];
+  if (!h) return;
+  l.splice(i, 1);
+  if (S.cart.lines.length) {   // swap: the current bill goes on hold
+    l.push({ at: new Date().toISOString(), note: 'สลับจากการเรียกคืน', lines: S.cart.lines, billDiscount: S.cart.billDiscount, approvalId: S.cart.approvalId });
+  }
+  saveHeld(l);
+  newCart();
+  S.cart.lines = h.lines; S.cart.billDiscount = h.billDiscount || 0; S.cart.approvalId = h.approvalId || '';
+  S.cart.sel = h.lines.length - 1;
+  renderCartOnly();
+  toast('เรียกคืนบิลแล้ว');
 }
 
 function askDiscount(kind) {
@@ -1251,7 +1376,9 @@ function openShift() {
 
 function closeShift() {
   var counted = denomSum('c');
-  confirm2('ปิดกะ', 'ยอดนับได้ ฿' + money(counted) + ' — ปิดกะแล้วจะยกเลิกบิลในกะนี้ไม่ได้', 'ปิดกะ').then(function (ok) {
+  var nHeld = heldBills().length;
+  confirm2('ปิดกะ', 'ยอดนับได้ ฿' + money(counted) + ' — ปิดกะแล้วจะยกเลิกบิลในกะนี้ไม่ได้' +
+    (nHeld ? ' · ยังมีบิลพัก ' + nHeld + ' บิล (ยังไม่ได้รับเงิน จะค้างไว้ให้กะถัดไป)' : ''), 'ปิดกะ').then(function (ok) {
     if (!ok) return;
     return api('closeShift', S.token, counted, ($('#cnote') || {}).value || '').then(function (s) {
       S.shift = null;
@@ -1433,7 +1560,7 @@ var ACTIONS = {
     var s = S.suggest[Number(el.getAttribute('data-i'))];
     if (s) { addItem(S.idx.bySku[s.sku], null, s.qty); clearScan(); }
   },
-  selLine: function (el, e) { if (e.target.closest('[data-act=qty]')) return; S.cart.sel = Number(el.getAttribute('data-i')); renderCartOnly(); },
+  selLine: function (el, e) { if (e.target.closest('.qty')) return; S.cart.sel = Number(el.getAttribute('data-i')); renderCartOnly(); },
   qty: function (el) { changeQty(Number(el.getAttribute('data-i')), Number(el.getAttribute('data-d'))); },
   discount: function () {
     if (!S.cart.lines.length) return toast('ยังไม่มีสินค้าในบิล', true);
@@ -1444,19 +1571,19 @@ var ACTIONS = {
     $all('[data-k]', m).forEach(function (b) { b.style.height = '64px'; b.onclick = function () { closeModal(); askDiscount(b.getAttribute('data-k')); }; });
     $('[data-x=no]', m).onclick = function () { closeModal(); };
   },
-  editQty: function () {
-    var l = S.cart.lines[S.cart.sel];
-    if (!l) return toast('แตะเลือกรายการก่อน', true);
+  holdBill: holdBill,
+  editQty: function (el) {
+    var i = el && el.hasAttribute('data-i') ? Number(el.getAttribute('data-i')) : S.cart.sel;
+    var l = S.cart.lines[i];
+    if (!l) return;
+    S.cart.sel = i;
     prompt2('แก้จำนวน: ' + l.name, 'จำนวน (' + l.unitName + ')', String(l.qty), { type: 'number', inputmode: 'numeric' }).then(function (v) {
       if (v === null) return;
       var n = Math.round(Number(v));
       if (!(n >= 0)) return toast('จำนวนไม่ถูกต้อง', true);
-      changeQty(S.cart.sel, n - l.qty);
+      if (n === l.qty) return;
+      changeQty(i, n - l.qty);
     });
-  },
-  delLine: function () {
-    if (!S.cart.lines[S.cart.sel]) return toast('แตะเลือกรายการก่อน', true);
-    changeQty(S.cart.sel, -S.cart.lines[S.cart.sel].qty);
   },
   payQr: function () { openPay('qr'); },
   cashMoveModal: function () {
@@ -1627,6 +1754,7 @@ document.addEventListener('keydown', function (e) {
     } else if (e.key === 'ArrowDown' && S.suggest.length) { e.preventDefault(); S.suggestOn = Math.min(S.suggest.length - 1, S.suggestOn + 1); renderSuggest(); }
     else if (e.key === 'ArrowUp' && S.suggest.length) { e.preventDefault(); S.suggestOn = Math.max(0, S.suggestOn - 1); renderSuggest(); }
     else if (e.key === 'Escape') { clearScan(); }
+    else if (e.key === 'Delete' && !e.target.value && S.cart.lines[S.cart.sel]) { e.preventDefault(); askRemoveLine(S.cart.sel); }
   }
 });
 
