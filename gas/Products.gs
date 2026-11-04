@@ -23,8 +23,9 @@ function api_bootstrap(token) {
   });
 }
 
+/** All products incl. inactive (the products page can switch them back on); the sale screen filters by active. */
 function productsForClient_() {
-  return readAll_('Products').filter(function (p) { return bool_(p.active); }).map(productOut_);
+  return readAll_('Products').map(productOut_);
 }
 
 function productOut_(p) {

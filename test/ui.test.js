@@ -155,14 +155,57 @@ call('importProducts', T, [
   assert.match(await page.textContent('#report'), /เปิดลิ้นชัก/);
   await shot('08-report');
 
-  // 9. Stock + products pages render
+  // 9. Stock page, then products: list + side editor
   await page.click('nav button[data-v=stock]');
   await page.waitForFunction(() => document.querySelectorAll('#srows tr').length >= 3);
   await page.click('nav button[data-v=products]');
-  await page.waitForSelector('#prows tr');
-  await page.click('#prows tr:has-text("น้ำดื่ม")');
-  await page.waitForSelector('#codes tr');
+  await page.waitForSelector('#prows .prod-grid');
+  await page.click('#prows .prod-grid:has-text("น้ำดื่ม")');
+  await page.waitForSelector('.units .u:not(.head)');
+  assert.strictEqual(await page.locator('.units .u:not(.head)').count(), 2, 'water has piece + pack');
   await shot('09-product-edit');
+
+  // Scan an unknown barcode in the search box -> new product prefilled with that barcode
+  await page.fill('#pq', '8850999111222');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#e-name:focus');
+  await page.keyboard.type('ขนมปังไส้สังขยา');
+  await page.fill('#e-category', 'ขนม');
+  await page.fill('#e-cost', '10');
+  await page.fill('#e-price', '15');
+  await page.fill('#e-scan', '8850999111239');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-ec=multiplier][data-i="1"]:focus');
+  await page.keyboard.type('6');
+  await page.fill('[data-ec=price][data-i="1"]', '85');
+  await page.click('[data-ef=quickKey]');
+  await page.click('[data-ed=icon][data-v=bread]');
+  await page.click('[data-ed=color][data-v=tan]');
+  await page.fill('#e-quickKeyGroup', 'ขนม');
+  await shot('09b-product-new');
+  await page.click('[data-ed=save]');
+  await page.waitForSelector('#ped .muted:has-text("SKU P")');
+  const saved = call('bootstrap', T);
+  const bread = saved.products.find(p => p.name === 'ขนมปังไส้สังขยา');
+  assert.ok(bread && bread.price === 15 && bread.quickKey && bread.icon === 'bread', 'new product saved');
+  assert.deepStrictEqual(saved.barcodes.filter(b => b.sku === bread.sku).map(b => [b.unitName, b.multiplier, b.price]).sort(),
+    [['ชิ้น', 1, null], ['แพ็ค', 6, 85]], 'barcodes per unit');
+
+  // Sell it: pack barcode + quick key with SVG icon; edit qty; QR quick button
+  await page.click('nav button[data-v=sale]');
+  await page.click('.chip:has-text("ขนม")');
+  await page.waitForSelector('.key:has-text("ขนมปัง") svg');
+  await page.click('.key:has-text("ขนมปัง")');
+  await page.fill('#scan', '8850999111239'); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelectorAll('.line').length === 2);
+  await page.click('[data-act=editQty]');
+  await page.fill('#p2', '2'); await page.keyboard.press('Enter');
+  assert.match(await page.textContent('#totalbar .amt'), /185\.00/, '15 + 2 x 85');
+  await shot('09c-sale-icons');
+  await page.click('[data-act=payQr]');
+  await page.waitForSelector('#qrbox svg');
+  await page.click('[data-x=ok]');
+  await page.waitForSelector('.modal h1:has-text("บันทึกแล้ว")');
   await page.keyboard.press('Escape');
 
   // 10. Close shift
