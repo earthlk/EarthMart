@@ -37,7 +37,9 @@ function api_bootstrap(token) {
         return { barcode: String(b.barcode), sku: String(b.sku), unitName: b.unitName,
                  multiplier: num_(b.multiplier) || 1, price: b.price === '' ? null : num_(b.price) };
       }),
-      shift: openShiftForDevice_(s.deviceId)
+      shift: openShiftForDevice_(s.deviceId),
+      markdowns: activeMarkdowns_(),
+      expiryTodo: expiryTodoCount_()
     };
   });
 }
@@ -59,7 +61,7 @@ function productOut_(p) {
     cost: num_(p.cost), price: num_(p.price), minStock: num_(p.minStock), openPrice: bool_(p.openPrice),
     quickKey: bool_(p.quickKey), quickKeyGroup: p.quickKeyGroup || '', quickKeyOrder: num_(p.quickKeyOrder),
     icon: p.icon || '', color: p.color || '', plu: p.plu === '' ? '' : String(p.plu),
-    active: bool_(p.active), onHand: num_(p.onHand), forSale: forSale_(p)
+    active: bool_(p.active), onHand: num_(p.onHand), forSale: forSale_(p), trackExpiry: bool_(p.trackExpiry)
   };
 }
 
@@ -155,6 +157,7 @@ function saveProduct_(sess, input, barcodes, components) {
     // Cost comes from received lots (FIFO); a new product may start with a cost (e.g. from import) as a fallback.
     unit: String(input.unit || 'ชิ้น'), cost: type === 'recipe' ? recipeCost_(comps, bySku) : existing ? num_(existing.cost) : num_(input.cost), price: price,
     minStock: type === 'recipe' ? 0 : num_(input.minStock), forSale: type === 'recipe' ? true : input.forSale !== false,
+    trackExpiry: type === 'recipe' ? false : !!input.trackExpiry,
     openPrice: !!input.openPrice, quickKey: !!input.quickKey, quickKeyGroup: String(input.quickKeyGroup || ''),
     quickKeyOrder: num_(input.quickKeyOrder), icon: String(input.icon || ''), color: String(input.color || ''),
     plu: plu, active: input.active === undefined ? true : !!input.active,

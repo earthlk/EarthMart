@@ -385,4 +385,79 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   f4(/อนุมัติ/, 'stockCount', C5, { countUid: 'CNT-2', lines: [{ sku: B, counted: 1 }] });
 }
 
+// ===================== Expiry management =====================
+{
+  const h = makeContext({ now: '2026-11-05T03:00:00Z' });   // 10:00 Bangkok, 5 Nov
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c6 = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m6 = (fn, ...a) => { const r = c6(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  const f6 = (re, fn, ...a) => { const r = c6(fn, ...a); ok(!r.ok && re.test(r.error), fn + ' should fail ' + re + ' got ' + JSON.stringify(r)); };
+  h.createOwner('O', '1111');
+  const DEV = 'Dcounter6xxxxxxxxxx';
+  let T6 = m6('login', m6('status').users[0].userId, '1111', DEV).token;
+  m6('registerDevice', T6, DEV, 'เครื่อง');
+  m6('addUser', T6, 'แคช', 'cashier', '2222');
+  const cashId = m6('listUsers', T6).find(u => u.name === 'แคช').userId;
+  let C6 = m6('login', cashId, '2222', DEV).token;
+  const M = m6('saveProduct', T6, { name: 'นมเปรี้ยว', category: 'นม', type: 'nobarcode', price: 14, trackExpiry: true }, []).sku;
+  eq(m6('bootstrap', T6).products.find(p => p.sku === M).trackExpiry, true, 'trackExpiry saved');
+  f6(/วันหมดอายุ/, 'receive', T6, { receiptUid: 'E0', lines: [{ sku: M, qty: 5, unitCost: 10 }] });
+  m6('receive', T6, { receiptUid: 'E1', lines: [
+    { sku: M, qty: 6, unitCost: 10, expiryDate: '2026-11-05' },    // today
+    { sku: M, qty: 8, unitCost: 10, expiryDate: '2026-11-06' },    // tomorrow
+    { sku: M, qty: 10, unitCost: 10, expiryDate: '2026-11-15' }]}); // later
+  let ex = m6('expiryList', T6);
+  eq([ex.stats.expired, ex.stats.near, ex.todo.length], [1, 1, 2], 'today expired + tomorrow near (default 3 days)');
+  eq(m6('bootstrap', T6).expiryTodo, 2, 'nav badge count');
+  const today = ex.todo.find(r => r.todo === 'expired'), near = ex.todo.find(r => r.todo === 'near');
+
+  // markdown the near lot: staff, no PIN
+  f6(/ไม่เหลือแล้ว/, 'expiryAction', C6, { lotId: near.lotId, action: 'MARKDOWN', found: 0 });
+  m6('expiryAction', C6, { lotId: near.lotId, action: 'MARKDOWN', found: 5, pct: 30 });
+  ex = m6('expiryList', T6);
+  eq(ex.todo.map(r => r.todo), ['expired'], 'marked-down lot leaves the to-do list');
+  eq(ex.done[0].status, 'MARKDOWN', 'in done list');
+  const md = m6('bootstrap', T6).markdowns;
+  eq(md.map(x => [x.lotId, x.pct, x.left]), [[near.lotId, 30, 5]], 'markdown quota for the till');
+
+  // sell with the markdown — cashier, no approval
+  m6('openShift', C6, 0, '');
+  const s1 = m6('commitSale', C6, { saleUid: 'MD1', payMethod: 'qr', lines: [{ sku: M, qty: 4, markdownLotId: near.lotId, markdownQty: 3 }] });
+  eq([s1.subtotal, s1.discount, s1.total], [56, 12.6, 43.4], '3 pieces at -30% (14 x 3 x 0.3 = 12.60)');
+  eq(m6('bootstrap', T6).markdowns[0].left, 2, 'quota used');
+  f6(/อีก 2 ชิ้น/, 'commitSale', C6, { saleUid: 'MD2', payMethod: 'qr', lines: [{ sku: M, qty: 3, markdownLotId: near.lotId, markdownQty: 3 }] });
+  f6(/อนุมัติ/, 'commitSale', C6, { saleUid: 'MD3', payMethod: 'qr', lines: [{ sku: M, qty: 2, markdownLotId: near.lotId, markdownQty: 1, lineDiscount: 1 }] });
+  const a6 = m6('approve', C6, '1111', 'VOID');
+  m6('voidSale', C6, s1.billNo, 'ทดสอบ', a6.approvalId);
+  eq(m6('bootstrap', T6).markdowns[0].left, 5, 'void gives the quota back');
+  ok(m6('dailyReport', T6, '2026-11-05').exceptions.some(x => x.action === 'MARKDOWN'), 'markdown logged');
+
+  // close today's lot: nothing left on the shelf, no stock change
+  const before = m6('bootstrap', T6).products.find(p => p.sku === M).onHand;
+  m6('expiryAction', C6, { lotId: today.lotId, action: 'CLOSE', found: 0 });
+  eq(m6('bootstrap', T6).products.find(p => p.sku === M).onHand, before, 'close does not move stock');
+  eq(m6('expiryList', T6).todo.length, 0, 'nothing left to do today');
+
+  // next day the marked-down lot expires -> back on the list, write off what is left (cashier needs PIN)
+  h.__advance(86400000);
+  T6 = m6('login', m6('status').users.find(u => u.role === 'owner').userId, '1111', DEV).token;
+  C6 = m6('login', cashId, '2222', DEV).token;
+  ex = m6('expiryList', T6);
+  eq(ex.todo.map(r => [r.lotId, r.todo, r.status]), [[near.lotId, 'expired', 'MARKDOWN']], 'marked-down lot is due on its expiry day');
+  f6(/อนุมัติ/, 'expiryAction', C6, { lotId: near.lotId, action: 'WRITEOFF', found: 4 });
+  const ap = m6('approve', C6, '1111', 'STOCK_ADJUST');
+  const wo = m6('expiryAction', C6, { lotId: near.lotId, action: 'WRITEOFF', found: 4, approvalId: ap.approvalId });
+  eq(wo.cost, 40, 'write-off 4 @10 from that lot');
+  eq(m6('lots', T6, M).find(l => l.lotId === near.lotId).qtyLeft, 4, 'taken from the chosen lot (8 - 4)');
+  eq(m6('bootstrap', T6).markdowns.length, 0, 'quota cleared by write-off');
+  eq(m6('expiryList', T6).todo.length, 0, 'done');
+
+  // settings per category
+  const es = m6('saveExpirySettings', T6, { 'นม': 12, '*': 2 }, 40);
+  eq([es.warnDays['นม'], es.warnDays['*'], es.markdownPct], [12, 2, 40], 'expiry settings');
+  eq(m6('expiryList', T6).todo.map(r => r.expiryDate), ['2026-11-15'], 'milk now warned 12 days ahead');
+  f6(/เจ้าของ/, 'saveExpirySettings', C6, {}, 30);
+}
+
 console.log('server tests passed:', pass);

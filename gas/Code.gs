@@ -23,9 +23,10 @@ var SCHEMA = {
   Devices:    ['deviceId', 'name', 'type', 'registeredBy', 'registeredAt', 'active'],
   Products:   ['sku', 'name', 'category', 'type', 'unit', 'cost', 'price', 'minStock', 'openPrice',
                'quickKey', 'quickKeyGroup', 'quickKeyOrder', 'icon', 'color', 'plu', 'active', 'onHand', 'updatedAt',
-               'forSale'],
+               'forSale', 'trackExpiry'],
   Recipes:    ['sku', 'componentSku', 'qty'],
-  Lots:       ['lotId', 'sku', 'receivedAt', 'receiptNo', 'qtyIn', 'qtyLeft', 'unitCost', 'expiryDate', 'note'],
+  Lots:       ['lotId', 'sku', 'receivedAt', 'receiptNo', 'qtyIn', 'qtyLeft', 'unitCost', 'expiryDate', 'note',
+               'expStatus', 'expFound', 'markdownPct', 'markdownLeft', 'expBy', 'expAt'],
   LotUse:     ['createdAt', 'refNo', 'lotId', 'sku', 'qty', 'unitCost', 'note'],
   Receipts:   ['receiptNo', 'receiptUid', 'createdAt', 'supplier', 'invoiceNo', 'userId', 'itemsCount', 'pieces',
                'total', 'note'],
@@ -33,7 +34,7 @@ var SCHEMA = {
   Sales:      ['billNo', 'saleUid', 'createdAt', 'shiftId', 'deviceId', 'userId', 'itemsCount', 'subtotal',
                'discount', 'total', 'payMethod', 'received', 'change', 'status', 'voidReason', 'voidBy', 'voidAt'],
   SaleLines:  ['billNo', 'lineNo', 'sku', 'name', 'barcode', 'unitName', 'multiplier', 'qty', 'unitPrice',
-               'lineDiscount', 'lineTotal', 'cost'],
+               'lineDiscount', 'lineTotal', 'cost', 'markdownLotId', 'markdownQty', 'markdown'],
   StockMoves: ['moveId', 'createdAt', 'sku', 'qtyPieces', 'type', 'refNo', 'userId', 'note'],
   Shifts:     ['shiftId', 'deviceId', 'userId', 'openedAt', 'openingCash', 'closedAt', 'closedBy', 'cashSales',
                'qrSales', 'transferSales', 'cashIn', 'cashOut', 'expectedCash', 'countedCash', 'diff', 'billCount',
@@ -59,7 +60,10 @@ var DEFAULT_SETTINGS = {
   shopHours: '',
   customerWelcome: 'ยินดีต้อนรับค่ะ',
   customerPromoTitle: '',
-  customerPromoText: ''
+  customerPromoText: '',
+  expiryWarnDays: '{}',
+  expiryDefaultDays: '3',
+  markdownPct: '30'
 };
 
 /* ------------------------------------------------------------------ */
@@ -245,7 +249,7 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '3';
+var SCHEMA_VERSION = '4';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {

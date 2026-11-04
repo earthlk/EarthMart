@@ -376,6 +376,7 @@ function doLogin() {
 function boot() {
   return api('bootstrap', S.token).then(function (d) {
     S.user = d.user; S.isCounter = d.isCounter; S.settings = d.settings; S.shift = d.shift;
+    S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0;
     setCatalog(d.products, d.barcodes, d.recipes);
     applyTheme();
     newCart();
@@ -408,7 +409,7 @@ function setCatalog(products, barcodes, recipes) {
 }
 
 function reloadCatalog() {
-  return api('bootstrap', S.token).then(function (d) { setCatalog(d.products, d.barcodes, d.recipes); S.shift = d.shift; });
+  return api('bootstrap', S.token).then(function (d) { setCatalog(d.products, d.barcodes, d.recipes); S.shift = d.shift; S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0; });
 }
 
 function categories() {
@@ -422,7 +423,7 @@ function categories() {
 /* =================================================================== */
 
 var NAV = [
-  ['sale', 'ขาย'], ['bills', 'บิล'], ['products', 'สินค้า'], ['stock', 'สต็อก'], ['receive', 'รับสินค้า'],
+  ['sale', 'ขาย'], ['bills', 'บิล'], ['products', 'สินค้า'], ['stock', 'สต็อก'], ['expiry', 'หมดอายุ'], ['receive', 'รับสินค้า'],
   ['shift', 'กะ'], ['reports', 'รายงาน', 'owner'], ['settings', 'ตั้งค่า', 'owner']
 ];
 
@@ -434,6 +435,7 @@ function go(view) {
   if (view === 'products') renderProductRows();
   if (view === 'stock') loadStock();
   if (view === 'receive') loadReceive();
+  if (view === 'expiry') { S.expSel = null; loadExpiry(); }
   if (view === 'shift' && S.shift) loadShift();
   if (view === 'reports') loadReport();
   if (view === 'settings') loadSettings();
@@ -441,7 +443,8 @@ function go(view) {
 
 function frame(inner) {
   var nav = NAV.filter(function (n) { return !n[2] || (S.user && S.user.role === n[2]); }).map(function (n) {
-    return '<button data-act="go" data-v="' + n[0] + '" class="' + (S.view === n[0] ? 'on' : '') + '">' + n[1] + '</button>';
+    return '<button data-act="go" data-v="' + n[0] + '" class="' + (S.view === n[0] ? 'on' : '') + '">' + n[1] +
+      (n[0] === 'expiry' ? '<span class="badge">' + (S.expiryTodo || '') + '</span>' : '') + '</button>';
   }).join('');
   var shiftTxt = S.shift ? 'กะเปิด ' + timeOf(S.shift.openedAt) : (S.isCounter ? 'ยังไม่เปิดกะ' : 'ไม่ใช่เครื่องหน้าร้าน');
   var role = S.user && S.user.role === 'owner' ? 'เจ้าของ' : 'แคชเชียร์';
@@ -464,6 +467,7 @@ function render() {
     case 'products': html = frame(renderProducts()); break;
     case 'stock': html = frame(renderStock()); break;
     case 'receive': html = frame(renderReceive()); break;
+    case 'expiry': html = frame(renderExpiry()); break;
     case 'shift': html = frame(renderShift()); break;
     case 'reports': html = frame(renderReports()); break;
     case 'settings': html = frame(renderSettings()); break;
@@ -523,16 +527,40 @@ function cdPublish(mode, extra) {
   var st = Object.assign({
     mode: mode, shopName: S.settings.shopName, welcome: S.settings.customerWelcome, hours: S.settings.shopHours,
     promoTitle: S.settings.customerPromoTitle, promoText: S.settings.customerPromoText, thanks: S.settings.receiptFooter,
-    lines: S.cart.lines.map(function (l) { return { name: l.name + (l.multiplier > 1 ? ' (' + l.unitName + ')' : ''), qty: l.qty, total: round2(l.qty * l.unitPrice), discount: l.lineDiscount }; }),
+    lines: S.cart.lines.map(function (l) { return { name: l.name + (l.multiplier > 1 ? ' (' + l.unitName + ')' : ''), qty: l.qty, total: round2(l.qty * l.unitPrice), discount: ldTotal(l) }; }),
     last: last ? { name: last.name, price: last.unitPrice } : null,
     items: t.items, subtotal: t.subtotal, discount: t.discount, total: t.total
   }, extra || {});
   CustomerDisplay.pos.publish(st);
 }
 
+/* Near-expiry markdown on a sale line (set on the Expiry page; no PIN needed at the till). */
+function mdAmt(l) { return l.md ? round2(l.unitPrice * l.md.qty * l.md.pct / 100) : 0; }
+function ldTotal(l) { return round2((l.lineDiscount || 0) + mdAmt(l)); }
+
+/** Markdown quota for this sku still free in the cart (excluding line `skip`). */
+function mdFor(sku, skip) {
+  var m = (S.markdowns || []).filter(function (x) { return x.sku === sku; }).sort(function (a, b) { return a.expiryDate < b.expiryDate ? -1 : 1; })[0];
+  if (!m) return null;
+  var used = 0;
+  S.cart.lines.forEach(function (l, i) { if (i !== skip && l.md && l.md.lotId === m.lotId) used += l.md.qty; });
+  return { lotId: m.lotId, pct: m.pct, left: m.left - used };
+}
+
+function toggleMd(i) {
+  var l = S.cart.lines[i];
+  if (!l) return;
+  if (l.md) { l.md = null; return renderCartOnly(); }
+  var m = mdFor(l.sku, i);
+  if (!m || m.left < 1) return toast('ไม่เหลือโควตาราคาลดของสินค้านี้', true);
+  l.md = { lotId: m.lotId, pct: m.pct, qty: Math.min(l.qty, m.left) };
+  if (l.lineDiscount + mdAmt(l) > l.qty * l.unitPrice) l.lineDiscount = 0;
+  renderCartOnly();
+}
+
 function cartTotals() {
   var sub = 0, ld = 0, items = 0;
-  S.cart.lines.forEach(function (l) { sub += l.qty * l.unitPrice; ld += l.lineDiscount; items += l.qty * (l.multiplier || 1); });
+  S.cart.lines.forEach(function (l) { sub += l.qty * l.unitPrice; ld += ldTotal(l); items += l.qty * (l.multiplier || 1); });
   sub = round2(sub);
   var disc = round2(ld + S.cart.billDiscount);
   return { subtotal: sub, discount: disc, total: round2(sub - disc), items: items };
@@ -609,12 +637,15 @@ function renderCartOnly() {
   if (!box) return;
   if (!S.cart.lines.length) box.innerHTML = '<div class="empty">สแกนสินค้าหรือแตะปุ่มด้านขวาเพื่อเริ่มบิล</div>';
   else box.innerHTML = S.cart.lines.map(function (l, i) {
+    var m = l.multiplier === 1 ? mdFor(l.sku, i) : null;
+    var mdChip = l.md ? '<button class="mdchip on" data-act="toggleMd" data-i="' + i + '" title="แตะเพื่อยกเลิก">ราคาลด −' + l.md.pct + '% × ' + l.md.qty + ' ✕</button>'
+      : m && m.left > 0 ? '<button class="mdchip" data-act="toggleMd" data-i="' + i + '">ใช้ราคาลด −' + m.pct + '% (เหลือ ' + m.left + ')</button>' : '';
     return '<div class="swipe" data-i="' + i + '"><div class="swipe-bg">ลบ</div><div class="line ' + (i === S.cart.sel ? 'sel' : '') + '" data-act="selLine" data-i="' + i + '">' +
       '<div><div class="name">' + esc(l.name) + '</div><div class="sub">' + (S.recipes[l.sku] ? 'สูตร: ' + esc(recipeText(l.sku)) : esc(l.unitName) + (l.multiplier > 1 ? ' (' + l.multiplier + ' ชิ้น)' : '')) +
-      ' · ฿' + money(l.unitPrice) + '</div></div>' +
+      ' · ฿' + money(l.unitPrice) + '</div>' + mdChip + '</div>' +
       '<div class="qty"><button data-act="qty" data-i="' + i + '" data-d="-1" aria-label="ลด">−</button><button class="n num" data-act="editQty" data-i="' + i + '" aria-label="พิมพ์จำนวน">' + l.qty +
       '</button><button data-act="qty" data-i="' + i + '" data-d="1" aria-label="เพิ่ม">+</button></div>' +
-      '<div class="r num">' + (l.lineDiscount ? '<div class="was">' + money(l.qty * l.unitPrice) + '</div>' : '') + '<b>' + money(l.qty * l.unitPrice - l.lineDiscount) + '</b></div>' +
+      '<div class="r num">' + (ldTotal(l) ? '<div class="was">' + money(l.qty * l.unitPrice) + '</div>' : '') + '<b>' + money(l.qty * l.unitPrice - ldTotal(l)) + '</b></div>' +
       '<button class="ldisc' + (l.lineDiscount ? ' on' : '') + '" data-act="lineDisc" data-i="' + i + '" aria-label="ส่วนลดรายการ ' + esc(l.name) + '" title="ส่วนลดรายการนี้">' +
       (l.lineDiscount ? '−' + money(l.lineDiscount).replace(/\.00$/, '') : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>') +
       '</button></div></div>';
@@ -649,7 +680,8 @@ function changeQty(i, d) {
   if (l.qty + d <= 0) return askRemoveLine(i);
   l.qty += d;
   if (l.qty <= 0) S.cart.lines.splice(i, 1);
-  if (l.lineDiscount > l.qty * l.unitPrice) l.lineDiscount = 0;
+  if (l.md) l.md.qty = Math.min(l.md.qty, l.qty);
+  if (ldTotal(l) > l.qty * l.unitPrice) l.lineDiscount = 0;
   S.cart.sel = Math.min(i, S.cart.lines.length - 1);
   renderCartOnly();
 }
@@ -657,7 +689,7 @@ function changeQty(i, d) {
 function askRemoveLine(i) {
   var l = S.cart.lines[i];
   if (!l) return Promise.resolve(false);
-  return confirm2('ลบรายการ', l.name + ' × ' + l.qty + ' (฿' + money(l.qty * l.unitPrice - l.lineDiscount) + ')', 'ลบรายการ', true).then(function (ok) {
+  return confirm2('ลบรายการ', l.name + ' × ' + l.qty + ' (฿' + money(l.qty * l.unitPrice - ldTotal(l)) + ')', 'ลบรายการ', true).then(function (ok) {
     if (ok) {
       S.cart.lines.splice(i, 1);
       S.cart.sel = Math.min(i, S.cart.lines.length - 1);
@@ -673,7 +705,7 @@ function askRemoveLine(i) {
   var TH = 90;
   document.addEventListener('pointerdown', function (e) {
     var w = e.target.closest('.swipe');
-    if (!w || e.target.closest('.qty, .ldisc') || e.button > 0) return;
+    if (!w || e.target.closest('.qty, .ldisc, .mdchip') || e.button > 0) return;
     sw = { w: w, line: $('.line', w), x: e.clientX, y: e.clientY, dx: 0, on: false, id: e.pointerId };
   });
   document.addEventListener('pointermove', function (e) {
@@ -726,7 +758,7 @@ function holdBill() {
   var m = openModal('<header><h1>พักบิล</h1><span class="muted">' + held.length + ' บิลที่พักไว้</span></header><div class="body">' +
     (t ? '<button class="btn primary" data-x="park" style="height:52px">พักบิลนี้ (฿' + money(t.total) + ') แล้วเริ่มบิลใหม่</button>' : '') +
     '<div class="col" style="gap:8px">' + held.map(function (h, i) {
-      var tot = h.lines.reduce(function (a, l) { return a + l.qty * l.unitPrice - l.lineDiscount; }, 0) - (h.billDiscount || 0);
+      var tot = h.lines.reduce(function (a, l) { return a + l.qty * l.unitPrice - ldTotal(l); }, 0) - (h.billDiscount || 0);
       return '<div class="card row" style="padding:10px 12px;gap:10px"><div class="grow"><b>' + esc(h.note || ('บิลพัก ' + timeOf(h.at))) + '</b>' +
         '<div class="muted" style="font-size:13px">' + timeOf(h.at) + ' · ' + h.lines.length + ' รายการ · ' + esc(h.lines.slice(0, 3).map(function (l) { return l.name; }).join(', ')) + (h.lines.length > 3 ? '…' : '') + '</div></div>' +
         '<b class="num">฿' + money(tot) + '</b><button class="btn sm" data-x="recall" data-i="' + i + '">เรียกคืน</button>' +
@@ -782,7 +814,7 @@ function askDiscount(kind) {
   if (kind === 'line' && !line) return toast('แตะเลือกรายการก่อน', true);
   var t = cartTotals();
   // A bill discount applies to what is left after line discounts.
-  var base = line ? round2(line.qty * line.unitPrice) : round2(t.subtotal - (t.discount - S.cart.billDiscount));
+  var base = line ? round2(line.qty * line.unitPrice - mdAmt(line)) : round2(t.subtotal - (t.discount - S.cart.billDiscount));
   var cur = line ? line.lineDiscount : S.cart.billDiscount;
   var mode = 'baht';
   var val = cur ? String(cur) : '';
@@ -929,7 +961,8 @@ function openPay(initial) {
       saleUid: S.cart.saleUid, payMethod: method, received: received, billDiscount: S.cart.billDiscount,
       approvalId: S.cart.approvalId,
       lines: S.cart.lines.map(function (l) {
-        return { sku: l.sku, barcode: l.barcode, qty: l.qty, unitPrice: l.openPrice ? l.unitPrice : undefined, lineDiscount: l.lineDiscount };
+        return { sku: l.sku, barcode: l.barcode, qty: l.qty, unitPrice: l.openPrice ? l.unitPrice : undefined, lineDiscount: l.lineDiscount,
+          markdownLotId: l.md ? l.md.lotId : undefined, markdownQty: l.md ? l.md.qty : undefined };
       })
     };
     api('commitSale', S.token, sale).then(function (rc) {
@@ -1163,7 +1196,7 @@ function selectProduct(sku) {
       var p = sku ? S.idx.bySku[sku] : null;
       S.ed = {
         p: p ? Object.assign({}, p) : { sku: '', name: '', category: S.prodFilter.cat || '', type: 'barcode', unit: 'ชิ้น', cost: '', price: '', minStock: '',
-          openPrice: false, quickKey: false, quickKeyGroup: '', quickKeyOrder: '', icon: '', color: 'gray', plu: '', active: true, forSale: true },
+          openPrice: false, quickKey: false, quickKeyGroup: '', quickKeyOrder: '', icon: '', color: 'gray', plu: '', active: true, forSale: true, trackExpiry: false },
         codes: p ? codesOf(sku).map(function (b) { return Object.assign({}, b); }) : [],
         comps: p && S.recipes[sku] ? S.recipes[sku].map(function (c) { return { sku: c.sku, qty: c.qty }; }) : [],
         dirty: false
@@ -1246,6 +1279,7 @@ function drawEditor() {
       '<div class="hintbox">' + (hint.length ? hint.join(' · ') + ' · ' : 'รับของ: สแกนบาร์โค้ดลัง = เพิ่มสต็อกตามจำนวนชิ้นในลัง · ') + 'สต็อกเก็บเป็นชิ้นเสมอ · ราคาขายเว้นว่าง = ราคาชิ้น × จำนวน</div>'
       : '<div class="hintbox">' + (p.forSale === false ? 'วัตถุดิบ — ใช้เป็นส่วนประกอบของสูตรผสม ไม่ขึ้นที่หน้าขาย' : 'ขายด้วย PLU (พิมพ์ในช่องสแกน) หรือปุ่มขายด่วน') + '</div>') +
     (isRecipe ? '' : '<label class="checkrow"><input type="checkbox" data-ef="forSaleOff" ' + (p.forSale === false ? 'checked' : '') + '> วัตถุดิบ / ของใช้ในร้าน — ไม่ขายหน้าร้าน (เช่น ฝา หลอด ถุง)</label>') +
+    (isRecipe ? '' : '<label class="checkrow"><input type="checkbox" data-ef="trackExpiry" ' + (p.trackExpiry ? 'checked' : '') + '> ติดตามวันหมดอายุ — ต้องใส่วันหมดอายุตอนรับสินค้า แล้วเตือนในหน้า "หมดอายุ"</label>') +
     (p.forSale === false && !isRecipe ? '' : '<div class="sec-title"><b>ปุ่มขายด่วน</b><label class="checkrow"><input type="checkbox" data-ef="quickKey" ' + (p.quickKey ? 'checked' : '') + '> แสดงบนหน้าขาย</label></div>' +
     (p.quickKey ?
       '<div class="row" style="align-items:flex-end"><span class="key" style="width:120px;height:104px;flex:0 0 120px;cursor:default"><span class="ic" style="background:' + c[0] + ';color:' + c[1] + '">' + iconHtml(p) + '</span>' +
@@ -1314,6 +1348,7 @@ function edAddComp(sku) {
 function edInput(t) {
   if (!S.ed) return;
   var k = t.getAttribute('data-ef'), ck = t.getAttribute('data-ec'), cc = t.getAttribute('data-ecc');
+  if (k === 'trackExpiry') { S.ed.p.trackExpiry = t.checked; S.ed.dirty = true; return; }
   if (k === 'forSaleOff') {
     S.ed.p.forSale = !t.checked;
     if (t.checked) { S.ed.p.quickKey = false; }
@@ -1392,7 +1427,7 @@ function saveEditor() {
     if (!(m >= 1) || Math.round(m) !== m) { toast('ใส่จำนวนชิ้นของหน่วย "' + (codes[i].unitName || codes[i].barcode) + '"', true); var inp = $('[data-ec=multiplier][data-i="' + S.ed.codes.indexOf(codes[i]) + '"]'); if (inp) inp.focus(); return; }
     if (!String(codes[i].unitName).trim()) { toast('ใส่ชื่อหน่วยของบาร์โค้ด ' + codes[i].barcode, true); return; }
   }
-  var payload = Object.assign({}, p, { forSale: p.forSale !== false, price: p.forSale === false ? 0 : Number(p.price) || 0, cost: Number(p.cost) || 0, minStock: Number(p.minStock) || 0, quickKeyOrder: Number(p.quickKeyOrder) || 0 });
+  var payload = Object.assign({}, p, { forSale: p.forSale !== false, trackExpiry: !!p.trackExpiry, price: p.forSale === false ? 0 : Number(p.price) || 0, cost: Number(p.cost) || 0, minStock: Number(p.minStock) || 0, quickKeyOrder: Number(p.quickKeyOrder) || 0 });
   api('saveProduct', S.token, payload, codes.map(function (c) {
     return { barcode: String(c.barcode).trim(), unitName: String(c.unitName).trim(), multiplier: Number(c.multiplier), price: c.price === null || c.price === '' ? null : Number(c.price) };
   }), p.type === 'recipe' ? S.ed.comps.map(function (c) { return { sku: c.sku, qty: Number(c.qty) }; }) : []).then(function (r) {
@@ -1533,8 +1568,9 @@ function drawRcLines() {
     var c = rcRowCalc(l);
     var units = rcUnits(l.sku);
     return '<div class="rcv-grid" data-row="' + i + '"><div style="min-width:0"><div style="font-weight:600">' + esc(p.name) + '</div>' +
-      '<div class="row" style="gap:6px;margin-top:3px"><label for="rx' + i + '" style="font-size:12px;white-space:nowrap">หมดอายุ</label>' +
-      '<input id="rx' + i + '" type="date" data-rc="expiryDate" data-i="' + i + '" value="' + esc(l.expiryDate) + '" style="height:30px;font-size:13px;width:150px;padding:0 6px"></div></div>' +
+      '<div class="row" style="gap:6px;margin-top:3px"><label for="rx' + i + '" style="font-size:12px;white-space:nowrap' + (p.trackExpiry ? ';color:var(--warn);font-weight:600' : '') + '">หมดอายุ' + (p.trackExpiry ? ' *' : '') + '</label>' +
+      '<input id="rx' + i + '" type="date" data-rc="expiryDate" data-i="' + i + '" value="' + esc(l.expiryDate) + '"' + (p.trackExpiry ? ' required aria-required="true"' : '') +
+      ' style="height:30px;font-size:13px;width:150px;padding:0 6px' + (p.trackExpiry && !l.expiryDate ? ';border-color:var(--warn)' : '') + '"></div></div>' +
       '<div><label class="sr" for="ru' + i + '">หน่วย</label><select id="ru' + i + '" data-rc="unit" data-i="' + i + '" style="height:36px;width:100%;font-size:14px">' + units.map(function (u) {
         return '<option value="' + u.mult + '"' + (u.mult === l.mult ? ' selected' : '') + '>' + esc(u.unitName) + (u.mult > 1 ? ' × ' + u.mult : '') + '</option>';
       }).join('') + '</select></div>' +
@@ -1695,12 +1731,146 @@ function showLots(sku) {
 }
 
 /* =================================================================== */
+/* Expiry management (จัดการสินค้าหมดอายุ)                                */
+/* =================================================================== */
+
+function thDate(ymd) {
+  var M = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  var d = String(ymd || '').slice(0, 10).split('-');
+  return d.length === 3 ? Number(d[2]) + ' ' + M[Number(d[1]) - 1] : '';
+}
+
+function renderExpiry() {
+  var tab = S.expTab || 'todo';
+  return '<div class="page"><div class="exp"><div class="exp-main"><div class="kpis" id="xkpi"></div>' +
+    '<section class="card stk-main"><div class="tabs"><button class="tab' + (tab === 'todo' ? ' on' : '') + '" data-act="expTab" data-t="todo" id="xtab-todo">ต้องจัดการ</button>' +
+    '<button class="tab' + (tab === 'done' ? ' on' : '') + '" data-act="expTab" data-t="done">จัดการแล้ว</button><span class="grow"></span>' +
+    '<span class="muted" style="align-self:center;font-size:13px;padding-right:6px">เตือนตามวันที่ ไม่ขึ้นกับจำนวนคงเหลือ</span></div>' +
+    '<div class="exp-grid head"><div>สินค้า</div><div>ล็อต (วันรับ · จำนวนรับ)</div><div>หมดอายุ</div><div class="r">จัดการ</div></div>' +
+    '<div class="stk-rows" id="xrows"><div class="empty">กำลังโหลด…</div></div></section></div>' +
+    '<aside class="stk-side"><div class="card pad" id="xact"></div><div class="card pad" id="xset"></div></aside></div></div>';
+}
+
+function loadExpiry() {
+  api('expiryList', S.token).then(function (d) {
+    S.exp = d;
+    S.expiryTodo = d.todo.length;
+    var nb = $('nav [data-v=expiry] .badge'); if (nb) nb.textContent = d.todo.length || '';
+    drawExpiry();
+  }).catch(fail);
+}
+
+function drawExpiry() {
+  var d = S.exp;
+  if (!d) return;
+  var k = $('#xkpi');
+  if (k) {
+    var c = function (label, v, cls) { return '<div class="card kpi"' + (cls === 'warn' ? ' style="background:var(--warn-soft);border-color:var(--warn-line)"' : '') + '><div class="' + (cls === 'warn' ? 'warn-text' : cls === 'amber' ? 'amber-text' : 'muted') + '">' + label + '</div><div class="v num' + (cls === 'warn' ? ' warn-text' : '') + '">' + v + '</div></div>'; };
+    k.innerHTML = c('หมดอายุ · ต้องเก็บออก', d.stats.expired + ' ล็อต', 'warn') + c('ใกล้หมดอายุ · ควรลดราคา', d.stats.near + ' ล็อต', 'amber') +
+      c('จัดการแล้ววันนี้', d.stats.doneToday + ' ล็อต') + c('ตัดเสียเดือนนี้', '฿' + money(d.stats.lossMonth));
+  }
+  var t = $('#xtab-todo'); if (t) t.textContent = 'ต้องจัดการ (' + d.todo.length + ')';
+  var box = $('#xrows');
+  if (box) {
+    var row = function (r) {
+      var badge = r.daysLeft < 0 ? 'เลยมา ' + (-r.daysLeft) + ' วัน' : r.daysLeft === 0 ? 'วันนี้' : r.daysLeft === 1 ? 'พรุ่งนี้' : 'อีก ' + r.daysLeft + ' วัน';
+      var exp = r.todo === 'expired' || r.daysLeft <= 0;
+      var acts = S.expTab === 'done' ? '<span class="tag ' + (r.status === 'MARKDOWN' ? 'green' : 'gray') + '">' +
+          ({ MARKDOWN: 'ลดราคา −' + r.markdownPct + '% · เหลือ ' + r.markdownLeft, WRITEOFF: 'ตัดเสีย ' + r.found, CLOSED: 'ไม่เหลือแล้ว' }[r.status] || r.status) + '</span>' +
+          '<span class="muted" style="font-size:12px">' + esc(r.by) + '</span>'
+        : (exp ? '<button class="btn sm warn" data-act="expPick" data-lot="' + esc(r.lotId) + '" data-a="WRITEOFF">ตัดเสีย</button>'
+          : '<button class="btn sm outline" data-act="expPick" data-lot="' + esc(r.lotId) + '" data-a="MARKDOWN">ลดราคา</button><button class="btn sm" data-act="expPick" data-lot="' + esc(r.lotId) + '" data-a="WRITEOFF">ตัดเสีย</button>') +
+          '<button class="btn sm" data-act="expPick" data-lot="' + esc(r.lotId) + '" data-a="CLOSE">ไม่เหลือแล้ว</button>';
+      return '<div class="exp-grid' + (S.expSel && S.expSel.lotId === r.lotId ? ' on' : '') + '"><div><div style="font-weight:600">' + esc(r.name) + '</div><div class="muted" style="font-size:12px">' + esc(r.category) +
+        (r.status === 'MARKDOWN' && S.expTab !== 'done' ? ' · ลดราคาอยู่ −' + r.markdownPct + '%' : '') + '</div></div>' +
+        '<div style="font-size:14px">' + thDate(r.receivedAt instanceof Date ? r.receivedAt : String(r.receivedAt).slice(0, 10)) + ' · ' + r.qtyIn + ' ' + esc(r.unit) +
+        '<div class="muted" style="font-size:12px">' + esc(r.receiptNo) + ' · ในระบบเหลือ ' + r.qtyLeft + '</div></div>' +
+        '<div><span class="tag ' + (exp ? 'warn' : 'amber') + '">' + thDate(r.expiryDate) + ' · ' + badge + '</span></div>' +
+        '<div class="row" style="justify-content:flex-end;gap:6px;flex-wrap:wrap">' + acts + '</div></div>';
+    };
+    if (S.expTab === 'done') box.innerHTML = d.done.length ? d.done.map(row).join('') : '<div class="empty">ยังไม่มี</div>';
+    else {
+      var ex = d.todo.filter(function (r) { return r.todo === 'expired'; }), nr = d.todo.filter(function (r) { return r.todo === 'near'; });
+      box.innerHTML = (ex.length ? '<div class="exp-sec warn">หมดอายุ · เก็บออกจากชั้น</div>' + ex.map(row).join('') : '') +
+        (nr.length ? '<div class="exp-sec amber">ใกล้หมดอายุ · ลดราคา</div>' + nr.map(row).join('') : '') +
+        (d.todo.length ? '' : '<div class="empty">ไม่มีล็อตที่ต้องจัดการ 🎉<br><span style="font-size:13px">ล็อตจะขึ้นที่นี่ตามวันหมดอายุที่ใส่ตอนรับสินค้า</span></div>').replace(' 🎉', '');
+    }
+  }
+  drawExpAction();
+  drawExpSettings();
+}
+
+function drawExpAction() {
+  var box = $('#xact');
+  if (!box) return;
+  var sel = S.expSel;
+  var r = sel && S.exp ? S.exp.todo.concat(S.exp.done).filter(function (x) { return x.lotId === sel.lotId; })[0] : null;
+  if (!r) {
+    box.innerHTML = '<h2>จัดการล็อต</h2><div class="muted" style="font-size:14px">เลือก "ลดราคา", "ตัดเสีย" หรือ "ไม่เหลือแล้ว" จากรายการ แล้วนับของล็อตนั้นที่เหลือบนชั้นจริง</div>';
+    return;
+  }
+  var a = sel.action, pct = sel.pct || S.exp.markdownPct;
+  var newPrice = round2(r.price * (100 - pct) / 100);
+  box.innerHTML = '<div><h2 style="margin:0">' + esc(r.name) + '</h2><div class="muted" style="font-size:13px">ล็อตรับ ' + thDate(String(r.receivedAt).slice(0, 10)) + ' · หมดอายุ ' + thDate(r.expiryDate) +
+    ' (' + (r.daysLeft <= 0 ? 'หมดแล้ว' : 'อีก ' + r.daysLeft + ' วัน') + ')</div></div>' +
+    '<div class="seg-sm">' + [['MARKDOWN', 'ลดราคา'], ['WRITEOFF', 'ตัดเสีย'], ['CLOSE', 'ไม่เหลือแล้ว']].map(function (x) {
+      var dis = x[0] === 'MARKDOWN' && r.daysLeft <= 0;
+      return '<button class="' + (a === x[0] ? 'on' : '') + '" data-act="expAct" data-a="' + x[0] + '"' + (dis ? ' disabled title="หมดอายุแล้ว ขายไม่ได้"' : '') + '>' + x[1] + '</button>';
+    }).join('') + '</div>' +
+    (a === 'CLOSE' ? '<div class="hintbox">ของล็อตนี้ไม่เหลือบนชั้นแล้ว (ขายหมด) — ปิดการแจ้งเตือน ไม่ปรับสต็อก</div>' :
+      '<div class="field"><label for="xq">ของล็อตนี้ที่เหลือบนชั้น (นับจริง)</label><div class="row"><button class="btn" data-act="expStep" data-d="-1" aria-label="ลดจำนวน" style="width:46px">−</button>' +
+      '<input id="xq" data-xq type="number" min="0" inputmode="numeric" value="' + sel.found + '" style="flex:1;height:44px;font-size:20px;font-weight:700;text-align:center">' +
+      '<button class="btn" data-act="expStep" data-d="1" aria-label="เพิ่มจำนวน" style="width:46px">+</button></div></div>') +
+    (a === 'MARKDOWN' ? '<div class="field"><label>ส่วนลด</label><div class="row">' + [20, 30, 50].map(function (p) {
+        return '<button class="chip' + (pct === p ? ' on' : '') + '" data-act="expPct" data-p="' + p + '" style="flex:1">' + p + '%</button>';
+      }).join('') + '</div></div>' +
+      '<div class="row" style="justify-content:space-between;padding:10px 12px;background:var(--bg);border-radius:8px"><span>ราคาใหม่</span><span><span class="muted" style="text-decoration:line-through">฿' + money(r.price) +
+      '</span> <b class="brand-text" style="font-size:20px">฿' + money(newPrice) + '</b></span></div>' +
+      '<div class="muted" style="font-size:13px;line-height:1.5">แปะสติกเกอร์ "ลดราคา" ' + sel.found + ' ชิ้น · แคชเชียร์สแกนตามปกติ แล้วกดปุ่ม "−' + pct + '%" ที่แถวสินค้าในหน้าขาย (ไม่ต้องใช้ PIN)</div>' : '') +
+    (a === 'WRITEOFF' ? '<div class="row" style="justify-content:space-between;padding:10px 12px;background:var(--bg);border-radius:8px"><span>ทุนที่สูญเสีย (ประมาณ)</span><b class="num">฿' +
+      money(Math.min(sel.found, r.qtyLeft) * r.unitCost) + '</b></div>' : '') +
+    '<button class="btn primary" data-act="expSave" style="height:46px">' + ({ MARKDOWN: 'บันทึก · เปิดราคาลดให้ล็อตนี้', WRITEOFF: 'บันทึก · ตัดสต็อกล็อตนี้', CLOSE: 'บันทึก · ไม่เหลือแล้ว' }[a]) + '</button>';
+}
+
+function drawExpSettings() {
+  var box = $('#xset');
+  if (!box || !S.exp) return;
+  var owner = S.user.role === 'owner';
+  var w = S.exp.warnDays;
+  var cats = categories().filter(function (c) { return S.products.some(function (p) { return p.category === c && p.trackExpiry; }) || w[c] !== undefined; });
+  box.innerHTML = '<h2 style="margin:0">เตือนล่วงหน้า (ตามหมวด)</h2>' +
+    cats.map(function (c) {
+      return '<div class="row" style="justify-content:space-between"><span>' + esc(c) + '</span>' + (owner ? '<span class="row" style="gap:4px"><input data-xw="' + esc(c) + '" type="number" min="0" max="60" value="' +
+        (w[c] !== undefined ? w[c] : '') + '" placeholder="' + w['*'] + '" aria-label="วันเตือน ' + esc(c) + '" style="width:64px;height:34px;text-align:right"> วัน</span>' : '<b>' + (w[c] !== undefined ? w[c] : w['*']) + ' วัน</b>') + '</div>';
+    }).join('') +
+    '<div class="row" style="justify-content:space-between;border-top:1px solid var(--line-soft);padding-top:6px"><span>หมวดอื่น ๆ</span>' + (owner ? '<span class="row" style="gap:4px"><input data-xw="*" type="number" min="0" max="60" value="' + w['*'] + '" aria-label="วันเตือนค่าเริ่มต้น" style="width:64px;height:34px;text-align:right"> วัน</span>' : '<b>' + w['*'] + ' วัน</b>') + '</div>' +
+    '<div class="row" style="justify-content:space-between"><span>ส่วนลดเริ่มต้น</span>' + (owner ? '<span class="row" style="gap:4px"><input id="xpct" type="number" min="1" max="99" value="' + S.exp.markdownPct + '" aria-label="ส่วนลดเริ่มต้น" style="width:64px;height:34px;text-align:right"> %</span>' : '<b>' + S.exp.markdownPct + '%</b>') + '</div>' +
+    (owner ? '<button class="btn sm" data-act="expSaveSet" style="align-self:flex-end">บันทึกการเตือน</button>' : '') +
+    '<div class="muted" style="font-size:12px">หมวดจะขึ้นที่นี่เมื่อมีสินค้าที่ติ๊ก "ติดตามวันหมดอายุ"</div>';
+}
+
+function expSave() {
+  var sel = S.expSel, a = sel.action;
+  var found = Number(sel.found) || 0;
+  var go = function (approvalId) {
+    return api('expiryAction', S.token, { lotId: sel.lotId, action: a, found: a === 'CLOSE' ? 0 : found, pct: sel.pct || S.exp.markdownPct, approvalId: approvalId || '' }).then(function (r) {
+      toast(a === 'MARKDOWN' ? 'เปิดราคาลดแล้ว ' + found + ' ชิ้น' : a === 'WRITEOFF' ? 'ตัดสต็อกแล้ว · ทุน ฿' + money(r.cost || 0) : 'ปิดการแจ้งเตือนแล้ว');
+      S.expSel = null;
+      return reloadCatalog().then(loadExpiry);
+    });
+  };
+  if (a === 'WRITEOFF' && found > 0) {
+    approval('STOCK_ADJUST', 'อนุมัติตัดของหมดอายุ').then(function (id) { if (id !== null) return go(id); }).catch(fail);
+  } else go('').catch(fail);
+}
+
+/* =================================================================== */
 /* Stock                                                               */
 /* =================================================================== */
 
 var stockRows = [];
 var MOVE_TH = { OPEN: 'สต็อกเปิด', RECEIVE: 'รับเข้า', SALE: 'ขาย', VOID: 'ยกเลิกบิล', ADJUST: 'ปรับยอด/ตรวจนับ', WRITEOFF: 'ตัดเสีย' };
-var WO_REASONS = ['หมดอายุ', 'เสียหาย', 'สูญหาย', 'ใช้ในร้าน'];
+var WO_REASONS = ['เสียหาย', 'สูญหาย', 'ใช้ในร้าน'];
 
 function renderStock() {
   var tab = S.stockTab || 'list';
@@ -1709,7 +1879,7 @@ function renderStock() {
   }).join('');
   return '<div class="page" style="flex-direction:column"><div class="kpis" id="skpi"></div>' +
     '<div class="stk"><section class="card stk-main"><div class="tabs">' + tabs + '</div><div id="stab" class="stk-tab"></div></section>' +
-    '<aside class="stk-side"><div class="card pad" id="swo"></div><div class="card pad" id="sexp"><span class="muted">กำลังโหลด…</span></div></aside></div></div>';
+    '<aside class="stk-side"><div class="card pad" id="swo"></div><button class="card pad exp-link" id="sexp" data-act="goExpiry"></button></aside></div></div>';
 }
 
 function loadStock() {
@@ -1717,6 +1887,7 @@ function loadStock() {
   drawWriteOff();
   Promise.all([api('stockList', S.token), api('stockOverview', S.token, 7)]).then(function (r) {
     stockRows = r[0]; S.ov = r[1];
+    if (S.ov.expiryTodo !== undefined) { S.expiryTodo = S.ov.expiryTodo; var nb = $('nav [data-v=expiry] .badge'); if (nb) nb.textContent = S.expiryTodo || ''; }
     drawStockKpis(); drawStockTab(); drawExpiring();
   }).catch(fail);
 }
@@ -1898,10 +2069,10 @@ function cntCommit() {
 function drawWriteOff() {
   var box = $('#swo');
   if (!box) return;
-  var w = S.wo = S.wo || { sku: '', qty: '', reason: 'หมดอายุ', lotId: '' };
+  var w = S.wo = S.wo || { sku: '', qty: '', reason: 'เสียหาย', lotId: '' };
   var p = w.sku ? S.idx.bySku[w.sku] : null;
   var est = p ? round2((Number(w.qty) || 0) * p.cost) : 0;
-  box.innerHTML = '<h2>ตัดของเสีย / หมดอายุ</h2>' +
+  box.innerHTML = '<h2>ตัดของเสีย</h2>' +
     '<div class="field" style="position:relative"><label for="wo-q">สินค้า</label>' +
     (p ? '<div class="row" style="justify-content:space-between;border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px"><b>' + esc(p.name) + '</b>' +
       (w.lotId ? '<span class="tag amber">เฉพาะล็อตนี้</span>' : '') + '<button class="btn sm ghost" data-act="woClear" aria-label="เปลี่ยนสินค้า">เปลี่ยน</button></div>'
@@ -1944,22 +2115,12 @@ function woCommit() {
   }).catch(fail);
 }
 
-function expiryText(l) {
-  return l.daysLeft < 0 ? 'หมดอายุแล้ว ' + (-l.daysLeft) + ' วัน' : l.daysLeft === 0 ? 'หมดอายุวันนี้' : 'อีก ' + l.daysLeft + ' วัน';
-}
-
 function drawExpiring() {
   var box = $('#sexp');
-  if (!box || !S.ov) return;
-  var ex = S.ov.expiring;
-  box.innerHTML = '<div class="row" style="justify-content:space-between"><h2 style="margin:0">ล็อตใกล้หมดอายุ</h2><span class="muted" style="font-size:13px">ภายใน 7 วัน · ' + ex.length + '</span></div>' +
-    (ex.length ? ex.slice(0, 8).map(function (l) {
-      var d = l.expiryDate.split('-');
-      return '<div class="row" style="justify-content:space-between;align-items:flex-start;padding:4px 0;border-top:1px solid var(--line-soft)"><div><div>' + esc(l.name) + '</div>' +
-        '<div class="muted" style="font-size:12px">' + esc(l.receiptNo) + ' · ' + expiryText(l) + '</div></div>' +
-        '<div class="row" style="gap:6px"><span class="num ' + (l.daysLeft <= 0 ? 'warn-text' : '') + '" style="font-weight:600">' + d[2] + '/' + d[1] + ' · ' + l.qtyLeft + '</span>' +
-        '<button class="btn sm" data-act="woLot" data-lot="' + esc(l.lotId) + '" data-sku="' + esc(l.sku) + '" data-q="' + l.qtyLeft + '">ตัดเสีย</button></div></div>';
-    }).join('') : '<div class="muted" style="font-size:14px">ไม่มี — ใส่วันหมดอายุตอนรับสินค้าเพื่อให้ขึ้นที่นี่</div>');
+  if (!box) return;
+  var n = S.expiryTodo || 0;
+  box.innerHTML = '<span><b>' + (n ? 'ใกล้หมดอายุ / หมดอายุ ' + n + ' ล็อต' : 'ไม่มีล็อตใกล้หมดอายุ') + '</b><br><span class="muted" style="font-size:13px">ลดราคา ตัดของหมดอายุ และตั้งวันเตือน ที่หน้า "หมดอายุ"</span></span><span class="' + (n ? 'warn-text' : 'muted') + '" style="font-size:22px">›</span>';
+  box.classList.toggle('has', n > 0);
 }
 
 function countStock(sku) {
@@ -1968,7 +2129,7 @@ function countStock(sku) {
   var m = openModal('<header><h1>ปรับยอดสต็อก</h1><span class="muted">' + esc(r.name) + '</span></header><form class="body">' +
     '<div class="muted">ในระบบ ' + r.onHand + ' ' + esc(r.unit) + '</div>' +
     '<div class="field"><label for="cnt">นับได้จริง (ชิ้น)</label><input id="cnt" type="number" class="big-input" autofocus value="' + Math.max(0, r.onHand) + '"></div>' +
-    '<div class="field"><label for="why">เหตุผล</label><select id="why"><option>สต็อกเปิด</option><option>ตรวจนับ</option><option>ของเสีย/หมดอายุ</option><option>สูญหาย</option><option>อื่นๆ</option></select></div>' +
+    '<div class="field"><label for="why">เหตุผล</label><select id="why"><option>สต็อกเปิด</option><option>ตรวจนับ</option><option>ของเสีย</option><option>สูญหาย</option><option>อื่นๆ</option></select></div>' +
     '</form><footer><button class="btn" data-x="cancel">ยกเลิก</button><button class="btn primary" data-x="save">บันทึก</button></footer>');
   $('[data-x=cancel]', m).onclick = function () { closeModal(); };
   var save = function () {
@@ -2252,19 +2413,37 @@ var ACTIONS = {
     var s = S.suggest[Number(el.getAttribute('data-i'))];
     if (s) { addItem(S.idx.bySku[s.sku], null, s.qty); clearScan(); }
   },
-  selLine: function (el, e) { if (e.target.closest('.qty, .ldisc')) return; S.cart.sel = Number(el.getAttribute('data-i')); renderCartOnly(); },
+  selLine: function (el, e) { if (e.target.closest('.qty, .ldisc, .mdchip')) return; S.cart.sel = Number(el.getAttribute('data-i')); renderCartOnly(); },
   qty: function (el) { changeQty(Number(el.getAttribute('data-i')), Number(el.getAttribute('data-d'))); },
   billDiscount: function () { askDiscount('bill'); },
   lineDisc: function (el) { S.cart.sel = Number(el.getAttribute('data-i')); askDiscount('line'); },
   holdBill: holdBill,
+  toggleMd: function (el) { toggleMd(Number(el.getAttribute('data-i'))); },
+  expTab: function (el) { S.expTab = el.getAttribute('data-t'); S.expSel = null; render(); drawExpiry(); },
+  expPick: function (el) {
+    var r = S.exp.todo.filter(function (x) { return x.lotId === el.getAttribute('data-lot'); })[0];
+    S.expSel = { lotId: r.lotId, action: el.getAttribute('data-a'), found: Math.max(0, r.qtyLeft), pct: S.exp.markdownPct };
+    drawExpiry();
+  },
+  expAct: function (el) { S.expSel.action = el.getAttribute('data-a'); drawExpAction(); },
+  expPct: function (el) { S.expSel.pct = Number(el.getAttribute('data-p')); drawExpAction(); },
+  expStep: function (el) { S.expSel.found = Math.max(0, (Number(S.expSel.found) || 0) + Number(el.getAttribute('data-d'))); drawExpAction(); },
+  expSave: expSave,
+  expSaveSet: function () {
+    var w = {};
+    $all('[data-xw]').forEach(function (i) { if (i.value !== '') w[i.getAttribute('data-xw')] = Number(i.value); });
+    api('saveExpirySettings', S.token, w, $('#xpct').value).then(function (r) {
+      S.exp.warnDays = r.warnDays; S.exp.markdownPct = r.markdownPct; toast('บันทึกแล้ว'); loadExpiry();
+    }).catch(fail);
+  },
+  goExpiry: function () { go('expiry'); },
   stockTab: function (el) { S.stockTab = el.getAttribute('data-t'); render(); loadStock(); },
   stockCat: function (el) { S.stockFilter.cat = el.getAttribute('data-c'); drawStockTab(); },
   cntCommit: cntCommit,
   cntClear: function () { confirm2('ล้างการนับ', 'ลบตัวเลขที่นับไว้ทั้งหมด?', 'ล้าง', true).then(function (ok) { if (ok) { S.cnt = null; store('em_count', null); drawStockTab(); } }); },
-  woPick: function (el) { S.wo = { sku: el.getAttribute('data-sku'), qty: '', reason: (S.wo || {}).reason || 'หมดอายุ', lotId: '' }; drawWriteOff(); var n = $('#wo-n'); if (n) n.focus(); },
+  woPick: function (el) { S.wo = { sku: el.getAttribute('data-sku'), qty: '', reason: (S.wo || {}).reason || 'เสียหาย', lotId: '' }; drawWriteOff(); var n = $('#wo-n'); if (n) n.focus(); },
   woClear: function () { S.wo = null; drawWriteOff(); var q = $('#wo-q'); if (q) q.focus(); },
   woReason: function (el) { S.wo.reason = el.getAttribute('data-r'); drawWriteOff(); },
-  woLot: function (el) { S.wo = { sku: el.getAttribute('data-sku'), qty: el.getAttribute('data-q'), reason: 'หมดอายุ', lotId: el.getAttribute('data-lot') }; drawWriteOff(); var n = $('#wo-n'); if (n) { n.focus(); n.select(); } },
   woCommit: woCommit,
   openCustomer: function () {
     if (!CustomerDisplay.pos.open()) return toast('เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาต pop-up ให้เว็บนี้ก่อน', true);
@@ -2409,6 +2588,7 @@ document.addEventListener('input', function (e) {
   if (t.hasAttribute('data-cnt')) cntSet(t.getAttribute('data-cnt'), t.value);
   if (t.hasAttribute('data-cnt-note')) { cntDraft().note = t.value; cntSave(); }
   if (t.id === 'wo-q') woSuggest(t.value);
+  if (t.hasAttribute('data-xq') && S.expSel) { S.expSel.found = t.value; }
   if (t.hasAttribute('data-wo-qty') && S.wo) { S.wo.qty = t.value; var p0 = S.idx.bySku[S.wo.sku]; var e0 = $('#wo-est'); if (e0) e0.textContent = '฿' + money(p0 ? (Number(t.value) || 0) * p0.cost : 0); }
 });
 

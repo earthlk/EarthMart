@@ -284,6 +284,24 @@ a{color:var(--brand-text)}
 
 /* ===== Receipt (80mm thermal) ===== */
 #print{display:none}
+
+/* Expiry page */
+.amber-text{color:var(--tag-amber)}
+.topbar nav .badge{display:inline-block;min-width:18px;height:18px;line-height:18px;padding:0 5px;margin-left:5px;border-radius:9px;background:var(--warn);color:#fff;font-size:11px;font-weight:700;text-align:center;vertical-align:1px}
+.topbar nav .badge:empty{display:none}
+.exp{flex:1;display:flex;gap:16px;min-height:0}
+.exp-main{flex:1;display:flex;flex-direction:column;gap:14px;min-width:0;min-height:0}
+.exp-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1.3fr) 170px minmax(250px,auto);gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line-soft)}
+.exp-grid.head{font-size:13px;color:var(--muted);border-bottom:1px solid var(--line);padding:8px 16px}
+.exp-grid.on{background:var(--brand-soft, var(--surface-muted))}
+.exp-sec{padding:8px 16px;font-size:13px;font-weight:700;background:var(--surface-muted);border-bottom:1px solid var(--line-soft)}
+.exp-sec.warn{color:var(--warn);background:var(--warn-soft)}
+.exp-sec.amber{color:var(--tag-amber);background:var(--tag-amber-bg)}
+.exp-link{flex-direction:row !important;align-items:center;justify-content:space-between;text-align:left;cursor:pointer;font:inherit;color:inherit}
+.exp-link.has{background:var(--warn-soft);border-color:var(--warn-line)}
+.mdchip{margin-top:4px;height:26px;padding:0 10px;border-radius:13px;border:1px dashed var(--tag-amber);background:var(--tag-amber-bg);color:var(--tag-amber);font-size:12px;font-weight:600;cursor:pointer}
+.mdchip.on{border-style:solid;background:var(--tag-amber);color:var(--tag-amber-bg)}
+
 @media print{
   @page{size:80mm auto;margin:0}
   body{background:#fff}
@@ -297,6 +315,9 @@ a{color:var(--brand-text)}
 }
 
 @media (max-width:1100px){
+  .exp{flex-direction:column}
+  .exp-grid{grid-template-columns:minmax(0,1fr) 150px minmax(200px,auto)}
+  .exp-grid>:nth-child(2){display:none}
   .stk{flex-direction:column}
   .stk-side{width:auto;flex:0 0 auto}
   .rcv{flex-direction:column}

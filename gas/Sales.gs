@@ -34,8 +34,12 @@ function api_commitSale(token, sale) {
       if (!shift) throw new Error('ยังไม่ได้เปิดกะ');
 
       var priced = priceLines_(sale.lines);
-      var lineDiscount = 0;
-      priced.forEach(function (l) { lineDiscount += l.lineDiscount; });
+      var lineDiscount = 0, manual = 0, markdowns = [];
+      priced.forEach(function (l) {
+        lineDiscount += l.lineDiscount;
+        manual += l.lineDiscount - (l.md ? l.md.amount : 0);
+        if (l.md) markdowns.push(l.md);
+      });
       var billDiscount = round2_(Math.max(0, num_(sale.billDiscount)));
       var subtotal = round2_(priced.reduce(function (a, l) { return a + l.qty * l.unitPrice; }, 0));
       var discount = round2_(lineDiscount + billDiscount);
@@ -43,7 +47,9 @@ function api_commitSale(token, sale) {
       var total = round2_(subtotal - discount);
 
       var approver = '';
-      if (discount > 0) approver = consumeApproval_(s, sale.approvalId, 'DISCOUNT');
+      // Near-expiry markdowns are pre-approved on the expiry page; only manual discounts need the owner.
+      manual = round2_(manual + billDiscount);
+      if (manual > 0) approver = consumeApproval_(s, sale.approvalId, 'DISCOUNT');
 
       var received = total, change = 0;
       if (sale.payMethod === 'cash') {
@@ -74,7 +80,8 @@ function api_commitSale(token, sale) {
         return {
           billNo: billNo, lineNo: i + 1, sku: l.sku, name: l.name, barcode: l.barcode, unitName: l.unitName,
           multiplier: l.multiplier, qty: l.qty, unitPrice: l.unitPrice, lineDiscount: l.lineDiscount,
-          lineTotal: round2_(l.qty * l.unitPrice - l.lineDiscount), cost: round2_(cost)
+          lineTotal: round2_(l.qty * l.unitPrice - l.lineDiscount), cost: round2_(cost),
+          markdownLotId: l.md ? l.md.lotId : '', markdownQty: l.md ? l.md.qty : '', markdown: l.md ? l.md.amount : ''
         };
       });
 
@@ -82,7 +89,11 @@ function api_commitSale(token, sale) {
       appendMany_('SaleLines', lines);
       fifoFlush_(ctx);
       addStockMoves_(s, explodeMoves_(lines, -1, 'SALE', billNo, ''));
-      if (discount > 0) log_(s, 'DISCOUNT', billNo, 'ส่วนลด ' + discount + ' บาท', approver);
+      if (manual > 0) log_(s, 'DISCOUNT', billNo, 'ส่วนลด ' + manual + ' บาท', approver);
+      if (markdowns.length) {
+        moveMarkdown_(markdowns, -1);
+        log_(s, 'MARKDOWN_SALE', billNo, markdowns.map(function (m) { return m.qty + ' ชิ้น −' + m.pct + '%'; }).join(', '), '');
+      }
       priced.filter(function (l) { return l.openPrice; }).forEach(function (l) {
         log_(s, 'OPEN_PRICE', billNo, l.name + ' ราคา ' + l.unitPrice, '');
       });
@@ -119,6 +130,7 @@ function priceLines_(inLines) {
   var rec = recipesMap_();
   var codes = {};
   readAll_('Barcodes').forEach(function (b) { codes[String(b.barcode)] = b; });
+  var lots = null;
 
   return inLines.map(function (l) {
     var qty = num_(l.qty);
@@ -139,11 +151,17 @@ function priceLines_(inLines) {
       unitPrice = round2_(num_(p.price) * mult);
     }
     var lineDiscount = round2_(Math.max(0, num_(l.lineDiscount)));
+    var md = null;
+    if (l.markdownLotId) {
+      if (!lots) { lots = {}; readAll_('Lots').forEach(function (x) { lots[x.lotId] = x; }); }
+      md = markdownFor_({ lotId: l.markdownLotId, qty: l.markdownQty }, { sku: sku, name: p.name, multiplier: mult, qty: qty, unitPrice: unitPrice }, lots);
+      lineDiscount = round2_(lineDiscount + md.amount);
+    }
     if (lineDiscount > qty * unitPrice) throw new Error('ส่วนลดของ ' + p.name + ' เกินราคา');
     return {
       sku: sku, name: p.name, barcode: code ? String(code.barcode) : '', unitName: code ? code.unitName : (p.unit || 'ชิ้น'),
       multiplier: mult, qty: qty, unitPrice: unitPrice, lineDiscount: lineDiscount,
-      costPerPiece: p.type === 'recipe' ? recipeCost_(rec[sku], products) : num_(p.cost), openPrice: bool_(p.openPrice)
+      costPerPiece: p.type === 'recipe' ? recipeCost_(rec[sku], products) : num_(p.cost), openPrice: bool_(p.openPrice), md: md
     };
   });
 }
@@ -230,6 +248,7 @@ function api_voidSale(token, billNo, reason, approvalId) {
       var lines = linesOf_(billNo);
       var ctx = fifoOpen_();
       fifoRestore_(ctx, billNo);
+      moveMarkdown_(lines.filter(function (l) { return l.markdownLotId; }).map(function (l) { return { lotId: l.markdownLotId, qty: num_(l.markdownQty) }; }), 1);
       fifoFlush_(ctx);
       addStockMoves_(s, explodeMoves_(lines, 1, 'VOID', billNo, reason));
       log_(s, 'VOID', billNo, num_(h.total) + ' บาท · ' + reason, approver);

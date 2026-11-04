@@ -205,7 +205,7 @@ function api_stockOverview(token, expiryDays) {
     return {
       stockValue: round2_(Object.keys(values).reduce(function (a, k) { return a + values[k]; }, 0)),
       values: values, lossMonth: round2_(lossMonth), moves: moves,
-      expiring: expiringLots_(num_(expiryDays) || 7, products)
+      expiryTodo: expiryTodoCount_(), expiring: expiringLots_(num_(expiryDays) || 7, products)
     };
   });
 }

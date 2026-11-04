@@ -162,6 +162,7 @@ function api_receive(token, rc) {
         var mult = code ? (num_(code.multiplier) || 1) : 1;
         var exp = String(l.expiryDate || '').trim();
         if (exp && !/^\d{4}-\d{2}-\d{2}$/.test(exp)) throw new Error('วันหมดอายุของ ' + p.name + ' ไม่ถูกต้อง');
+        if (!exp && bool_(p.trackExpiry)) throw new Error('ใส่วันหมดอายุของ ' + p.name + ' (สินค้านี้ติดตามวันหมดอายุ)');
         return { p: p, sku: sku, qty: qty, mult: mult, pieces: qty * mult, unitCost: cost, pieceCost: cost / mult,
                  unitName: code ? code.unitName : (p.unit || 'ชิ้น'), expiryDate: exp };
       });

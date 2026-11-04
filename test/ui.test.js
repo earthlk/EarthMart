@@ -390,10 +390,58 @@ call('importProducts', T, [
   await shot('09k-lots');
   await page.keyboard.press('Escape');
 
+  // 9x. Expiry page: one lot near expiry (markdown), one expired (write off); markdown used at the till
+  const ymd = d => new Date(Date.now() + 7 * 3600e3 + d * 86400e3).toISOString().slice(0, 10);
+  const prodsNow = call('bootstrap', T).products;
+  const mk = sku => Object.assign({}, prodsNow.find(p => p.sku === sku), { trackExpiry: true });
+  const bcs = sku => call('bootstrap', T).barcodes.filter(b => b.sku === sku);
+  call('saveProduct', T, mk('W0001'), bcs('W0001'), []);
+  call('receive', T, { receiptUid: 'exp-test', supplier: 'ทดสอบ', lines: [
+    { sku: 'W0001', qty: 6, unitCost: 4.5, expiryDate: ymd(2) },
+    { sku: 'D0102', qty: 3, unitCost: 9, expiryDate: ymd(-1) }] });
+  await page.click('nav button[data-v=stock]');
+  await page.waitForSelector('#sexp.has');
+  assert.doesNotMatch(await page.textContent('#swo'), /หมดอายุ/, 'stock write-off has no expiry reason');
+  await page.click('#sexp');
+  await page.waitForSelector('#xrows .exp-grid');
+  assert.strictEqual(await page.locator('#xrows .exp-grid').count(), 2, 'two lots to handle');
+  assert.match(await page.textContent('#xrows'), /หมดอายุ · เก็บออกจากชั้น[\s\S]*ใกล้หมดอายุ · ลดราคา/);
+  assert.strictEqual((await page.textContent('nav button[data-v=expiry] .badge')).trim(), '2');
+  await page.click('#xrows .exp-grid:has-text("น้ำดื่ม") [data-a=MARKDOWN]');
+  await page.fill('#xq', '4');
+  await page.click('[data-act=expPct][data-p="30"]');
+  assert.match(await page.textContent('#xact'), /฿4\.90/);
+  await shot('09n-expiry');
+  await page.click('[data-act=expSave]');
+  await page.waitForFunction(() => document.querySelectorAll('#xrows .exp-grid').length === 1);
+  await page.click('#xrows .exp-grid:has-text("กาแฟ") [data-a=WRITEOFF]');
+  await page.fill('#xq', '2');
+  await page.click('[data-act=expSave]');
+  await page.waitForSelector('#xrows .empty');
+  assert.strictEqual((await page.textContent('nav button[data-v=expiry] .badge')).trim(), '');
+  await page.click('[data-act=expTab][data-t=done]');
+  await page.waitForFunction(() => document.querySelectorAll('#xrows .exp-grid').length === 2);
+  await shot('09o-expiry-done');
+  // till: markdown chip on the water line (no PIN)
+  await page.click('nav button[data-v=sale]');
+  await page.fill('#scan', '8851234567890'); await page.keyboard.press('Enter');
+  await page.fill('#scan', '8851234567890'); await page.keyboard.press('Enter');
+  await page.waitForSelector('.mdchip:has-text("เหลือ 4")');
+  await page.click('.mdchip');
+  await page.waitForSelector('.mdchip.on:has-text("× 2")');
+  assert.match(await page.textContent('#totalbar'), /฿9\.80/);
+  await shot('09p-sale-markdown');
+  await page.keyboard.press('F12');
+  await page.fill('#recv', '20');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.modal h1:has-text("ใบเสร็จ"), .modal :text("ทอน")');
+  await page.keyboard.press('Escape');
+  assert.deepStrictEqual(call('bootstrap', T).markdowns.map(m => m.left), [2], 'quota used');
+
   // 10. Close shift
   await page.click('nav button[data-v=shift]');
   await page.waitForSelector('#shiftsum h2');
-  await page.fill('#c1000', '0'); await page.fill('#c500', '1'); await page.fill('#c100', '1'); await page.fill('#ccoin', '91');
+  await page.fill('#c1000', '0'); await page.fill('#c500', '1'); await page.fill('#c100', '1'); await page.fill('#ccoin', '100.80');
   await page.click('[data-act=closeShift]');
   await page.click('[data-x=yes]');
   await page.waitForSelector('.modal h1:has-text("ปิดกะแล้ว")');
