@@ -751,22 +751,92 @@ function askDiscount(kind) {
   if (!S.cart.lines.length) return toast('ยังไม่มีสินค้าในบิล', true);
   var line = kind === 'line' ? S.cart.lines[S.cart.sel] : null;
   if (kind === 'line' && !line) return toast('แตะเลือกรายการก่อน', true);
-  var base = kind === 'line' ? line.qty * line.unitPrice : cartTotals().subtotal;
+  var t = cartTotals();
+  // A bill discount applies to what is left after line discounts.
+  var base = line ? round2(line.qty * line.unitPrice) : round2(t.subtotal - (t.discount - S.cart.billDiscount));
   var cur = line ? line.lineDiscount : S.cart.billDiscount;
-  prompt2(kind === 'line' ? 'ส่วนลด: ' + line.name : 'ส่วนลดท้ายบิล', 'ใส่เป็นบาท หรือใส่ % เช่น 10%', cur ? String(cur) : '',
-    { hint: 'ยอดก่อนลด ฿' + money(base) + (cur ? ' · ใส่ 0 = ยกเลิกส่วนลด' : '') })
-    .then(function (v) {
-      if (v === null || String(v).trim() === '') return;
-      var amt = /%$/.test(v.trim()) ? round2(base * Number(v.trim().slice(0, -1)) / 100) : round2(Number(v));
-      if (!(amt >= 0) || amt > base) return toast('ส่วนลดไม่ถูกต้อง', true);
-      if (amt === 0) { if (line) line.lineDiscount = 0; else S.cart.billDiscount = 0; renderCartOnly(); return; }
-      return approval('DISCOUNT', 'อนุมัติส่วนลด ฿' + money(amt)).then(function (id) {
-        if (id === null) return;
-        if (id) S.cart.approvalId = id;
-        if (line) line.lineDiscount = amt; else S.cart.billDiscount = amt;
-        renderCartOnly();
-      });
+  var mode = 'baht';
+  var val = cur ? String(cur) : '';
+
+  var apply = function (amt) {
+    var set = function () {
+      if (line) line.lineDiscount = amt; else S.cart.billDiscount = amt;
+      renderCartOnly();
+    };
+    if (amt === 0) return set();
+    return approval('DISCOUNT', 'อนุมัติส่วนลด ฿' + money(amt)).then(function (id) {
+      if (id === null) return;
+      if (id) S.cart.approvalId = id;
+      set();
     });
+  };
+  var amountOf = function () {
+    var n = Number(val || 0);
+    return round2(mode === 'pct' ? base * n / 100 : n);
+  };
+  // "Round down" suggestions: drop the satang, or down to the nearest 5 / 10 baht (max 10 baht off).
+  var rounds = [];
+  [1, 5, 10].forEach(function (step) {
+    var to = Math.floor(base / step) * step, off = round2(base - to);
+    if (off > 0 && off <= 10 && rounds.every(function (r) { return r.to !== to; })) rounds.push({ to: to, off: off });
+  });
+
+  var m = openModal('<header><h1>' + (line ? 'ส่วนลด: ' + esc(line.name) : 'ส่วนลดท้ายบิล') + '</h1><span class="grow"></span>' +
+    '<span class="muted">ยอด</span><b class="num" style="font-size:20px">฿' + money(base) + '</b></header>' +
+    '<div class="body disc"><div class="seg"><button type="button" data-mode="baht" class="on">บาท (฿)</button><button type="button" data-mode="pct">เปอร์เซ็นต์ (%)</button></div>' +
+    '<div class="disc-in"><label class="sr" for="d-val">ส่วนลด</label><input id="d-val" class="big-input num" inputmode="decimal" autocomplete="off" autofocus value="' + esc(val) + '"><span id="d-unit">฿</span></div>' +
+    '<div class="disc-chips" id="d-chips"></div>' +
+    (rounds.length ? '<div class="disc-chips"><span class="muted" style="font-size:13px;align-self:center">ปัดเศษ</span>' + rounds.map(function (r) {
+      return '<button type="button" class="chip" data-round="' + r.off + '">เหลือ ฿' + money(r.to).replace(/\.00$/, '') + ' <span class="muted">(ลด ' + money(r.off).replace(/\.00$/, '') + ')</span></button>';
+    }).join('') + '</div>' : '') +
+    '<div class="disc-pad">' + ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', 'del'].map(function (k) {
+      return '<button type="button" data-k="' + k + '">' + (k === 'del' ? '⌫' : k) + '</button>';
+    }).join('') + '</div>' +
+    '<div class="disc-preview" id="d-prev"></div></div>' +
+    '<footer>' + (cur ? '<button class="btn warn" data-x="clear" style="margin-right:auto">ยกเลิกส่วนลด</button>' : '') +
+    '<button class="btn" data-x="no">ปิด</button><button class="btn primary" data-x="ok" style="min-width:140px">ใช้ส่วนลด</button></footer>');
+
+  var input = $('#d-val', m);
+  var draw = function () {
+    var chips = mode === 'pct' ? [5, 10, 15, 20, 25, 50] : [1, 2, 5, 10, 20, 50].filter(function (n) { return n < base; });
+    $('#d-chips', m).innerHTML = chips.map(function (n) {
+      return '<button type="button" class="chip' + (String(n) === val ? ' on' : '') + '" data-q="' + n + '">' + (mode === 'pct' ? n + '%' : '฿' + n) + '</button>';
+    }).join('');
+    $('#d-unit', m).textContent = mode === 'pct' ? '%' : '฿';
+    var amt = amountOf(), ok = amt >= 0 && amt <= base && (mode !== 'pct' || Number(val || 0) <= 100);
+    $('#d-prev', m).className = 'disc-preview' + (ok ? '' : ' bad');
+    $('#d-prev', m).innerHTML = ok
+      ? '<span>ลด <b class="num">฿' + money(amt) + '</b></span><span>เหลือ <b class="num" style="font-size:24px">฿' + money(base - amt) + '</b></span>'
+      : '<span>ส่วนลดเกินยอด ฿' + money(base) + '</span>';
+    $('[data-x=ok]', m).disabled = !ok || amt === 0;
+  };
+  var fine = window.matchMedia && matchMedia('(pointer:fine)').matches;   // PC: keep typing/Enter working; touch: don't pop the keyboard
+  var setVal = function (v) { val = v; input.value = v; draw(); if (fine) input.focus(); };
+  input.addEventListener('input', function () { val = input.value.replace(/[^\d.]/g, ''); draw(); });
+  m.addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    if (b.hasAttribute('data-mode')) {
+      mode = b.getAttribute('data-mode');
+      $all('[data-mode]', m).forEach(function (x) { x.classList.toggle('on', x === b); });
+      setVal(''); input.focus();
+    } else if (b.hasAttribute('data-q')) { setVal(b.getAttribute('data-q')); }
+    else if (b.hasAttribute('data-round')) {
+      mode = 'baht'; $all('[data-mode]', m).forEach(function (x) { x.classList.toggle('on', x.getAttribute('data-mode') === 'baht'); });
+      setVal(b.getAttribute('data-round'));
+    } else if (b.hasAttribute('data-k')) {
+      var k = b.getAttribute('data-k');
+      if (k === 'del') setVal(val.slice(0, -1));
+      else if (k === '.' && val.indexOf('.') >= 0) return;
+      else setVal(val + k);
+    } else if (b.getAttribute('data-x') === 'no') closeModal();
+    else if (b.getAttribute('data-x') === 'clear') { closeModal(); apply(0); }
+    else if (b.getAttribute('data-x') === 'ok') { var amt = amountOf(); closeModal(); apply(amt); }
+  });
+  m.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); var ok = $('[data-x=ok]', m); if (!ok.disabled) ok.click(); }
+  });
+  draw();
 }
 
 /* ---------------------------- Payment ----------------------------- */

@@ -232,10 +232,19 @@ call('importProducts', T, [
   await page.waitForFunction(() => document.querySelectorAll('.line').length === 2);
   // per-line discount from the row, bill discount from the bottom button (owner approves self)
   await page.click('.line:has-text("แพ็ค") [data-act=lineDisc]');
-  await page.fill('#p2', '10'); await page.keyboard.press('Enter');
+  await page.waitForSelector('#d-val');
+  await page.click('[data-mode=pct]');
+  await page.click('[data-q="5"]');                      // 5% of 170 = 8.50
+  assert.match(await page.textContent('#d-prev'), /8\.50/);
+  await page.click('[data-mode=baht]');
+  await page.click('.disc-pad [data-k="1"]'); await page.click('.disc-pad [data-k="0"]');   // ฿10 via keypad
+  await shot('09g-discount-dialog');
+  await page.click('[data-x=ok]');
   await page.waitForSelector('.line:has-text("แพ็ค") .ldisc.on');
   await page.click('[data-act=billDiscount]');
-  await page.fill('#p2', '5'); await page.keyboard.press('Enter');
+  await page.waitForSelector('#d-val');
+  await page.click('#d-chips [data-q="5"]');
+  await page.keyboard.press('Enter');
   await page.waitForFunction(() => /170\.00/.test(document.querySelector('#totalbar .amt').textContent));
   await shot('09f-discounts');
   assert.match(await page.textContent('#totalbar .amt'), /170\.00/, '15 + 2 x 85 - 10 - 5');

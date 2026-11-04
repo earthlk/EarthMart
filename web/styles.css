@@ -193,6 +193,20 @@ a{color:var(--brand-text)}
 .swatches button.on{border-color:var(--ink)}
 .ed-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted);text-align:center;padding:24px}
 
+/* ===== Discount dialog ===== */
+.disc{gap:14px}
+.disc .seg button{height:44px;font-size:15px}
+.disc-in{position:relative}
+.disc-in input{width:100%;padding-right:44px}
+.disc-in span{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:24px;font-weight:600;color:var(--muted)}
+.disc-chips{display:flex;gap:6px;flex-wrap:wrap}
+.disc-chips .chip{height:40px;font-size:15px}
+.disc-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.disc-pad button{height:52px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:22px;font-weight:600;cursor:pointer}
+.disc-pad button:active{background:var(--surface-muted)}
+.disc-preview{display:flex;justify-content:space-between;align-items:baseline;padding:12px 14px;border-radius:10px;background:var(--brand-soft);color:var(--ink)}
+.disc-preview.bad{background:var(--warn-soft);color:var(--warn)}
+
 /* ===== Login / PIN ===== */
 .center{flex:1;display:flex;align-items:center;justify-content:center;padding:24px}
 .login{display:flex;width:880px;max-width:100%;overflow:hidden}
