@@ -230,7 +230,15 @@ call('importProducts', T, [
   await shot('09e-held');
   await page.click('[data-x=recall]');
   await page.waitForFunction(() => document.querySelectorAll('.line').length === 2);
-  assert.match(await page.textContent('#totalbar .amt'), /185\.00/, '15 + 2 x 85');
+  // per-line discount from the row, bill discount from the bottom button (owner approves self)
+  await page.click('.line:has-text("แพ็ค") [data-act=lineDisc]');
+  await page.fill('#p2', '10'); await page.keyboard.press('Enter');
+  await page.waitForSelector('.line:has-text("แพ็ค") .ldisc.on');
+  await page.click('[data-act=billDiscount]');
+  await page.fill('#p2', '5'); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => /170\.00/.test(document.querySelector('#totalbar .amt').textContent));
+  await shot('09f-discounts');
+  assert.match(await page.textContent('#totalbar .amt'), /170\.00/, '15 + 2 x 85 - 10 - 5');
   await shot('09c-sale-icons');
   await page.click('[data-act=payQr]');
   await page.waitForSelector('#qrbox svg');

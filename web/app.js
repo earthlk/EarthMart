@@ -568,9 +568,9 @@ function renderSale() {
     '<section class="card cart"><div class="scan"><div class="row"><label for="scan" style="white-space:nowrap">สแกน / ค้นหา</label>' +
     '<input id="scan" autocomplete="off" placeholder="สแกนบาร์โค้ด, PLU หรือพิมพ์ชื่อสินค้า" ' + (S.isCounter && S.shift ? '' : 'disabled') + '></div>' +
     '<div class="scan-hint">พิมพ์จำนวนแล้วกด * ก่อนสแกน เช่น 6* = 6 ชิ้น</div><div id="suggest"></div></div>' +
-    '<div class="cart-head"><div>รายการ</div><div style="text-align:center">จำนวน</div><div class="r">รวม</div></div>' +
+    '<div class="cart-head"><div>รายการ</div><div style="text-align:center">จำนวน</div><div class="r">รวม</div><div class="r" style="font-size:12px">ลด</div></div>' +
     '<div class="lines" id="lines"></div>' +
-    '<div class="cart-actions"><button class="btn" data-act="discount">ส่วนลด</button><button class="btn" data-act="holdBill">พักบิล</button>' +
+    '<div class="cart-actions"><button class="btn" data-act="billDiscount">ส่วนลดท้ายบิล</button><button class="btn" data-act="holdBill">พักบิล</button>' +
     '<button class="btn" data-act="noSale">เปิดลิ้นชัก</button><button class="btn warn" data-act="clearCart">ล้างบิล</button></div></section>' +
     '<section class="sell"><div class="row" style="flex-wrap:wrap">' + chips + '</div><div class="keys">' + keys + '</div>' +
     '<div class="card total" id="totalbar"></div></section></div></div>';
@@ -583,10 +583,13 @@ function renderCartOnly() {
   else box.innerHTML = S.cart.lines.map(function (l, i) {
     return '<div class="swipe" data-i="' + i + '"><div class="swipe-bg">ลบ</div><div class="line ' + (i === S.cart.sel ? 'sel' : '') + '" data-act="selLine" data-i="' + i + '">' +
       '<div><div class="name">' + esc(l.name) + '</div><div class="sub">' + esc(l.unitName) + (l.multiplier > 1 ? ' (' + l.multiplier + ' ชิ้น)' : '') +
-      ' · ฿' + money(l.unitPrice) + (l.lineDiscount ? ' · ลด ' + money(l.lineDiscount) : '') + '</div></div>' +
+      ' · ฿' + money(l.unitPrice) + '</div></div>' +
       '<div class="qty"><button data-act="qty" data-i="' + i + '" data-d="-1" aria-label="ลด">−</button><button class="n num" data-act="editQty" data-i="' + i + '" aria-label="พิมพ์จำนวน">' + l.qty +
       '</button><button data-act="qty" data-i="' + i + '" data-d="1" aria-label="เพิ่ม">+</button></div>' +
-      '<div class="r num"><b>' + money(l.qty * l.unitPrice - l.lineDiscount) + '</b></div></div></div>';
+      '<div class="r num">' + (l.lineDiscount ? '<div class="was">' + money(l.qty * l.unitPrice) + '</div>' : '') + '<b>' + money(l.qty * l.unitPrice - l.lineDiscount) + '</b></div>' +
+      '<button class="ldisc' + (l.lineDiscount ? ' on' : '') + '" data-act="lineDisc" data-i="' + i + '" aria-label="ส่วนลดรายการ ' + esc(l.name) + '" title="ส่วนลดรายการนี้">' +
+      (l.lineDiscount ? '−' + money(l.lineDiscount).replace(/\.00$/, '') : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>') +
+      '</button></div></div>';
   }).join('');
   var hb = $('[data-act=holdBill]');
   if (hb) hb.textContent = 'พักบิล' + (heldBills().length ? ' (' + heldBills().length + ')' : '');
@@ -641,7 +644,7 @@ function askRemoveLine(i) {
   var TH = 90;
   document.addEventListener('pointerdown', function (e) {
     var w = e.target.closest('.swipe');
-    if (!w || e.target.closest('.qty') || e.button > 0) return;
+    if (!w || e.target.closest('.qty, .ldisc') || e.button > 0) return;
     sw = { w: w, line: $('.line', w), x: e.clientX, y: e.clientY, dx: 0, on: false, id: e.pointerId };
   });
   document.addEventListener('pointermove', function (e) {
@@ -749,11 +752,14 @@ function askDiscount(kind) {
   var line = kind === 'line' ? S.cart.lines[S.cart.sel] : null;
   if (kind === 'line' && !line) return toast('แตะเลือกรายการก่อน', true);
   var base = kind === 'line' ? line.qty * line.unitPrice : cartTotals().subtotal;
-  prompt2(kind === 'line' ? 'ส่วนลด: ' + line.name : 'ส่วนลดท้ายบิล', 'ใส่เป็นบาท หรือใส่ % เช่น 10%', '', { hint: 'ยอดก่อนลด ฿' + money(base) })
+  var cur = line ? line.lineDiscount : S.cart.billDiscount;
+  prompt2(kind === 'line' ? 'ส่วนลด: ' + line.name : 'ส่วนลดท้ายบิล', 'ใส่เป็นบาท หรือใส่ % เช่น 10%', cur ? String(cur) : '',
+    { hint: 'ยอดก่อนลด ฿' + money(base) + (cur ? ' · ใส่ 0 = ยกเลิกส่วนลด' : '') })
     .then(function (v) {
       if (v === null || String(v).trim() === '') return;
       var amt = /%$/.test(v.trim()) ? round2(base * Number(v.trim().slice(0, -1)) / 100) : round2(Number(v));
       if (!(amt >= 0) || amt > base) return toast('ส่วนลดไม่ถูกต้อง', true);
+      if (amt === 0) { if (line) line.lineDiscount = 0; else S.cart.billDiscount = 0; renderCartOnly(); return; }
       return approval('DISCOUNT', 'อนุมัติส่วนลด ฿' + money(amt)).then(function (id) {
         if (id === null) return;
         if (id) S.cart.approvalId = id;
@@ -1560,17 +1566,10 @@ var ACTIONS = {
     var s = S.suggest[Number(el.getAttribute('data-i'))];
     if (s) { addItem(S.idx.bySku[s.sku], null, s.qty); clearScan(); }
   },
-  selLine: function (el, e) { if (e.target.closest('.qty')) return; S.cart.sel = Number(el.getAttribute('data-i')); renderCartOnly(); },
+  selLine: function (el, e) { if (e.target.closest('.qty, .ldisc')) return; S.cart.sel = Number(el.getAttribute('data-i')); renderCartOnly(); },
   qty: function (el) { changeQty(Number(el.getAttribute('data-i')), Number(el.getAttribute('data-d'))); },
-  discount: function () {
-    if (!S.cart.lines.length) return toast('ยังไม่มีสินค้าในบิล', true);
-    var line = S.cart.lines[S.cart.sel];
-    var m = openModal('<header><h1>ส่วนลด</h1></header><div class="body"><div class="seg">' +
-      '<button data-k="line" ' + (line ? '' : 'disabled') + '>รายการที่เลือก' + (line ? '<br><span style="font-size:13px">' + esc(line.name) + '</span>' : '') + '</button>' +
-      '<button data-k="bill">ทั้งบิล</button></div></div><footer><button class="btn" data-x="no">ยกเลิก</button></footer>');
-    $all('[data-k]', m).forEach(function (b) { b.style.height = '64px'; b.onclick = function () { closeModal(); askDiscount(b.getAttribute('data-k')); }; });
-    $('[data-x=no]', m).onclick = function () { closeModal(); };
-  },
+  billDiscount: function () { askDiscount('bill'); },
+  lineDisc: function (el) { S.cart.sel = Number(el.getAttribute('data-i')); askDiscount('line'); },
   holdBill: holdBill,
   editQty: function (el) {
     var i = el && el.hasAttribute('data-i') ? Number(el.getAttribute('data-i')) : S.cart.sel;
