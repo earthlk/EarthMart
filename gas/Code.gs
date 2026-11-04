@@ -25,6 +25,10 @@ var SCHEMA = {
                'quickKey', 'quickKeyGroup', 'quickKeyOrder', 'icon', 'color', 'plu', 'active', 'onHand', 'updatedAt',
                'forSale'],
   Recipes:    ['sku', 'componentSku', 'qty'],
+  Lots:       ['lotId', 'sku', 'receivedAt', 'receiptNo', 'qtyIn', 'qtyLeft', 'unitCost', 'expiryDate', 'note'],
+  LotUse:     ['createdAt', 'refNo', 'lotId', 'sku', 'qty', 'unitCost', 'note'],
+  Receipts:   ['receiptNo', 'receiptUid', 'createdAt', 'supplier', 'invoiceNo', 'userId', 'itemsCount', 'pieces',
+               'total', 'note'],
   Barcodes:   ['barcode', 'sku', 'unitName', 'multiplier', 'price'],
   Sales:      ['billNo', 'saleUid', 'createdAt', 'shiftId', 'deviceId', 'userId', 'itemsCount', 'subtotal',
                'discount', 'total', 'payMethod', 'received', 'change', 'status', 'voidReason', 'voidBy', 'voidAt'],
@@ -237,12 +241,13 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '2';
+var SCHEMA_VERSION = '3';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {
   var props = PropertiesService.getScriptProperties();
-  if (!force && props.getProperty('SCHEMA_VERSION') === SCHEMA_VERSION) return;
+  var was = num_(props.getProperty('SCHEMA_VERSION'));
+  if (!force && String(was) === SCHEMA_VERSION) return;
   ss = ss || ss_();
   Object.keys(SCHEMA).forEach(function (name) {
     var sh = ss.getSheetByName(name) || ss.insertSheet(name);
@@ -253,6 +258,7 @@ function ensureSchema_(ss, force) {
       sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
     }
   });
+  if (was < 3) migrateLots_();   // v3: FIFO lots — existing stock becomes an opening lot at its current cost
   props.setProperty('SCHEMA_VERSION', SCHEMA_VERSION);
 }
 

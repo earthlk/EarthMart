@@ -172,7 +172,6 @@ call('importProducts', T, [
   await page.waitForSelector('#e-name:focus');
   await page.keyboard.type('ขนมปังไส้สังขยา');
   await page.fill('#e-category', 'ขนม');
-  await page.fill('#e-cost', '10');
   await page.fill('#e-price', '15');
   await page.fill('#e-scan', '8850999111239');
   await page.keyboard.press('Enter');
@@ -196,7 +195,6 @@ call('importProducts', T, [
   await page.click('[data-act=selProduct][data-sku=""]');
   await page.fill('#e-name', 'ฝาโดม 95');
   await page.click('[data-ed=type][data-v=nobarcode]');
-  await page.fill('#e-cost', '0.56');
   await page.click('[data-ef=forSaleOff]');
   await page.click('[data-ed=save]');
   await page.waitForSelector('#ped .muted:has-text("SKU P")');
@@ -223,7 +221,7 @@ call('importProducts', T, [
   const set = b3.products.find(p => p.name === 'ชุดน้ำแข็ง+ฝา');
   const lid = b3.products.find(p => p.name === 'ฝาโดม 95');
   assert.ok(set && set.type === 'recipe' && lid.forSale === false, 'recipe + material saved');
-  assert.strictEqual(set.cost, 1.65 + 2 * 0.56, 'recipe cost');
+  assert.strictEqual(set.cost, 1.65, 'recipe cost: ice 1.65 + lid (not received yet) 0');
   assert.strictEqual(b3.recipes.filter(r => r.sku === set.sku).length, 2, 'two components');
   assert.ok(await page.isVisible('#prows .prod-grid:has-text("ชุดน้ำแข็ง+ฝา") .tag:has-text("สูตรผสม")'));
   assert.ok(await page.isVisible('#prows .prod-grid:has-text("ฝาโดม 95") .tag:has-text("วัตถุดิบ")'));
@@ -304,6 +302,41 @@ call('importProducts', T, [
   const after = call('bootstrap', T);
   assert.strictEqual(after.products.find(p => p.name === 'ฝาโดม 95').onHand, -2, 'lid stock cut by 2');
   assert.strictEqual(after.products.find(p => p.name === 'ชุดน้ำแข็ง+ฝา').onHand, 0, 'recipe has no own stock');
+
+  // 9b. Receive goods: pack scanned twice, line total typed, item added by name, expiry set
+  await page.click('nav button[data-v=receive]');
+  await page.waitForSelector('#rscan');
+  await page.fill('#rc-sup', 'แม็คโคร');
+  await page.fill('#rscan', '8851234567906'); await page.keyboard.press('Enter');
+  await page.fill('#rscan', '8851234567906'); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#rlines [data-rc=qty]').value === '2');
+  assert.strictEqual(await page.inputValue('#rlines [data-row="0"] [data-rc=unitCost]'), '50.4', 'prefilled 4.20 x 12');
+  await page.fill('#rlines [data-row="0"] [data-rc=total]', '108');
+  assert.strictEqual(await page.inputValue('#rlines [data-row="0"] [data-rc=unitCost]'), '54');
+  assert.match(await page.textContent('#rlines [data-row="0"] [data-calc=piece]'), /4\.20 → 4\.50/);
+  await page.fill('#rlines [data-row="0"] [data-rc=expiryDate]', '2027-03-31');
+  await page.fill('#rscan', 'กาแฟ');
+  await page.waitForSelector('#rsug button');
+  await page.keyboard.press('Enter');
+  await page.fill('#rlines [data-row="1"] [data-rc=qty]', '5');
+  await page.fill('#rlines [data-row="1"] [data-rc=unitCost]', '9');
+  assert.match(await page.textContent('#rsum'), /153\.00/, '108 + 45');
+  assert.match(await page.textContent('#rsum'), /น้ำดื่ม 600 มล\. \+0\.30/);
+  await shot('09j-receive');
+  await page.click('[data-act=rcCommit]');
+  await page.click('[data-x=yes]');
+  await page.waitForFunction(() => document.querySelectorAll('#rlines .rcv-grid').length === 0);
+  const wl = call('lots', T, 'W0001');
+  assert.deepStrictEqual(wl.slice(-1).map(l => [l.qtyIn, l.qtyLeft, l.unitCost, l.expiryDate]), [[24, 24, 4.5, '2027-03-31']], 'new FIFO lot');
+  assert.ok(wl.length === 2 && wl[0].unitCost === 4.2, 'opening lot still first');
+  await page.waitForSelector('#rrecent :text("RC")');
+  // lots modal from the product editor
+  await page.click('nav button[data-v=products]');
+  await page.click('#prows .prod-grid:has-text("น้ำดื่ม")');
+  await page.click('[data-act=showLots]');
+  await page.waitForSelector('.modal tbody tr:nth-child(2)');
+  await shot('09k-lots');
+  await page.keyboard.press('Escape');
 
   // 10. Close shift
   await page.click('nav button[data-v=shift]');

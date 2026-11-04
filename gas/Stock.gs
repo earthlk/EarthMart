@@ -2,7 +2,7 @@
  * Stock is the sum of StockMoves (in pieces). Products.onHand is a cached total kept in step
  * with every move, so screens never have to add up the whole move history.
  *
- * Move types: OPEN (opening stock), SALE (negative), VOID (sale reversed), ADJUST (count / correction)
+ * Move types: OPEN (opening stock), RECEIVE (goods in), SALE (negative), VOID (sale reversed), ADJUST (count / correction)
  */
 
 /**
@@ -55,7 +55,15 @@ function api_setStockCount(token, sku, countedPieces, reason, approvalId) {
       if (p.type === 'recipe') throw new Error('สูตรผสมไม่มีสต็อกของตัวเอง — ปรับที่ส่วนประกอบแทน');
       var diff = round2_(counted - num_(p.onHand));
       if (diff !== 0) {
-        addStockMoves_(s, [{ sku: String(sku), qtyPieces: diff, type: 'ADJUST', refNo: '', note: reason }]);
+        var ref = uid_('ADJ');
+        var ctx = fifoOpen_();
+        if (diff < 0) fifoTake_(ctx, sku, -diff, ref, p);
+        else {
+          var add = round2_(counted - fifoLeft_(ctx, sku));   // lots must hold exactly what is counted
+          if (add > 0) fifoAddLot_(ctx, { sku: sku, receiptNo: ref, qtyIn: add, unitCost: fifoLastCost_(ctx, String(sku), p), note: 'ปรับยอด: ' + reason });
+        }
+        fifoFlush_(ctx);
+        addStockMoves_(s, [{ sku: String(sku), qtyPieces: diff, type: 'ADJUST', refNo: ref, note: reason }]);
         log_(s, 'STOCK_ADJUST', String(sku), p.name + ': ' + p.onHand + ' → ' + counted + ' (' + reason + ')', approver);
       }
       return { sku: String(sku), onHand: counted, diff: diff };

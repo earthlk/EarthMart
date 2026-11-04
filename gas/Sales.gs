@@ -60,16 +60,27 @@ function api_commitSale(token, sale) {
         subtotal: subtotal, discount: discount, total: total, payMethod: sale.payMethod,
         received: received, change: change, status: 'PAID'
       };
+      // FIFO: each line costs what its pieces (or its recipe components) cost in the oldest lots.
+      var ctx = fifoOpen_(), rec = recipesMap_(), prodBySku = {};
+      readAll_('Products').forEach(function (p) { prodBySku[String(p.sku)] = p; });
       var lines = priced.map(function (l, i) {
+        var pieces = l.qty * l.multiplier, cost = 0;
+        var comps = rec[l.sku];
+        if (comps && comps.length) {
+          comps.forEach(function (c) { cost += fifoTake_(ctx, c.sku, pieces * c.qty, billNo, prodBySku[c.sku]); });
+        } else {
+          cost = fifoTake_(ctx, l.sku, pieces, billNo, prodBySku[l.sku]);
+        }
         return {
           billNo: billNo, lineNo: i + 1, sku: l.sku, name: l.name, barcode: l.barcode, unitName: l.unitName,
           multiplier: l.multiplier, qty: l.qty, unitPrice: l.unitPrice, lineDiscount: l.lineDiscount,
-          lineTotal: round2_(l.qty * l.unitPrice - l.lineDiscount), cost: round2_(l.costPerPiece * l.multiplier * l.qty)
+          lineTotal: round2_(l.qty * l.unitPrice - l.lineDiscount), cost: round2_(cost)
         };
       });
 
       append_('Sales', header);
       appendMany_('SaleLines', lines);
+      fifoFlush_(ctx);
       addStockMoves_(s, explodeMoves_(lines, -1, 'SALE', billNo, ''));
       if (discount > 0) log_(s, 'DISCOUNT', billNo, 'ส่วนลด ' + discount + ' บาท', approver);
       priced.filter(function (l) { return l.openPrice; }).forEach(function (l) {
@@ -217,6 +228,9 @@ function api_voidSale(token, billNo, reason, approvalId) {
       h.voidAt = now_();
       writeRow_('Sales', h);
       var lines = linesOf_(billNo);
+      var ctx = fifoOpen_();
+      fifoRestore_(ctx, billNo);
+      fifoFlush_(ctx);
       addStockMoves_(s, explodeMoves_(lines, 1, 'VOID', billNo, reason));
       log_(s, 'VOID', billNo, num_(h.total) + ' บาท · ' + reason, approver);
       return { billNo: billNo, status: 'VOID' };

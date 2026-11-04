@@ -152,7 +152,8 @@ function saveProduct_(sess, input, barcodes, components) {
 
   var row = {
     sku: sku, name: name, category: String(input.category || '').trim(), type: type,
-    unit: String(input.unit || 'ชิ้น'), cost: type === 'recipe' ? recipeCost_(comps, bySku) : num_(input.cost), price: price,
+    // Cost comes from received lots (FIFO); a new product may start with a cost (e.g. from import) as a fallback.
+    unit: String(input.unit || 'ชิ้น'), cost: type === 'recipe' ? recipeCost_(comps, bySku) : existing ? num_(existing.cost) : num_(input.cost), price: price,
     minStock: type === 'recipe' ? 0 : num_(input.minStock), forSale: type === 'recipe' ? true : input.forSale !== false,
     openPrice: !!input.openPrice, quickKey: !!input.quickKey, quickKeyGroup: String(input.quickKeyGroup || ''),
     quickKeyOrder: num_(input.quickKeyOrder), icon: String(input.icon || ''), color: String(input.color || ''),
@@ -295,12 +296,15 @@ function api_importProducts(token, csvText) {
           }, merged);
           if (before) updated++; else created++;
           var open = get(r, 'openingStock');
-          if (open !== '' && !before) opening.push({ sku: res.sku, qty: num_(open) });
+          if (open !== '' && !before && num_(open) > 0) opening.push({ sku: res.sku, qty: num_(open), cost: num_(get(r, 'cost')) });
         } catch (e) {
           errors.push('แถว ' + g.line + ': ' + e.message);
         }
       });
       if (opening.length) {
+        var ctx = fifoOpen_();
+        opening.forEach(function (o) { fifoAddLot_(ctx, { sku: o.sku, receiptNo: 'IMPORT', qtyIn: o.qty, unitCost: o.cost, note: 'สต็อกเปิดจากนำเข้า' }); });
+        fifoFlush_(ctx);
         addStockMoves_(s, opening.map(function (o) {
           return { sku: o.sku, qtyPieces: o.qty, type: 'OPEN', refNo: 'IMPORT', note: 'สต็อกเปิดจากนำเข้า' };
         }));

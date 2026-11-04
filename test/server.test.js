@@ -261,4 +261,78 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(m2('bootstrap', T3).recipes.filter(r => r.sku === combo).length, 0, 'recipe rows cleared');
 }
 
+// ===================== FIFO cost =====================
+{
+  const h = makeContext({ now: '2026-11-05T03:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c3 = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m3 = (fn, ...a) => { const r = c3(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  const f3 = (re, fn, ...a) => { const r = c3(fn, ...a); ok(!r.ok && re.test(r.error), fn + ' should fail ' + re + ' got ' + JSON.stringify(r)); };
+  h.createOwner('O', '1111');
+  const T4 = m3('login', m3('status').users[0].userId, '1111', 'Dcounter3xxxxxxxxxx').token;
+  m3('registerDevice', T4, 'Dcounter3xxxxxxxxxx', 'เครื่อง');
+  const X = m3('saveProduct', T4, { name: 'น้ำ X', type: 'barcode', price: 7 }, [
+    { barcode: '8850000000101', unitName: 'ชิ้น', multiplier: 1 }, { barcode: '8850000000118', unitName: 'แพ็ค', multiplier: 12 }]).sku;
+  const prod = () => m3('bootstrap', T4).products.find(p => p.sku === X);
+  const lots = () => m3('lots', T4, X).map(l => [l.qtyLeft, l.unitCost]);
+  eq(prod().cost, 0, 'new product has no cost until received');
+
+  const r1 = m3('receive', T4, { receiptUid: 'RC-A', supplier: 'แม็คโคร', lines: [{ sku: X, qty: 10, unitCost: 4 }] });
+  ok(/^RC2611-0001$/.test(r1.receiptNo), 'receipt no ' + r1.receiptNo);
+  eq(m3('receive', T4, { receiptUid: 'RC-A', lines: [{ sku: X, qty: 10, unitCost: 4 }] }).duplicate, true, 'receive idempotent');
+  m3('receive', T4, { receiptUid: 'RC-B', lines: [{ barcode: '8850000000118', qty: 2, unitCost: 54, expiryDate: '2027-01-31' }] });
+  eq([prod().onHand, prod().cost], [34, 4], 'onHand 10 + 24; cost = oldest lot');
+  eq(lots(), [[10, 4], [24, 4.5]], 'two lots, pack cost per piece 54/12');
+  eq(m3('lots', T4, X)[1].expiryDate, '2027-01-31', 'expiry kept on lot');
+  f3(/วันหมดอายุ/, 'receive', T4, { receiptUid: 'RC-x', lines: [{ sku: X, qty: 1, unitCost: 1, expiryDate: '31/01/27' }] });
+  eq(m3('receipts', T4).length, 2, 'receipts list');
+
+  m3('openShift', T4, 0, '');
+  const s1 = m3('commitSale', T4, { saleUid: 'F1', payMethod: 'qr', lines: [{ sku: X, qty: 15 }] });
+  const s2 = m3('commitSale', T4, { saleUid: 'F2', payMethod: 'qr', lines: [{ barcode: '8850000000118', qty: 1 }] });
+  const cost = bill => m3('dailyReport', T4, '2026-11-05') && h.__ss.getSheetByName('SaleLines').data.filter(r => r[0] === bill).reduce((a, r) => a + r[11], 0);
+  eq(cost(s1.billNo), 62.5, 'FIFO: 10 x 4 + 5 x 4.5');
+  eq(cost(s2.billNo), 54, 'pack from the 4.5 lot');
+  eq([prod().cost, lots()], [4.5, [[7, 4.5]]], 'first lot used up');
+  m3('voidSale', T4, s1.billNo, 'ทดสอบ', '');
+  eq(lots(), [[10, 4], [12, 4.5]], 'void puts pieces back into the same lots');
+  eq(prod().cost, 4, 'head lot cost again');
+
+  // Sell more than the lots hold
+  const s3 = m3('commitSale', T4, { saleUid: 'F3', payMethod: 'qr', lines: [{ sku: X, qty: 25 }] });
+  eq(cost(s3.billNo), 107.5, '10x4 + 12x4.5 + 3 missing at last cost 4.5');
+  eq(prod().onHand, -3, 'negative stock');
+  m3('receive', T4, { receiptUid: 'RC-C', lines: [{ sku: X, qty: 10, unitCost: 5 }] });
+  eq([prod().onHand, lots()], [7, [[7, 5]]], 'new lot shortened by the deficit');
+
+  // Count down / up
+  m3('setStockCount', T4, X, 5, 'ตรวจนับ', '');
+  eq(lots(), [[5, 5]], 'count down takes from lots');
+  m3('setStockCount', T4, X, 9, 'ตรวจนับ', '');
+  eq(lots(), [[5, 5], [4, 5]], 'count up adds a lot at last cost');
+
+  // Recipe uses component FIFO cost; receiving a recipe is rejected
+  const cup = m3('saveProduct', T4, { name: 'แก้ว', type: 'nobarcode', forSale: false }, []).sku;
+  m3('receive', T4, { receiptUid: 'RC-D', lines: [{ sku: cup, qty: 2, unitCost: 1 }, { sku: cup, qty: 2, unitCost: 2 }] });
+  const set = m3('saveProduct', T4, { name: 'ชุด', type: 'recipe', price: 20 }, [], [{ sku: X, qty: 1 }, { sku: cup, qty: 1 }]).sku;
+  f3(/สูตรผสม/, 'receive', T4, { receiptUid: 'RC-E', lines: [{ sku: set, qty: 1, unitCost: 1 }] });
+  const s4 = m3('commitSale', T4, { saleUid: 'F4', payMethod: 'qr', lines: [{ sku: set, qty: 3 }] });
+  eq(cost(s4.billNo), 15 + 1 + 1 + 2, 'recipe: 3 x X @5 + cups 1,1,2');
+  const rep3 = m3('dailyReport', T4, '2026-11-05');
+  eq(rep3.grossProfit, round(rep3.total - (54 + 107.5 + 19)), 'report profit = sales - FIFO cost');
+
+  // Migration from v2: stock without lots becomes an opening lot at the stored cost
+  const oldSku = 'OLD1';
+  const ps = h.__ss.getSheetByName('Products');
+  const hdr = ps.data[0];
+  const row = hdr.map(k => ({ sku: oldSku, name: 'ของเก่า', type: 'barcode', cost: 3.5, price: 5, active: true, onHand: 40 })[k] ?? '');
+  ps.data.push(row);
+  h.__props.SCHEMA_VERSION = '2';
+  m3('status');
+  eq(m3('lots', T4, oldSku).map(l => [l.qtyLeft, l.unitCost, l.receiptNo]), [[40, 3.5, 'OPENING']], 'migrated opening lot');
+  m3('status');
+  eq(m3('lots', T4, oldSku).length, 1, 'migration runs once');
+}
+
 console.log('server tests passed:', pass);

@@ -420,7 +420,7 @@ function categories() {
 /* =================================================================== */
 
 var NAV = [
-  ['sale', 'ขาย'], ['bills', 'บิล'], ['products', 'สินค้า'], ['stock', 'สต็อก'],
+  ['sale', 'ขาย'], ['bills', 'บิล'], ['products', 'สินค้า'], ['stock', 'สต็อก'], ['receive', 'รับสินค้า'],
   ['shift', 'กะ'], ['reports', 'รายงาน', 'owner'], ['settings', 'ตั้งค่า', 'owner']
 ];
 
@@ -431,6 +431,7 @@ function go(view) {
   if (view === 'bills') loadBills();
   if (view === 'products') renderProductRows();
   if (view === 'stock') loadStock();
+  if (view === 'receive') loadReceive();
   if (view === 'shift' && S.shift) loadShift();
   if (view === 'reports') loadReport();
   if (view === 'settings') loadSettings();
@@ -458,6 +459,7 @@ function render() {
     case 'bills': html = frame(renderBills()); break;
     case 'products': html = frame(renderProducts()); break;
     case 'stock': html = frame(renderStock()); break;
+    case 'receive': html = frame(renderReceive()); break;
     case 'shift': html = frame(renderShift()); break;
     case 'reports': html = frame(renderReports()); break;
     case 'settings': html = frame(renderSettings()); break;
@@ -1199,7 +1201,8 @@ function drawEditor() {
     '<button type="button" data-ed="type" data-v="recipe" class="' + (isRecipe ? 'on' : '') + '">สูตรผสม</button></div>' +
     '<div class="grid3">' + f('category', 'หมวด', 'list="e-catlist"') + '<datalist id="e-catlist">' + catList + '</datalist>' +
     (isRecipe ? '<div class="field"><label>ทุน / หน่วย</label><input value="' + money(rcost) + '" disabled title="คำนวณจากส่วนประกอบ"></div>'
-      : f('cost', 'ทุน / ชิ้น', 'type="number" step="0.01" inputmode="decimal"')) +
+      : '<div class="field"><label>ทุน / ชิ้น (FIFO)</label><div class="row" style="gap:4px"><input value="' + (isNew ? 'จากการรับสินค้า' : money(p.cost)) + '" disabled title="ทุนของล็อตที่จะขายถัดไป" class="grow">' +
+        (isNew ? '' : '<button type="button" class="btn sm" data-act="showLots" data-sku="' + esc(p.sku) + '" style="height:40px;padding:0 8px">ล็อต</button>') + '</div></div>') +
     (p.forSale === false && !isRecipe ? '<div class="field"><label>ราคาขาย</label><input value="ไม่ขาย" disabled></div>'
       : f('price', isRecipe ? 'ราคาขาย / หน่วย' : 'ราคาขาย / ชิ้น', 'type="number" step="0.25" inputmode="decimal"')) + '</div>' +
     '<div class="grid3">' + f('unit', 'หน่วยนับ') + (isRecipe ? '<div class="field"><label>สต็อก</label><input value="ใช้ของส่วนประกอบ" disabled></div>'
@@ -1406,6 +1409,259 @@ function importCsv() {
       return reloadCatalog().then(renderProductRows);
     }).catch(fail);
   };
+}
+
+/* =================================================================== */
+/* Receive goods (FIFO lots)                                           */
+/* =================================================================== */
+
+function rcDraft() {
+  if (!S.rc) {
+    try { S.rc = JSON.parse(store('em_receive') || 'null'); } catch (e) { S.rc = null; }
+    if (!S.rc) S.rc = { uid: 'R' + Date.now().toString(36) + randomId(6), supplier: '', invoiceNo: '', note: '', lines: [] };
+  }
+  return S.rc;
+}
+function rcSave() { store('em_receive', JSON.stringify(S.rc)); }
+
+/** Units a product can be received in: piece + every barcode unit. */
+function rcUnits(sku) {
+  var p = S.idx.bySku[sku] || {};
+  var units = [{ key: '', unitName: p.unit || 'ชิ้น', mult: 1, barcode: '' }];
+  codesOf(sku).forEach(function (b) {
+    if (b.multiplier === 1 && !units[0].barcode) { units[0].barcode = b.barcode; units[0].unitName = b.unitName || units[0].unitName; return; }
+    units.push({ key: b.barcode, unitName: b.unitName, mult: b.multiplier, barcode: b.barcode });
+  });
+  return units;
+}
+
+function rcAdd(sku, barcode) {
+  var p = S.idx.bySku[sku];
+  if (!p) return;
+  if (p.type === 'recipe') return toast(p.name + ' เป็นสูตรผสม — รับเข้าที่ส่วนประกอบแทน', true);
+  var units = rcUnits(sku);
+  var u = units.filter(function (x) { return barcode && x.barcode === barcode; })[0] || units[0];
+  var d = rcDraft();
+  var same = d.lines.filter(function (l) { return l.sku === sku && l.mult === u.mult; })[0];
+  if (same) same.qty = (Number(same.qty) || 0) + 1;
+  else d.lines.push({ sku: sku, barcode: u.mult > 1 ? u.barcode : '', unitName: u.unitName, mult: u.mult, qty: 1,
+    unitCost: p.cost ? round2(p.cost * u.mult) : '', expiryDate: '' });
+  rcSave();
+  drawRcLines();
+  var i = d.lines.indexOf(same || d.lines[d.lines.length - 1]);
+  var row = $('#rlines [data-row="' + i + '"]');
+  if (row) { row.scrollIntoView({ block: 'nearest' }); row.classList.add('flash'); setTimeout(function () { row.classList.remove('flash'); }, 600); }
+}
+
+function renderReceive() {
+  var d = rcDraft();
+  return '<div class="page"><div class="rcv">' +
+    '<section class="card rcv-main"><div class="grid3 rcv-head">' +
+    '<div class="field"><label for="rc-sup">ผู้ขาย</label><input id="rc-sup" data-rch="supplier" list="rc-suplist" value="' + esc(d.supplier) + '" placeholder="เช่น แม็คโคร, ร้านส่ง"><datalist id="rc-suplist"></datalist></div>' +
+    '<div class="field"><label for="rc-inv">เลขใบส่งของ / ใบเสร็จ</label><input id="rc-inv" data-rch="invoiceNo" value="' + esc(d.invoiceNo) + '" placeholder="ถ้ามี"></div>' +
+    '<div class="field"><label for="rc-note">หมายเหตุ</label><input id="rc-note" data-rch="note" value="' + esc(d.note) + '"></div></div>' +
+    '<div class="scan"><div class="row"><label for="rscan" style="white-space:nowrap">สแกนรับ</label>' +
+    '<input id="rscan" autocomplete="off" placeholder="สแกนบาร์โค้ดชิ้น / แพ็ค / ลัง หรือพิมพ์ชื่อสินค้า"></div><div id="rsug"></div></div>' +
+    '<div class="rcv-grid head"><div>สินค้า</div><div>หน่วยที่รับ</div><div class="r">จำนวน</div><div class="r">ทุน / หน่วย</div>' +
+    '<div class="r">ทุน/ชิ้น เดิม → ใหม่</div><div class="r">รวม</div><div></div></div>' +
+    '<div class="rcv-rows" id="rlines"></div></section>' +
+    '<aside class="rcv-side"><div class="card pad" id="rsum"></div><div class="card pad" id="rlow"></div><div class="card pad" id="rrecent"><span class="muted">กำลังโหลด…</span></div>' +
+    '<span class="grow"></span><button class="btn primary" data-act="rcCommit" style="height:60px;font-size:18px">บันทึกรับสินค้า · เพิ่มสต็อก</button></aside></div></div>';
+}
+
+function loadReceive() {
+  drawRcLines();
+  drawRcLow();
+  api('receipts', S.token, 8).then(function (rows) {
+    var box = $('#rrecent');
+    if (!box) return;
+    var sups = {};
+    rows.forEach(function (r) { if (r.supplier) sups[r.supplier] = 1; });
+    var dl = $('#rc-suplist');
+    if (dl) dl.innerHTML = Object.keys(sups).map(function (x) { return '<option value="' + esc(x) + '">'; }).join('');
+    box.innerHTML = '<h2>รับล่าสุด</h2>' + (rows.length ? rows.slice(0, 5).map(function (r) {
+      return '<div class="row" style="justify-content:space-between;font-size:14px;padding:3px 0"><span><b class="num">' + esc(r.receiptNo) + '</b> <span class="muted">' +
+        dateTime(r.createdAt) + (r.supplier ? ' · ' + esc(r.supplier) : '') + '</span></span><span class="num">฿' + money(r.total) + '</span></div>';
+    }).join('') : '<div class="muted">ยังไม่มี</div>');
+  }).catch(function () {});
+}
+
+function rcRowCalc(l) {
+  var p = S.idx.bySku[l.sku] || {};
+  var qty = Number(l.qty) || 0, uc = l.unitCost === '' ? NaN : Number(l.unitCost);
+  var piece = isNaN(uc) ? NaN : uc / (l.mult || 1);
+  var old = Number(p.cost) || 0;
+  return { total: isNaN(uc) ? 0 : round2(qty * uc), piece: piece, old: old, changed: !isNaN(piece) && old > 0 && Math.abs(piece - old) >= 0.005 };
+}
+
+function drawRcLines() {
+  var box = $('#rlines');
+  if (!box) return;
+  var d = rcDraft();
+  box.innerHTML = d.lines.length ? d.lines.map(function (l, i) {
+    var p = S.idx.bySku[l.sku] || { name: l.sku };
+    var c = rcRowCalc(l);
+    var units = rcUnits(l.sku);
+    return '<div class="rcv-grid" data-row="' + i + '"><div style="min-width:0"><div style="font-weight:600">' + esc(p.name) + '</div>' +
+      '<div class="row" style="gap:6px;margin-top:3px"><label for="rx' + i + '" style="font-size:12px;white-space:nowrap">หมดอายุ</label>' +
+      '<input id="rx' + i + '" type="date" data-rc="expiryDate" data-i="' + i + '" value="' + esc(l.expiryDate) + '" style="height:30px;font-size:13px;width:150px;padding:0 6px"></div></div>' +
+      '<div><label class="sr" for="ru' + i + '">หน่วย</label><select id="ru' + i + '" data-rc="unit" data-i="' + i + '" style="height:36px;width:100%;font-size:14px">' + units.map(function (u) {
+        return '<option value="' + u.mult + '"' + (u.mult === l.mult ? ' selected' : '') + '>' + esc(u.unitName) + (u.mult > 1 ? ' × ' + u.mult : '') + '</option>';
+      }).join('') + '</select></div>' +
+      '<div><input data-rc="qty" data-i="' + i + '" value="' + esc(l.qty) + '" type="number" min="1" inputmode="numeric" aria-label="จำนวน ' + esc(p.name) + '" style="height:36px;width:100%;text-align:right"></div>' +
+      '<div><input data-rc="unitCost" data-i="' + i + '" value="' + esc(l.unitCost) + '" type="number" min="0" step="0.01" inputmode="decimal" placeholder="ทุน" aria-label="ทุนต่อหน่วย ' + esc(p.name) + '" style="height:36px;width:100%;text-align:right"></div>' +
+      '<div class="r num" data-calc="piece">' + rcPieceHtml(c) + '</div>' +
+      '<div><input data-rc="total" data-i="' + i + '" value="' + (c.total ? c.total.toFixed(2) : '') + '" type="number" min="0" step="0.01" inputmode="decimal" aria-label="ยอดรวม ' + esc(p.name) + '" style="height:36px;width:100%;text-align:right"></div>' +
+      '<button class="x" data-act="rcDel" data-i="' + i + '" aria-label="เอา ' + esc(p.name) + ' ออก">×</button></div>';
+  }).join('') : '<div class="empty">สแกนบาร์โค้ดที่ชิ้น แพ็ค หรือลัง — ระบบเลือกหน่วยให้เอง<br>สแกนซ้ำ = เพิ่มจำนวน · ทุนแต่ละรอบเก็บเป็นล็อตแยก (FIFO)</div>';
+  drawRcSummary();
+}
+
+function rcPieceHtml(c) {
+  if (isNaN(c.piece)) return '<span class="muted">—</span>';
+  return (c.old ? '<span class="muted">' + money(c.old) + ' → </span>' : '') + '<span class="' + (c.changed ? 'warn-text' : '') + '" style="font-weight:' + (c.changed ? 700 : 400) + '">' + money(c.piece) + '</span>';
+}
+
+function drawRcSummary() {
+  var box = $('#rsum');
+  if (!box) return;
+  var d = rcDraft();
+  var total = 0, pieces = 0, changes = [], noCost = 0;
+  d.lines.forEach(function (l) {
+    var c = rcRowCalc(l);
+    total += c.total; pieces += (Number(l.qty) || 0) * (l.mult || 1);
+    if (l.unitCost === '' || isNaN(Number(l.unitCost))) noCost++;
+    if (c.changed) changes.push((S.idx.bySku[l.sku] || {}).name + ' ' + (c.piece > c.old ? '+' : '') + money(c.piece - c.old));
+  });
+  var row = function (k, v, cls) { return '<div class="row" style="justify-content:space-between' + (cls ? ';color:var(--warn)' : '') + '"><span class="' + (cls ? '' : 'muted') + '">' + k + '</span><span style="text-align:right">' + v + '</span></div>'; };
+  box.innerHTML = '<h2>สรุปการรับ</h2>' + row('รายการ', d.lines.length) + row('รวมเป็นชิ้น', pieces) +
+    row('มูลค่ารวม', '<b class="num" style="font-size:20px">฿' + money(total) + '</b>') +
+    (changes.length ? row('ทุนต่อชิ้นเปลี่ยน', esc(changes.join(', ')), true) : '') +
+    (noCost ? row('ยังไม่ใส่ทุน', noCost + ' รายการ', true) : '') +
+    (d.lines.length ? '<button class="btn sm ghost" data-act="rcClear" style="align-self:flex-start;margin-top:4px">ล้างรายการ</button>' : '');
+}
+
+function drawRcLow() {
+  var box = $('#rlow');
+  if (!box) return;
+  var low = S.products.filter(function (p) { return p.active && p.type !== 'recipe' && p.minStock > 0 && p.onHand <= p.minStock; })
+    .sort(function (a, b) { return a.onHand / a.minStock - b.onHand / b.minStock; });
+  box.innerHTML = '<div class="row" style="justify-content:space-between"><h2 style="margin:0">ของใกล้หมด</h2><span class="muted" style="font-size:13px">' + low.length + ' รายการ</span></div>' +
+    (low.length ? low.slice(0, 8).map(function (p) {
+      return '<div class="row" style="justify-content:space-between;font-size:14px;padding:3px 0"><span>' + esc(p.name) + '</span><span class="row" style="gap:6px"><span class="warn-text num">' +
+        p.onHand + ' / ' + p.minStock + '</span><button class="btn sm" data-act="rcAddSku" data-sku="' + esc(p.sku) + '" style="height:28px;padding:0 8px" aria-label="เพิ่ม ' + esc(p.name) + ' ในใบรับ">+</button></span></div>';
+    }).join('') : '<div class="muted" style="font-size:14px;margin-top:6px">ไม่มี</div>');
+}
+
+function rcInput(t) {
+  var d = rcDraft();
+  var h = t.getAttribute('data-rch');
+  if (h) { d[h] = t.value; rcSave(); return; }
+  var f = t.getAttribute('data-rc'), i = Number(t.getAttribute('data-i'));
+  var l = d.lines[i];
+  if (!l) return;
+  var row = $('#rlines [data-row="' + i + '"]');
+  if (f === 'unit') {
+    var u = rcUnits(l.sku).filter(function (x) { return String(x.mult) === t.value; })[0];
+    var p = S.idx.bySku[l.sku] || {};
+    l.mult = u.mult; l.unitName = u.unitName; l.barcode = u.mult > 1 ? u.barcode : '';
+    if (p.cost) l.unitCost = round2(p.cost * u.mult);
+    rcSave(); drawRcLines(); return;
+  }
+  if (f === 'total') {
+    var q = Number(l.qty) || 0;
+    l.unitCost = q && t.value !== '' ? round2(Number(t.value) / q * 10000) / 10000 : l.unitCost;
+    var uc = row && $('[data-rc=unitCost]', row); if (uc) uc.value = l.unitCost;
+  } else {
+    l[f] = t.value;
+    if (f === 'qty' || f === 'unitCost') {
+      var tot = row && $('[data-rc=total]', row), c0 = rcRowCalc(l);
+      if (tot) tot.value = c0.total ? c0.total.toFixed(2) : '';
+    }
+  }
+  var c = rcRowCalc(l);
+  var pc = row && $('[data-calc=piece]', row); if (pc) pc.innerHTML = rcPieceHtml(c);
+  rcSave(); drawRcSummary();
+}
+
+function rcMatches(q) {
+  q = String(q || '').trim().toLowerCase();
+  if (!q) return [];
+  return S.products.filter(function (x) {
+    return x.active && x.type !== 'recipe' && (x.plu === q || x.sku.toLowerCase() === q || x.name.toLowerCase().indexOf(q) >= 0);
+  }).slice(0, 8);
+}
+
+function rcScan(v) {
+  v = String(v || '').trim();
+  if (!v) return;
+  var code = S.barcodes.filter(function (b) { return b.barcode === v; })[0];
+  if (code) { rcAdd(code.sku, code.barcode); return true; }
+  var m = rcMatches(v);
+  if (m.length === 1 || (m.length && (m[0].plu === v || m[0].sku.toLowerCase() === v.toLowerCase()))) { rcAdd(m[0].sku, ''); return true; }
+  if (/^\d{8,14}$/.test(v)) {
+    beep();
+    toast('ไม่พบบาร์โค้ด ' + v + ' — เพิ่มที่หน้าสินค้าก่อน (สแกนในช่องค้นหาหน้าสินค้าได้เลย)', true);
+    return true;
+  }
+  return false;
+}
+
+function drawRcSuggest(q) {
+  var box = $('#rsug');
+  if (!box) return;
+  var list = rcMatches(q);
+  box.innerHTML = list.length ? '<div class="suggest">' + list.map(function (x, i) {
+    return '<button data-act="rcAddSku" data-sku="' + esc(x.sku) + '" class="' + (i === 0 ? 'on' : '') + '"><span>' + esc(x.name) +
+      (x.forSale === false ? ' <span class="tag gray">วัตถุดิบ</span>' : '') + '</span><span class="muted num">เหลือ ' + x.onHand + '</span></button>';
+  }).join('') + '</div>' : '';
+}
+
+function rcCommit() {
+  var d = rcDraft();
+  if (!d.lines.length) return toast('ยังไม่มีสินค้า', true);
+  for (var i = 0; i < d.lines.length; i++) {
+    var l = d.lines[i], q = Number(l.qty);
+    var nm = (S.idx.bySku[l.sku] || {}).name;
+    if (!(q > 0) || Math.round(q) !== q) return toast('จำนวนของ ' + nm + ' ต้องเป็นจำนวนเต็ม', true);
+    if (l.unitCost === '' || isNaN(Number(l.unitCost)) || Number(l.unitCost) < 0) {
+      var inp = $('#rlines [data-row="' + i + '"] [data-rc=unitCost]'); if (inp) inp.focus();
+      return toast('ใส่ทุนของ ' + nm, true);
+    }
+  }
+  var t = 0;
+  d.lines.forEach(function (l) { t += Number(l.qty) * Number(l.unitCost); });
+  var free = d.lines.filter(function (l) { return Number(l.unitCost) === 0; }).length;
+  confirm2('บันทึกรับสินค้า', d.lines.length + ' รายการ · มูลค่า ฿' + money(t) + (free ? ' · มี ' + free + ' รายการทุน 0 (ของแถม)' : '') + ' — สต็อกจะเพิ่มทันที', 'บันทึกรับ').then(function (ok) {
+    if (!ok) return;
+    return api('receive', S.token, {
+      receiptUid: d.uid, supplier: d.supplier, invoiceNo: d.invoiceNo, note: d.note,
+      lines: d.lines.map(function (l) {
+        return { sku: l.sku, barcode: l.barcode || '', qty: Number(l.qty), unitCost: Number(l.unitCost), expiryDate: l.expiryDate || '' };
+      })
+    }).then(function (r) {
+      S.rc = null; store('em_receive', null);
+      toast('รับสินค้าแล้ว ' + r.receiptNo + ' · ฿' + money(r.total));
+      return reloadCatalog().then(function () { render(); loadReceive(); });
+    });
+  }).catch(fail);
+}
+
+function showLots(sku) {
+  var p = S.idx.bySku[sku];
+  api('lots', S.token, sku).then(function (rows) {
+    var left = rows.reduce(function (a, l) { return a + l.qtyLeft; }, 0);
+    var value = rows.reduce(function (a, l) { return a + l.qtyLeft * l.unitCost; }, 0);
+    var m = openModal('<header><h1>ล็อตคงเหลือ: ' + esc(p ? p.name : sku) + '</h1></header><div class="body">' +
+      '<div class="muted" style="font-size:14px">ขายออกจากล็อตบนสุดก่อน (FIFO) · รวม ' + left + ' ชิ้น · มูลค่าทุน ฿' + money(value) + '</div>' +
+      '<table class="table"><thead><tr><th>รับเมื่อ</th><th>เลขที่</th><th class="r">รับ</th><th class="r">เหลือ</th><th class="r">ทุน/ชิ้น</th><th>หมดอายุ</th></tr></thead><tbody>' +
+      (rows.map(function (l, i) {
+        return '<tr' + (i === 0 ? ' class="sel"' : '') + '><td>' + dateTime(l.receivedAt) + '</td><td class="num">' + esc(l.receiptNo) + '<div class="muted" style="font-size:12px">' + esc(l.note) + '</div></td>' +
+          '<td class="r num">' + l.qtyIn + '</td><td class="r num"><b>' + l.qtyLeft + '</b></td><td class="r num">' + money(l.unitCost) + '</td><td>' + esc(l.expiryDate || '—') + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="muted">ไม่มีของในล็อต — รับสินค้าเพื่อสร้างล็อตแรก</td></tr>') +
+      '</tbody></table></div><footer><button class="btn primary" data-x="close">ปิด</button></footer>', { wide: true });
+    $('[data-x=close]', m).onclick = function () { closeModal(); };
+  }).catch(fail);
 }
 
 /* =================================================================== */
@@ -1738,6 +1994,11 @@ var ACTIONS = {
   billDiscount: function () { askDiscount('bill'); },
   lineDisc: function (el) { S.cart.sel = Number(el.getAttribute('data-i')); askDiscount('line'); },
   holdBill: holdBill,
+  rcAddSku: function (el) { rcAdd(el.getAttribute('data-sku'), ''); var i = $('#rscan'); if (i) { i.value = ''; i.focus(); } drawRcSuggest(''); },
+  rcDel: function (el) { rcDraft().lines.splice(Number(el.getAttribute('data-i')), 1); rcSave(); drawRcLines(); },
+  rcClear: function () { confirm2('ล้างรายการ', 'ลบรายการรับทั้งหมดในใบนี้?', 'ล้าง', true).then(function (ok) { if (ok) { S.rc = null; store('em_receive', null); render(); loadReceive(); } }); },
+  rcCommit: rcCommit,
+  showLots: function (el) { showLots(el.getAttribute('data-sku')); },
   editQty: function (el) {
     var i = el && el.hasAttribute('data-i') ? Number(el.getAttribute('data-i')) : S.cart.sel;
     var l = S.cart.lines[i];
@@ -1864,6 +2125,8 @@ document.addEventListener('input', function (e) {
     if (out) out.textContent = '฿' + money(denomSum(p));
   }
   if (t.hasAttribute('data-ef') || t.hasAttribute('data-ec') || t.hasAttribute('data-ecc') || t.id === 'e-comp') edInput(t);
+  if (t.hasAttribute('data-rc') || t.hasAttribute('data-rch')) rcInput(t);
+  if (t.id === 'rscan') drawRcSuggest(/^\d{6,}$/.test(t.value.trim()) ? '' : t.value);
   var k = t.getAttribute('data-input');
   if (k === 'prodQ') { S.prodFilter.q = t.value; renderProductRows(); }
   if (k === 'stockQ') { S.stockFilter.q = t.value; renderStockRows(); }
@@ -1888,6 +2151,13 @@ document.addEventListener('keydown', function (e) {
     if (/^\d$/.test(e.key)) { e.preventDefault(); pinKey(e.key); }
     else if (e.key === 'Backspace') { e.preventDefault(); pinKey('del'); }
     else if (e.key === 'Enter') { e.preventDefault(); pinKey('ok'); }
+    return;
+  }
+  if (S.view === 'receive' && !modalStack.length && e.target.id === 'rscan' && e.key === 'Enter') {
+    e.preventDefault();
+    var v = e.target.value;
+    if (rcScan(v)) { e.target.value = ''; drawRcSuggest(''); }
+    else { var first = rcMatches(v)[0]; if (first) { rcAdd(first.sku, ''); e.target.value = ''; drawRcSuggest(''); } else toast('ไม่พบสินค้า "' + v + '"', true); }
     return;
   }
   if (S.view === 'products' && !modalStack.length && e.key === 'Enter') {
