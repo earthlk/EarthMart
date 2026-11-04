@@ -57,7 +57,7 @@ call('importProducts', T, [
       const out = g.doPost({ postData: { contents: route.request().postData() } });
       return route.fulfill({ status: 200, contentType: 'application/json', body: out.getContent(), headers: { 'access-control-allow-origin': '*' } });
     }
-    if (url.includes('qrcode-generator')) return route.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(require.resolve('qrcode-generator/qrcode.js'), 'utf8') });
+    if (url.includes('cdnjs')) return route.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(require.resolve('qrcode-generator/qrcode.js'), 'utf8') });
     if (url.startsWith(SITE)) {
       const f = path.join(WEB, new URL(url).pathname.replace(/^\/$/, '/index.html'));
       if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: '' });
