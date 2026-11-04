@@ -70,9 +70,7 @@ function api_commitSale(token, sale) {
 
       append_('Sales', header);
       appendMany_('SaleLines', lines);
-      addStockMoves_(s, lines.map(function (l) {
-        return { sku: l.sku, qtyPieces: -l.qty * l.multiplier, type: 'SALE', refNo: billNo, note: '' };
-      }));
+      addStockMoves_(s, explodeMoves_(lines, -1, 'SALE', billNo, ''));
       if (discount > 0) log_(s, 'DISCOUNT', billNo, 'ส่วนลด ' + discount + ' บาท', approver);
       priced.filter(function (l) { return l.openPrice; }).forEach(function (l) {
         log_(s, 'OPEN_PRICE', billNo, l.name + ' ราคา ' + l.unitPrice, '');
@@ -82,10 +80,32 @@ function api_commitSale(token, sale) {
   });
 }
 
+/**
+ * Stock moves for sold (sign -1) or voided (sign +1) lines. A recipe line moves its components instead.
+ */
+function explodeMoves_(lines, sign, type, refNo, note) {
+  var rec = recipesMap_();
+  var moves = [];
+  lines.forEach(function (l) {
+    var pieces = num_(l.qty) * (num_(l.multiplier) || 1);
+    var comps = rec[String(l.sku)];
+    if (comps && comps.length) {
+      comps.forEach(function (c) {
+        moves.push({ sku: c.sku, qtyPieces: round2_(sign * pieces * c.qty), type: type, refNo: refNo,
+                     note: (note ? note + ' · ' : '') + 'สูตร ' + l.name });
+      });
+    } else {
+      moves.push({ sku: String(l.sku), qtyPieces: sign * pieces, type: type, refNo: refNo, note: note });
+    }
+  });
+  return moves;
+}
+
 /** Re-price client lines from the sheet. */
 function priceLines_(inLines) {
   var products = {};
   readAll_('Products').forEach(function (p) { products[String(p.sku)] = p; });
+  var rec = recipesMap_();
   var codes = {};
   readAll_('Barcodes').forEach(function (b) { codes[String(b.barcode)] = b; });
 
@@ -96,6 +116,7 @@ function priceLines_(inLines) {
     var sku = code ? String(code.sku) : String(l.sku || '');
     var p = products[sku];
     if (!p || !bool_(p.active)) throw new Error('ไม่พบสินค้า ' + (l.barcode || l.sku));
+    if (!forSale_(p)) throw new Error(p.name + ' เป็นวัตถุดิบ ไม่ได้ตั้งให้ขายหน้าร้าน');
     var mult = code ? (num_(code.multiplier) || 1) : 1;
     var unitPrice;
     if (bool_(p.openPrice)) {
@@ -111,7 +132,7 @@ function priceLines_(inLines) {
     return {
       sku: sku, name: p.name, barcode: code ? String(code.barcode) : '', unitName: code ? code.unitName : (p.unit || 'ชิ้น'),
       multiplier: mult, qty: qty, unitPrice: unitPrice, lineDiscount: lineDiscount,
-      costPerPiece: num_(p.cost), openPrice: bool_(p.openPrice)
+      costPerPiece: p.type === 'recipe' ? recipeCost_(rec[sku], products) : num_(p.cost), openPrice: bool_(p.openPrice)
     };
   });
 }
@@ -196,9 +217,7 @@ function api_voidSale(token, billNo, reason, approvalId) {
       h.voidAt = now_();
       writeRow_('Sales', h);
       var lines = linesOf_(billNo);
-      addStockMoves_(s, lines.map(function (l) {
-        return { sku: String(l.sku), qtyPieces: num_(l.qty) * (num_(l.multiplier) || 1), type: 'VOID', refNo: billNo, note: reason };
-      }));
+      addStockMoves_(s, explodeMoves_(lines, 1, 'VOID', billNo, reason));
       log_(s, 'VOID', billNo, num_(h.total) + ' บาท · ' + reason, approver);
       return { billNo: billNo, status: 'VOID' };
     });

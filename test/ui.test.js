@@ -192,6 +192,43 @@ call('importProducts', T, [
   assert.deepStrictEqual(saved.barcodes.filter(b => b.sku === bread.sku).map(b => [b.unitName, b.multiplier, b.price]).sort(),
     [['ชิ้น', 1, null], ['แพ็ค', 6, 85]], 'barcodes per unit');
 
+  // Raw material (not sold) + recipe product built from components
+  await page.click('[data-act=selProduct][data-sku=""]');
+  await page.fill('#e-name', 'ฝาโดม 95');
+  await page.click('[data-ed=type][data-v=nobarcode]');
+  await page.fill('#e-cost', '0.56');
+  await page.click('[data-ef=forSaleOff]');
+  await page.click('[data-ed=save]');
+  await page.waitForSelector('#ped .muted:has-text("SKU P")');
+  await page.click('[data-act=selProduct][data-sku=""]');
+  await page.fill('#e-name', 'ชุดน้ำแข็ง+ฝา');
+  await page.click('[data-ed=type][data-v=recipe]');
+  await page.fill('#e-price', '6');
+  await page.fill('#e-unit', 'ชุด');
+  await page.fill('#e-comp', 'น้ำแข็ง');
+  await page.waitForSelector('#e-comp-sug button');
+  await page.keyboard.press('Enter');
+  await page.fill('#e-comp', 'ฝาโดม');
+  await page.click('#e-comp-sug button:has-text("ฝาโดม")');
+  await page.waitForFunction(() => document.querySelectorAll('.units .u.c:not(.head)').length === 2);
+  await page.fill('[data-ecc=qty][data-i="1"]', '2');
+  await page.click('[data-ef=quickKey]');
+  await page.click('[data-ed=icon][data-v=ice]');
+  await page.click('[data-ed=color][data-v=blue]');
+  await page.fill('#e-quickKeyGroup', 'ขนม');
+  await shot('09h-recipe');
+  await page.click('[data-ed=save]');
+  await page.waitForSelector('#ped .muted:has-text("SKU P")');
+  const b3 = call('bootstrap', T);
+  const set = b3.products.find(p => p.name === 'ชุดน้ำแข็ง+ฝา');
+  const lid = b3.products.find(p => p.name === 'ฝาโดม 95');
+  assert.ok(set && set.type === 'recipe' && lid.forSale === false, 'recipe + material saved');
+  assert.strictEqual(set.cost, 1.65 + 2 * 0.56, 'recipe cost');
+  assert.strictEqual(b3.recipes.filter(r => r.sku === set.sku).length, 2, 'two components');
+  assert.ok(await page.isVisible('#prows .prod-grid:has-text("ชุดน้ำแข็ง+ฝา") .tag:has-text("สูตรผสม")'));
+  assert.ok(await page.isVisible('#prows .prod-grid:has-text("ฝาโดม 95") .tag:has-text("วัตถุดิบ")'));
+  await shot('09i-list-types');
+
   // Sell it: pack barcode + quick key with SVG icon; edit qty; QR quick button
   await page.click('nav button[data-v=sale]');
   await page.click('.chip:has-text("ขนม")');
@@ -254,6 +291,19 @@ call('importProducts', T, [
   await page.click('[data-x=ok]');
   await page.waitForSelector('.modal h1:has-text("บันทึกแล้ว")');
   await page.keyboard.press('Escape');
+  // sell the recipe: components are cut, material is not sellable by name
+  await page.click('.key:has-text("ชุดน้ำแข็ง+ฝา")');
+  await page.waitForSelector('.line .sub:has-text("สูตร: น้ำแข็งแก้ว + ฝาโดม 95 ×2")');
+  await page.fill('#scan', 'ฝาโดม'); await page.keyboard.press('Enter');
+  await page.waitForSelector('.toast.err');
+  await page.click('[data-act=payQr]');
+  await page.waitForSelector('#qrbox svg');
+  await page.click('[data-x=ok]');
+  await page.waitForSelector('.modal h1:has-text("บันทึกแล้ว")');
+  await page.keyboard.press('Escape');
+  const after = call('bootstrap', T);
+  assert.strictEqual(after.products.find(p => p.name === 'ฝาโดม 95').onHand, -2, 'lid stock cut by 2');
+  assert.strictEqual(after.products.find(p => p.name === 'ชุดน้ำแข็ง+ฝา').onHand, 0, 'recipe has no own stock');
 
   // 10. Close shift
   await page.click('nav button[data-v=shift]');

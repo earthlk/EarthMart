@@ -5,6 +5,7 @@ const { makeContext } = require('./gasmock');
 
 const g = makeContext({ now: '2026-11-03T03:00:00Z' }); // 10:00 Bangkok
 let pass = 0;
+const round = n => Math.round(n * 100) / 100;
 const ok = (cond, msg) => { assert.ok(cond, msg); pass++; };
 const eq = (a, b, msg) => { assert.deepStrictEqual(a, b, msg); pass++; };
 
@@ -194,5 +195,70 @@ mustFail(/เข้าสู่ระบบ/, 'bootstrap', T2);
 // PIN lockout after 5 tries
 for (let i = 0; i < 5; i++) call('login', ownerId, '0000', DEV);
 mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
+
+// ===================== Recipes (สูตรผสม) + raw materials =====================
+{
+  const h = makeContext({ now: '2026-11-04T05:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c2 = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m2 = (fn, ...a) => { const r = c2(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  const f2 = (re, fn, ...a) => { const r = c2(fn, ...a); ok(!r.ok && re.test(r.error), fn + ' should fail ' + re + ' got ' + JSON.stringify(r)); };
+
+  // Old sheet without the forSale column / Recipes sheet -> first status call migrates it.
+  const prodSheet = h.__ss.getSheetByName('Products');
+  prodSheet.data[0] = prodSheet.data[0].slice(0, 18);
+  h.__ss.deleteSheet(h.__ss.getSheetByName('Recipes'));
+  delete h.__props.SCHEMA_VERSION;
+  h.createOwner('O', '1111');
+  const st2 = m2('status');
+  ok(h.__ss.getSheetByName('Recipes') && prodSheet.data[0][18] === 'forSale', 'schema migrated');
+  const T3 = m2('login', st2.users[0].userId, '1111', 'Dcounter2').token;
+  m2('registerDevice', T3, 'Dcounter2', 'เครื่อง');
+
+  const cup = m2('saveProduct', T3, { name: 'แก้ว 22oz', type: 'nobarcode', cost: 0.96, price: 0, forSale: false }, []).sku;
+  const lid = m2('saveProduct', T3, { name: 'ฝาโดม', type: 'nobarcode', cost: 0.56, price: 0, forSale: false }, []).sku;
+  const straw = m2('saveProduct', T3, { name: 'หลอด', type: 'nobarcode', cost: 0.32, price: 0, forSale: false }, []).sku;
+  const water = m2('saveProduct', T3, { name: 'น้ำ 600', type: 'barcode', cost: 4, price: 7 }, [{ barcode: '8850000000011', unitName: 'ชิ้น', multiplier: 1 }]).sku;
+  m2('importProducts', T3, 'sku,name,openingStock\n' + [cup, lid, straw, water].map(k => k + ',,100').join('\n'));
+  // import only adds opening stock to NEW products -> set counts instead
+  [cup, lid, straw, water].forEach(k => m2('setStockCount', T3, k, 100, 'สต็อกเปิด', ''));
+
+  f2(/อย่างน้อย 1/, 'saveProduct', T3, { name: 'ชุดว่าง', type: 'recipe', price: 5 }, [], []);
+  const ice = m2('saveProduct', T3, { name: 'น้ำแข็งแก้ว', type: 'recipe', price: 5, quickKey: true, plu: '101' }, [{ barcode: '8851111111111', unitName: 'ชิ้น', multiplier: 1 }],
+    [{ sku: cup, qty: 1 }, { sku: lid, qty: 1 }, { sku: straw, qty: 1 }]).sku;
+  const combo = m2('saveProduct', T3, { name: 'น้ำ+น้ำแข็ง', type: 'recipe', price: 12 }, [], [{ sku: water, qty: 1 }, { sku: cup, qty: 1 }]).sku;
+  f2(/สูตรซ้อนสูตร/, 'saveProduct', T3, { name: 'ซ้อน', type: 'recipe', price: 1 }, [], [{ sku: ice, qty: 1 }]);
+  f2(/ส่วนประกอบของ/, 'saveProduct', T3, { sku: cup, name: 'แก้ว 22oz', type: 'recipe', price: 1 }, [], [{ sku: lid, qty: 1 }]);
+
+  let b2 = m2('bootstrap', T3);
+  const iceP = b2.products.find(p => p.sku === ice);
+  eq(iceP.cost, 1.84, 'recipe cost = 0.96 + 0.56 + 0.32');
+  eq(b2.barcodes.filter(b => b.sku === ice).length, 0, 'recipe keeps no barcodes');
+  eq(b2.recipes.filter(r => r.sku === ice).length, 3, 'recipe rows returned');
+  eq(b2.products.find(p => p.sku === cup).forSale, false, 'material flagged');
+  eq(b2.products.find(p => p.sku === water).forSale, true, 'normal product for sale');
+  ok(!m2('stockList', T3).some(r => r.sku === ice), 'recipe not in stock list');
+  f2(/สูตรผสมไม่มีสต็อก/, 'setStockCount', T3, ice, 5, 'x', '');
+
+  m2('openShift', T3, 0, '');
+  f2(/วัตถุดิบ/, 'commitSale', T3, { saleUid: 'R0', payMethod: 'qr', lines: [{ sku: cup, qty: 1 }] });
+  const rs = m2('commitSale', T3, { saleUid: 'R1', payMethod: 'qr', lines: [{ sku: ice, qty: 3 }, { sku: combo, qty: 2 }] });
+  eq(rs.total, 39, '3x5 + 2x12');
+  const on = () => Object.fromEntries(m2('bootstrap', T3).products.map(p => [p.sku, p.onHand]));
+  let o = on();
+  eq([o[cup], o[lid], o[straw], o[water]], [95, 97, 97, 98], 'components cut: cup 3+2, lid 3, straw 3, water 2');
+  eq(o[ice], 0, 'recipe has no own stock moves');
+  const mv = m2('stockMoves', T3, cup);
+  ok(mv.some(x => /สูตร น้ำแข็งแก้ว/.test(x.note)), 'move note names the recipe');
+  const rep2 = m2('dailyReport', T3, '2026-11-04');
+  eq(rep2.grossProfit, round(39 - (3 * 1.84 + 2 * (4 + 0.96))), 'profit uses component costs');
+  m2('voidSale', T3, rs.billNo, 'ทดสอบ', '');
+  o = on();
+  eq([o[cup], o[lid], o[straw], o[water]], [100, 100, 100, 100], 'void restores components');
+  // switching a recipe back to a normal product removes its recipe rows
+  m2('saveProduct', T3, { sku: combo, name: 'น้ำ+น้ำแข็ง', type: 'nobarcode', price: 12 }, [], []);
+  eq(m2('bootstrap', T3).recipes.filter(r => r.sku === combo).length, 0, 'recipe rows cleared');
+}
 
 console.log('server tests passed:', pass);

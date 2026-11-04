@@ -3,7 +3,25 @@
  * internal EAN-13 barcodes for items without a barcode.
  */
 
-var PRODUCT_TYPES = ['barcode', 'nobarcode'];
+var PRODUCT_TYPES = ['barcode', 'nobarcode', 'recipe'];
+
+/** Blank forSale (rows written before the column existed) means "sold at the counter". */
+function forSale_(p) { return p.forSale === '' || p.forSale === undefined || p.forSale === null ? true : bool_(p.forSale); }
+
+/** { recipeSku: [{ sku, qty }] } */
+function recipesMap_() {
+  var map = {};
+  readAll_('Recipes').forEach(function (r) {
+    var k = String(r.sku);
+    (map[k] = map[k] || []).push({ sku: String(r.componentSku), qty: num_(r.qty) });
+  });
+  return map;
+}
+
+/** Cost of one recipe unit from the current component costs. */
+function recipeCost_(comps, bySku) {
+  return round2_((comps || []).reduce(function (a, c) { var p = bySku[c.sku]; return a + (p ? num_(p.cost) * c.qty : 0); }, 0));
+}
 
 /** Everything the client needs after login. */
 function api_bootstrap(token) {
@@ -14,6 +32,7 @@ function api_bootstrap(token) {
       isCounter: isCounter_(s.deviceId),
       settings: publicSettings_(),
       products: productsForClient_(),
+      recipes: readAll_('Recipes').map(function (r) { return { sku: String(r.sku), componentSku: String(r.componentSku), qty: num_(r.qty) }; }),
       barcodes: readAll_('Barcodes').map(function (b) {
         return { barcode: String(b.barcode), sku: String(b.sku), unitName: b.unitName,
                  multiplier: num_(b.multiplier) || 1, price: b.price === '' ? null : num_(b.price) };
@@ -25,7 +44,13 @@ function api_bootstrap(token) {
 
 /** All products incl. inactive (the products page can switch them back on); the sale screen filters by active. */
 function productsForClient_() {
-  return readAll_('Products').map(productOut_);
+  var rows = readAll_('Products'), bySku = {}, rec = recipesMap_();
+  rows.forEach(function (p) { bySku[String(p.sku)] = p; });
+  return rows.map(function (p) {
+    var o = productOut_(p);
+    if (o.type === 'recipe') o.cost = recipeCost_(rec[o.sku], bySku);
+    return o;
+  });
 }
 
 function productOut_(p) {
@@ -34,7 +59,7 @@ function productOut_(p) {
     cost: num_(p.cost), price: num_(p.price), minStock: num_(p.minStock), openPrice: bool_(p.openPrice),
     quickKey: bool_(p.quickKey), quickKeyGroup: p.quickKeyGroup || '', quickKeyOrder: num_(p.quickKeyOrder),
     icon: p.icon || '', color: p.color || '', plu: p.plu === '' ? '' : String(p.plu),
-    active: bool_(p.active), onHand: num_(p.onHand)
+    active: bool_(p.active), onHand: num_(p.onHand), forSale: forSale_(p)
   };
 }
 
@@ -54,14 +79,15 @@ function api_listProducts(token) {
  *            quickKeyGroup, quickKeyOrder, icon, color, plu, active }
  * barcodes: [{ barcode, unitName, multiplier, price? }]
  */
-function api_saveProduct(token, product, barcodes) {
+function api_saveProduct(token, product, barcodes, components) {
   return respond_(function () {
     var s = owner_(token);
-    return withLock_(function () { return saveProduct_(s, product, barcodes || []); });
+    return withLock_(function () { return saveProduct_(s, product, barcodes || [], components || []); });
   });
 }
 
-function saveProduct_(sess, input, barcodes) {
+function saveProduct_(sess, input, barcodes, components) {
+  components = components || [];
   var name = String(input.name || '').trim();
   if (!name) throw new Error('ต้องใส่ชื่อสินค้า');
   var price = num_(input.price);
@@ -77,6 +103,31 @@ function saveProduct_(sess, input, barcodes) {
   if (plu) {
     var dupPlu = all.filter(function (p) { return String(p.plu) === plu && String(p.sku) !== sku && bool_(p.active); })[0];
     if (dupPlu) throw new Error('PLU ' + plu + ' ซ้ำกับ ' + dupPlu.name);
+  }
+
+  // Recipe ("สูตรผสม"): no own stock or barcodes; selling it takes stock from its components.
+  var bySku = {};
+  all.forEach(function (p) { bySku[String(p.sku)] = p; });
+  var comps = [];
+  var rec = recipesMap_();
+  if (type === 'recipe') {
+    var seenC = {};
+    components.forEach(function (c) {
+      var csku = String(c.sku || '').trim(), q = round2_(num_(c.qty));
+      if (!csku) return;
+      var cp = bySku[csku];
+      if (!cp) throw new Error('ไม่พบส่วนประกอบ ' + csku);
+      if (csku === sku) throw new Error('ใส่สินค้าเป็นส่วนประกอบของตัวเองไม่ได้');
+      if (cp.type === 'recipe') throw new Error(cp.name + ' เป็นสูตรผสม — ใส่สูตรซ้อนสูตรไม่ได้');
+      if (!(q > 0)) throw new Error('จำนวนของ ' + cp.name + ' ต้องมากกว่า 0');
+      if (seenC[csku]) throw new Error(cp.name + ' ซ้ำในสูตร');
+      seenC[csku] = true;
+      comps.push({ sku: csku, qty: q });
+    });
+    if (!comps.length) throw new Error('สูตรผสมต้องมีส่วนประกอบอย่างน้อย 1 รายการ');
+    var usedIn = Object.keys(rec).filter(function (r) { return r !== sku && rec[r].some(function (c) { return c.sku === sku; }); })[0];
+    if (usedIn) throw new Error('สินค้านี้เป็นส่วนประกอบของ ' + (bySku[usedIn] ? bySku[usedIn].name : usedIn) + ' — เปลี่ยนเป็นสูตรผสมไม่ได้');
+    barcodes = [];
   }
 
   // Validate barcodes before writing anything.
@@ -101,7 +152,8 @@ function saveProduct_(sess, input, barcodes) {
 
   var row = {
     sku: sku, name: name, category: String(input.category || '').trim(), type: type,
-    unit: String(input.unit || 'ชิ้น'), cost: num_(input.cost), price: price, minStock: num_(input.minStock),
+    unit: String(input.unit || 'ชิ้น'), cost: type === 'recipe' ? recipeCost_(comps, bySku) : num_(input.cost), price: price,
+    minStock: type === 'recipe' ? 0 : num_(input.minStock), forSale: type === 'recipe' ? true : input.forSale !== false,
     openPrice: !!input.openPrice, quickKey: !!input.quickKey, quickKeyGroup: String(input.quickKeyGroup || ''),
     quickKeyOrder: num_(input.quickKeyOrder), icon: String(input.icon || ''), color: String(input.color || ''),
     plu: plu, active: input.active === undefined ? true : !!input.active,
@@ -119,7 +171,19 @@ function saveProduct_(sess, input, barcodes) {
     log_(sess, 'PRODUCT_ADD', sku, name, '');
   }
   replaceBarcodes_(sku, clean);
+  if (type === 'recipe' || rec[sku]) replaceRecipe_(sku, comps);
   return { sku: sku };
+}
+
+function replaceRecipe_(sku, comps) {
+  var keep = readAll_('Recipes').filter(function (r) { return String(r.sku) !== sku; });
+  var sh = sheet_('Recipes');
+  var width = SCHEMA.Recipes.length;
+  var last = sh.getLastRow();
+  if (last > 1) sh.getRange(2, 1, last - 1, width).clearContent();
+  var all = keep.concat(comps.map(function (c) { return { sku: sku, componentSku: c.sku, qty: c.qty }; }))
+    .map(function (r) { return toRow_('Recipes', r); });
+  if (all.length) sh.getRange(2, 1, all.length, width).setValues(all);
 }
 
 function nextSku_(all) {

@@ -31,9 +31,9 @@ function addStockMoves_(sess, moves) {
 function api_stockList(token) {
   return respond_(function () {
     session_(token);
-    return readAll_('Products').filter(function (p) { return bool_(p.active); }).map(function (p) {
+    return readAll_('Products').filter(function (p) { return bool_(p.active) && p.type !== 'recipe'; }).map(function (p) {
       return { sku: String(p.sku), name: p.name, category: p.category, unit: p.unit || 'ชิ้น',
-               onHand: num_(p.onHand), minStock: num_(p.minStock), cost: num_(p.cost) };
+               onHand: num_(p.onHand), minStock: num_(p.minStock), cost: num_(p.cost), forSale: forSale_(p) };
     });
   });
 }
@@ -52,6 +52,7 @@ function api_setStockCount(token, sku, countedPieces, reason, approvalId) {
     return withLock_(function () {
       var p = readAll_('Products').filter(function (x) { return String(x.sku) === String(sku); })[0];
       if (!p) throw new Error('ไม่พบสินค้า');
+      if (p.type === 'recipe') throw new Error('สูตรผสมไม่มีสต็อกของตัวเอง — ปรับที่ส่วนประกอบแทน');
       var diff = round2_(counted - num_(p.onHand));
       if (diff !== 0) {
         addStockMoves_(s, [{ sku: String(sku), qtyPieces: diff, type: 'ADJUST', refNo: '', note: reason }]);

@@ -176,6 +176,7 @@ a{color:var(--brand-text)}
 .units{border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .units .u{display:grid;grid-template-columns:64px minmax(0,1fr) 52px 72px 28px;gap:6px;padding:6px 8px;align-items:center;border-bottom:1px solid var(--line-soft)}
 .units .u:last-child{border-bottom:0}
+.units .u.c{grid-template-columns:minmax(0,1fr) 64px 44px 60px 28px}
 .units .u.head{font-size:12px;color:var(--muted);background:var(--surface-2);border-bottom:1px solid var(--line);padding:7px 8px}
 .units input{height:32px;font-size:14px;padding:0 6px;width:100%}
 .units .x{width:28px;height:28px;border:0;background:transparent;color:var(--muted);cursor:pointer;border-radius:6px;font-size:16px}
