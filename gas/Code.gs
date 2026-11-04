@@ -55,7 +55,11 @@ var DEFAULT_SETTINGS = {
   backupKeepDays: '30',
   theme: 'light',
   palette: 'forest',
-  autoLockMinutes: '5'
+  autoLockMinutes: '5',
+  shopHours: '',
+  customerWelcome: 'ยินดีต้อนรับค่ะ',
+  customerPromoTitle: '',
+  customerPromoText: ''
 };
 
 /* ------------------------------------------------------------------ */

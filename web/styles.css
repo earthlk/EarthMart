@@ -84,6 +84,8 @@ a{color:var(--brand-text)}
 .topbar nav button{height:34px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:var(--header-muted);cursor:pointer}
 .topbar nav button.on{background:var(--header-active);color:var(--header-ink);font-weight:600}
 .topbar .meta{font-size:13px;color:var(--header-muted);white-space:nowrap}
+.topbar .dot{width:9px;height:9px;border-radius:50%;background:var(--header-muted);display:inline-block;margin-right:6px}
+.topbar .dot.on{background:#4ADE80}
 .topbar .btn{height:34px;background:transparent;color:var(--header-ink);border-color:var(--header-line);font-size:13px;padding:0 12px}
 .page{flex:1 1 auto;min-height:0;padding:16px;display:flex;gap:16px;overflow:auto}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:12px}

@@ -32,7 +32,8 @@ call('importProducts', T, [
 
 (async () => {
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1366, height: 800 } });
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 800 } });
+  const page = await ctx.newPage();
   const errors = []; errorsRef = errors;
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
@@ -50,7 +51,7 @@ call('importProducts', T, [
     Object.defineProperty(navigator, 'serial', { value: { getPorts: async () => [port], requestPort: async () => port } });
   }, [DEV]);
 
-  await page.route('**/*', async route => {
+  const handler = async route => {
     const url = route.request().url();
     if (url.startsWith(API)) {
       const out = g.doPost({ postData: { contents: route.request().postData() } });
@@ -65,7 +66,8 @@ call('importProducts', T, [
     }
     if (url.includes('fonts.g')) return route.fulfill({ contentType: 'text/css', body: '' });
     return route.abort();
-  });
+  };
+  await page.route('**/*', handler);
 
   const shot = n => page.screenshot({ path: path.join(SHOTS, n + '.png') });
 
@@ -94,6 +96,16 @@ call('importProducts', T, [
   assert.match(await page.textContent('#o-total'), /520/);
   await page.click('[data-form=openShift] button[type=submit]');
 
+  // 3b. Customer display in a second window of the same browser
+  const cd = await page.context().newPage();
+  await cd.setViewportSize({ width: 1024, height: 600 });
+  cd.on('pageerror', e => errors.push('customer: ' + e.message));
+  await cd.route('**/*', handler);
+  await cd.goto(SITE + '?page=customer');
+  await cd.waitForSelector('#cd');
+  await cd.waitForFunction(() => /ยินดีต้อนรับ/.test(document.body.textContent));
+  await cd.screenshot({ path: path.join(SHOTS, 'c1-idle.png') });
+
   // 4. Sale: scan pack barcode, quick key, PLU, multiplier
   await page.waitForSelector('#scan:not([disabled])');
   await page.fill('#scan', '8851234567906'); await page.keyboard.press('Enter');
@@ -107,12 +119,17 @@ call('importProducts', T, [
   const total = await page.textContent('#totalbar .amt');
   assert.match(total, /141\.00/, 'total 80+30+5*2+21 = 141, got ' + total);
   await shot('03-sale');
+  await cd.waitForFunction(() => /รายการของคุณ/.test(document.body.textContent) && /141\.00/.test(document.body.textContent));
+  assert.match(await cd.textContent('#cd'), /เพิ่งเพิ่ม/);
+  await cd.screenshot({ path: path.join(SHOTS, 'c2-scan.png') });
 
   // 5. Pay by QR first to see the PromptPay QR, then cash
   await page.keyboard.press('F12');
   await page.click('#pm button[data-m=qr]');
   await page.waitForSelector('#qrbox svg');
   await shot('04-pay-qr');
+  await cd.waitForSelector('#cdqr svg');
+  await cd.screenshot({ path: path.join(SHOTS, 'c3-pay.png') });
   await page.click('#pm button[data-m=cash]');
   await page.click('[data-q="500"]');
   assert.match(await page.textContent('#chg'), /359\.00/);
@@ -120,6 +137,12 @@ call('importProducts', T, [
   await page.waitForSelector('.modal h1:has-text("บันทึกแล้ว")');
   await page.waitForTimeout(300);
   await shot('05-receipt');
+  await cd.waitForFunction(() => /ชำระเงินเรียบร้อย/.test(document.body.textContent) && /359\.00/.test(document.body.textContent));
+  await cd.screenshot({ path: path.join(SHOTS, 'c4-done.png') });
+  // a reloaded display asks the POS for the current state
+  await cd.reload(); await cd.waitForSelector('#cd');
+  await cd.waitForFunction(() => /ยินดีต้อนรับ|ชำระเงินเรียบร้อย/.test(document.body.textContent));
+  await cd.close();
   assert.ok(await page.evaluate(() => window.__printed >= 1), 'receipt printed');
   // Drawer is in "none" mode yet -> no kick
   assert.strictEqual((await page.evaluate(() => window.__serialWrites)).length, 0);

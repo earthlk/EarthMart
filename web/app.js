@@ -252,6 +252,7 @@ function applyTheme() {
 /* =================================================================== */
 
 function start() {
+  if (window.CustomerDisplay && CustomerDisplay.isDisplay) return CustomerDisplay.startDisplay();
   S.deviceId = deviceId();
   readConnectLink();
   api('status').then(function (st) {
@@ -378,6 +379,7 @@ function boot() {
     setCatalog(d.products, d.barcodes, d.recipes);
     applyTheme();
     newCart();
+    cdPublish('idle');
     S.lastActivity = Date.now();
     go(S.isCounter && !S.shift ? 'shift' : 'sale');
   });
@@ -448,6 +450,8 @@ function frame(inner) {
   return '<header class="topbar"><span class="brand">' + esc(S.settings.shopName || 'EarthMart') + '</span><nav>' + nav + '</nav>' +
     '<span class="grow"></span><span class="meta">' + shiftTxt + ' · ' + role + ': ' + esc(S.user ? S.user.name : '') + '</span>' +
     (S.shift && S.isCounter ? '<button class="btn" data-act="cashMoveModal">เงินเข้า/ออก</button>' : '') +
+    (S.isCounter ? '<button class="btn" data-act="openCustomer" id="cdbtn" title="เปิดจอลูกค้าบนจอที่ 2"><span class="dot' +
+      (window.CustomerDisplay && CustomerDisplay.pos.connected() ? ' on' : '') + '"></span>จอลูกค้า</button>' : '') +
     '<button class="btn" data-act="logout">ออก</button></header>' + banner + inner;
 }
 
@@ -491,12 +495,13 @@ function addItem(p, b, qty) {
     var key = p.sku + '|' + (b ? b.barcode : '') + '|' + unitPrice;
     var found = -1;
     S.cart.lines.forEach(function (l, i) { if (l.key === key) found = i; });
-    if (found >= 0) { S.cart.lines[found].qty += qty; S.cart.sel = found; }
+    if (found >= 0) { S.cart.lines[found].qty += qty; S.cart.sel = found; S.cart.lastIdx = found; }
     else {
       S.cart.lines.push({ key: key, sku: p.sku, barcode: b ? b.barcode : '', name: p.name,
         unitName: b ? b.unitName : (p.unit || 'ชิ้น'), multiplier: b ? b.multiplier : 1, qty: qty,
         unitPrice: unitPrice, lineDiscount: 0, openPrice: p.openPrice });
       S.cart.sel = S.cart.lines.length - 1;
+      S.cart.lastIdx = S.cart.sel;
     }
     S.suggest = [];
     renderCartOnly();
@@ -505,6 +510,24 @@ function addItem(p, b, qty) {
     prompt2('ราคาเปิด: ' + p.name, 'ราคาต่อหน่วย (บาท)', '', { type: 'number', inputmode: 'decimal', step: '0.25', ok: 'ใส่ในบิล' })
       .then(function (v) { var n = round2(Number(v)); if (v !== null && n > 0) doAdd(n); else if (v !== null) toast('ราคาไม่ถูกต้อง', true); });
   } else doAdd(unitPriceOf(p, b));
+}
+
+/* --------------------------- Customer display ---------------------------- */
+
+/** Publish the bill to the customer display (2nd screen). mode: idle | scan | pay | done. */
+function cdPublish(mode, extra) {
+  if (!window.CustomerDisplay || !S.cart) return;
+  var t = cartTotals();
+  mode = mode || (S.cart.lines.length ? 'scan' : 'idle');
+  var last = S.cart.lines[S.cart.lastIdx];
+  var st = Object.assign({
+    mode: mode, shopName: S.settings.shopName, welcome: S.settings.customerWelcome, hours: S.settings.shopHours,
+    promoTitle: S.settings.customerPromoTitle, promoText: S.settings.customerPromoText, thanks: S.settings.receiptFooter,
+    lines: S.cart.lines.map(function (l) { return { name: l.name + (l.multiplier > 1 ? ' (' + l.unitName + ')' : ''), qty: l.qty, total: round2(l.qty * l.unitPrice), discount: l.lineDiscount }; }),
+    last: last ? { name: last.name, price: last.unitPrice } : null,
+    items: t.items, subtotal: t.subtotal, discount: t.discount, total: t.total
+  }, extra || {});
+  CustomerDisplay.pos.publish(st);
 }
 
 function cartTotals() {
@@ -596,6 +619,7 @@ function renderCartOnly() {
       (l.lineDiscount ? '−' + money(l.lineDiscount).replace(/\.00$/, '') : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>') +
       '</button></div></div>';
   }).join('');
+  if (!$('#pm')) cdPublish();
   var hb = $('[data-act=holdBill]');
   if (hb) hb.textContent = 'พักบิล' + (heldBills().length ? ' (' + heldBills().length + ')' : '');
   var t = cartTotals();
@@ -867,7 +891,10 @@ function openPay(initial) {
       : '<div class="banner" style="border-radius:8px">ยังไม่ได้ตั้งเบอร์พร้อมเพย์ (ตั้งค่า › ร้าน)</div>') + '</div>' +
     '<div id="pm-transfer" class="col hidden"><div class="muted">ตรวจยอดโอนในแอปธนาคารก่อน แล้วกด "ได้รับเงินแล้ว"</div></div>' +
     '<label class="row" style="color:var(--ink);font-size:15px"><input type="checkbox" id="autoprint" ' + (store('em_autoprint') === '0' ? '' : 'checked') + '> พิมพ์ใบเสร็จ</label>' +
-    '</div><footer><button class="btn" data-x="cancel">ยกเลิก (Esc)</button><button class="btn primary lg" data-x="ok" style="height:52px;font-size:17px">ยืนยัน (Enter)</button></footer>');
+    '</div><footer><button class="btn" data-x="cancel">ยกเลิก (Esc)</button><button class="btn primary lg" data-x="ok" style="height:52px;font-size:17px">ยืนยัน (Enter)</button></footer>',
+    { onClose: function () { if (!paid) cdPublish(); } });
+  var paid = false;
+  cdPublish('pay', { method: 'cash' });
 
   var recv = $('#recv', m);
   var update = function () {
@@ -885,6 +912,7 @@ function openPay(initial) {
       $all('#pm button', m).forEach(function (x) { x.classList.toggle('on', x === b); });
       ['cash', 'qr', 'transfer'].forEach(function (k) { $('#pm-' + k, m).classList.toggle('hidden', k !== method); });
       if (method === 'qr' && hasPP) drawQr($('#qrbox', m), promptPayPayload(S.settings.promptPayId, t.total));
+      cdPublish('pay', { method: method, qr: method === 'qr' && hasPP ? promptPayPayload(S.settings.promptPayId, t.total) : '' });
       if (method === 'cash') recv.focus();
       update();
     };
@@ -905,6 +933,8 @@ function openPay(initial) {
       })
     };
     api('commitSale', S.token, sale).then(function (rc) {
+      paid = true;
+      cdPublish('done', { method: rc.payMethod, total: rc.total, received: rc.received, change: rc.change });
       closeModal();
       var print = $('#autoprint', m).checked;
       newCart();
@@ -1888,7 +1918,10 @@ function renderSettings() {
   return '<div class="page" style="flex-direction:column;gap:14px"><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px">' +
     '<form class="card pad col" data-form="settings" style="gap:10px"><h2>ร้าน</h2>' + f('shopName', 'ชื่อร้าน (บนใบเสร็จ)') + f('shopAddress', 'ที่อยู่') +
     f('taxId', 'เลขผู้เสียภาษี', 'ถ้ามี') + f('promptPayId', 'พร้อมเพย์', 'เบอร์มือถือ / เลขบัตร 13 หลัก') + f('receiptFooter', 'ข้อความท้ายใบเสร็จ') +
-    f('billPrefix', 'คำนำหน้าเลขบิล', 'เว้นว่างได้') + '<button class="btn primary" type="submit">บันทึก</button></form>' +
+    f('billPrefix', 'คำนำหน้าเลขบิล', 'เว้นว่างได้') +
+    '<h2 style="margin:8px 0 0">จอลูกค้า</h2>' + f('customerWelcome', 'ข้อความต้อนรับ', 'ยินดีต้อนรับค่ะ') + f('shopHours', 'เวลาเปิด–ปิด', 'เช่น เปิดทุกวัน 06:00–22:00') +
+    f('customerPromoTitle', 'โปรโมชั่น (หัวข้อ)', 'เว้นว่าง = ไม่แสดง') + f('customerPromoText', 'โปรโมชั่น (รายละเอียด)', 'เช่น ซื้อ 2 ขวด 25 บาท') +
+    '<button class="btn primary" type="submit">บันทึก</button></form>' +
     '<form class="card pad col" data-form="settings" style="gap:10px"><h2>ธีม & LINE</h2>' +
     '<div class="field"><label for="s-theme">โหมดสี (ทั้งร้าน)</label><select id="s-theme" data-skey="theme">' + ['light', 'dark', 'system'].map(function (t) {
       return '<option value="' + t + '"' + (st.theme === t ? ' selected' : '') + '>' + { light: 'สว่าง', dark: 'มืด', system: 'ตามเครื่อง' }[t] + '</option>';
@@ -1994,6 +2027,10 @@ var ACTIONS = {
   billDiscount: function () { askDiscount('bill'); },
   lineDisc: function (el) { S.cart.sel = Number(el.getAttribute('data-i')); askDiscount('line'); },
   holdBill: holdBill,
+  openCustomer: function () {
+    if (!CustomerDisplay.pos.open()) return toast('เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาต pop-up ให้เว็บนี้ก่อน', true);
+    toast('ลากหน้าต่างไปจอที่ 2 แล้วดับเบิลคลิกเพื่อเต็มจอ');
+  },
   rcAddSku: function (el) { rcAdd(el.getAttribute('data-sku'), ''); var i = $('#rscan'); if (i) { i.value = ''; i.focus(); } drawRcSuggest(''); },
   rcDel: function (el) { rcDraft().lines.splice(Number(el.getAttribute('data-i')), 1); rcSave(); drawRcLines(); },
   rcClear: function () { confirm2('ล้างรายการ', 'ลบรายการรับทั้งหมดในใบนี้?', 'ล้าง', true).then(function (ok) { if (ok) { S.rc = null; store('em_receive', null); render(); loadReceive(); } }); },
@@ -2209,6 +2246,7 @@ setInterval(function () {
 }, 30000);
 
 /* Expose a few pure helpers for testing. */
+if (window.CustomerDisplay) CustomerDisplay.pos.onStatus = function (on) { var d = $('#cdbtn .dot'); if (d) d.classList.toggle('on', on); };
 window.__em = { promptPayPayload: promptPayPayload, crc16: crc16, S: S, conn: conn };
 
 start();
