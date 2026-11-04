@@ -176,6 +176,7 @@ function api_writeOff(token, wo) {
       fifoFlush_(ctx);
       addStockMoves_(s, [{ sku: String(wo.sku), qtyPieces: -qty, type: 'WRITEOFF', refNo: ref, note: reason + (wo.note ? ': ' + wo.note : '') }]);
       log_(s, 'WRITEOFF', ref, p.name + ' ' + qty + ' ' + (p.unit || 'ชิ้น') + ' · ' + reason + ' · ทุน ' + cost + ' บาท', approver);
+      if (reason === 'หมดอายุ') markExpiredLotsWrittenOff_(s, ref);
       return { refNo: ref, cost: cost };
     });
   });

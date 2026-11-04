@@ -80,15 +80,14 @@ function api_expiryList(token) {
     var rows = expiryRows_();
     var today = fmtDate_(now_(), 'yyyy-MM-dd');
     var month = today.slice(0, 7);
+    var wos = expiryWriteOffs_();
     var loss = 0;
-    readAll_('LotUse').forEach(function (u) {
-      if (String(u.refNo).indexOf('WO') === 0 && u.createdAt instanceof Date && fmtDate_(u.createdAt, 'yyyy-MM') === month) loss += num_(u.qty) * num_(u.unitCost);
-    });
+    wos.forEach(function (w) { if (w.at instanceof Date && fmtDate_(w.at, 'yyyy-MM') === month) loss += w.cost; });
     var todo = rows.filter(function (r) { return r.todo; }).sort(function (a, b) { return a.daysLeft - b.daysLeft; });
     var done = rows.filter(function (r) { return r.status && !r.todo; })
       .sort(function (a, b) { return (b.at instanceof Date ? b.at.getTime() : 0) - (a.at instanceof Date ? a.at.getTime() : 0); }).slice(0, 60);
     return {
-      todo: todo, done: done,
+      todo: todo, done: done, writeoffs: wos.slice(0, 100),
       stats: {
         expired: todo.filter(function (r) { return r.todo === 'expired'; }).length,
         near: todo.filter(function (r) { return r.todo === 'near'; }).length,
@@ -136,7 +135,7 @@ function api_expiryAction(token, act) {
             cost = fifoTake_(ctx, lot.sku, found, ref, p);
             ctx.open[String(lot.sku)].sort(function (a, b) { return (a._row || 1e9) - (b._row || 1e9); });
             fifoFlush_(ctx);
-            addStockMoves_(s, [{ sku: String(lot.sku), qtyPieces: -found, type: 'WRITEOFF', refNo: ref, note: 'หมดอายุ ' + expiryDate_(lot) }]);
+            addStockMoves_(s, [{ sku: String(lot.sku), qtyPieces: -found, type: 'WRITEOFF', refNo: ref, note: 'หมดอายุ ' + expiryDate_(lot) + ' · หน้าหมดอายุ' }]);
           }
           log_(s, 'WRITEOFF', ref, p.name + ' ' + found + ' ' + (p.unit || 'ชิ้น') + ' · หมดอายุ · ทุน ' + cost + ' บาท', approver);
           out.cost = cost;
@@ -204,5 +203,49 @@ function moveMarkdown_(items, sign) {
     if (!l) return;
     l.markdownLeft = Math.max(0, num_(l.markdownLeft) + sign * it.qty);
     sh.getRange(l._row, col).setValue(l.markdownLeft);
+  });
+}
+
+/**
+ * Every write-off with reason "หมดอายุ" — from this page or from the Stock page during a stock check —
+ * newest first: [{ at, refNo, sku, name, unit, qty, cost, source: 'expiry' | 'stock', by, note }].
+ */
+function expiryWriteOffs_() {
+  var products = {};
+  readAll_('Products').forEach(function (p) { products[String(p.sku)] = p; });
+  var users = {};
+  readAll_('Users').forEach(function (u) { users[u.userId] = u.name; });
+  var cost = {};
+  readAll_('LotUse').forEach(function (u) { cost[u.refNo] = (cost[u.refNo] || 0) + num_(u.qty) * num_(u.unitCost); });
+  return readAll_('StockMoves').filter(function (m) {
+    return m.type === 'WRITEOFF' && String(m.note).indexOf('หมดอายุ') === 0;
+  }).reverse().map(function (m) {
+    var p = products[String(m.sku)] || {};
+    var note = String(m.note);
+    return {
+      at: m.createdAt, refNo: m.refNo, sku: String(m.sku), name: p.name || m.sku, unit: p.unit || 'ชิ้น',
+      qty: -num_(m.qtyPieces), cost: round2_(cost[m.refNo] || 0),
+      source: note.indexOf('หน้าหมดอายุ') >= 0 ? 'expiry' : 'stock',
+      by: users[m.userId] || '', note: note.replace(/^หมดอายุ:?\s*/, '').replace(/\s*·\s*หน้าหมดอายุ$/, '')
+    };
+  });
+}
+
+/**
+ * Stock page write-off with reason "หมดอายุ": the lots it took from that are already past expiry are
+ * marked handled (WRITEOFF) so they leave the Expiry page to-do list. Caller holds the lock.
+ */
+function markExpiredLotsWrittenOff_(s, ref) {
+  var used = {};
+  readAll_('LotUse').forEach(function (u) { if (u.refNo === ref) used[u.lotId] = (used[u.lotId] || 0) + num_(u.qty); });
+  readAll_('Lots').forEach(function (l) {
+    if (!used[l.lotId] || !l.expiryDate) return;
+    if (daysUntil_(expiryDate_(l)) > 0) return;
+    l.expStatus = 'WRITEOFF';
+    l.expFound = num_(l.expFound) + used[l.lotId];
+    l.markdownLeft = 0;
+    l.expBy = s.userId;
+    l.expAt = now_();
+    writeRow_('Lots', l);
   });
 }

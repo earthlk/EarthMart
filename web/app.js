@@ -1734,6 +1734,8 @@ function showLots(sku) {
 /* Expiry management (จัดการสินค้าหมดอายุ)                                */
 /* =================================================================== */
 
+function fmtYmd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+
 function thDate(ymd) {
   var M = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   var d = String(ymd || '').slice(0, 10).split('-');
@@ -1744,9 +1746,11 @@ function renderExpiry() {
   var tab = S.expTab || 'todo';
   return '<div class="page"><div class="exp"><div class="exp-main"><div class="kpis" id="xkpi"></div>' +
     '<section class="card stk-main"><div class="tabs"><button class="tab' + (tab === 'todo' ? ' on' : '') + '" data-act="expTab" data-t="todo" id="xtab-todo">ต้องจัดการ</button>' +
-    '<button class="tab' + (tab === 'done' ? ' on' : '') + '" data-act="expTab" data-t="done">จัดการแล้ว</button><span class="grow"></span>' +
+    '<button class="tab' + (tab === 'done' ? ' on' : '') + '" data-act="expTab" data-t="done">จัดการแล้ว</button>' +
+    '<button class="tab' + (tab === 'wo' ? ' on' : '') + '" data-act="expTab" data-t="wo">ประวัติตัดหมดอายุ</button><span class="grow"></span>' +
     '<span class="muted" style="align-self:center;font-size:13px;padding-right:6px">เตือนตามวันที่ ไม่ขึ้นกับจำนวนคงเหลือ</span></div>' +
-    '<div class="exp-grid head"><div>สินค้า</div><div>ล็อต (วันรับ · จำนวนรับ)</div><div>หมดอายุ</div><div class="r">จัดการ</div></div>' +
+    (tab === 'wo' ? '<div class="exp-grid head"><div>สินค้า</div><div>วันที่ตัด · โดย</div><div>ตัดจาก</div><div class="r">จำนวน · ทุนที่เสีย</div></div>'
+      : '<div class="exp-grid head"><div>สินค้า</div><div>ล็อต (วันรับ · จำนวนรับ)</div><div>หมดอายุ</div><div class="r">จัดการ</div></div>') +
     '<div class="stk-rows" id="xrows"><div class="empty">กำลังโหลด…</div></div></section></div>' +
     '<aside class="stk-side"><div class="card pad" id="xact"></div><div class="card pad" id="xset"></div></aside></div></div>';
 }
@@ -1766,8 +1770,8 @@ function drawExpiry() {
   var k = $('#xkpi');
   if (k) {
     var c = function (label, v, cls) { return '<div class="card kpi"' + (cls === 'warn' ? ' style="background:var(--warn-soft);border-color:var(--warn-line)"' : '') + '><div class="' + (cls === 'warn' ? 'warn-text' : cls === 'amber' ? 'amber-text' : 'muted') + '">' + label + '</div><div class="v num' + (cls === 'warn' ? ' warn-text' : '') + '">' + v + '</div></div>'; };
-    k.innerHTML = c('หมดอายุ · ต้องเก็บออก', d.stats.expired + ' ล็อต', 'warn') + c('ใกล้หมดอายุ · ควรลดราคา', d.stats.near + ' ล็อต', 'amber') +
-      c('จัดการแล้ววันนี้', d.stats.doneToday + ' ล็อต') + c('ตัดเสียเดือนนี้', '฿' + money(d.stats.lossMonth));
+    k.innerHTML = c('หมดอายุ · ต้องเก็บออก', d.stats.expired + ' ล็อต', d.stats.expired ? 'warn' : '') + c('ใกล้หมดอายุ · ควรลดราคา', d.stats.near + ' ล็อต', 'amber') +
+      c('จัดการแล้ววันนี้', d.stats.doneToday + ' ล็อต') + c('ตัดของหมดอายุเดือนนี้', '฿' + money(d.stats.lossMonth));
   }
   var t = $('#xtab-todo'); if (t) t.textContent = 'ต้องจัดการ (' + d.todo.length + ')';
   var box = $('#xrows');
@@ -1788,7 +1792,14 @@ function drawExpiry() {
         '<div><span class="tag ' + (exp ? 'warn' : 'amber') + '">' + thDate(r.expiryDate) + ' · ' + badge + '</span></div>' +
         '<div class="row" style="justify-content:flex-end;gap:6px;flex-wrap:wrap">' + acts + '</div></div>';
     };
-    if (S.expTab === 'done') box.innerHTML = d.done.length ? d.done.map(row).join('') : '<div class="empty">ยังไม่มี</div>';
+    if (S.expTab === 'wo') box.innerHTML = (d.writeoffs || []).length ? d.writeoffs.map(function (w) {
+      var at = new Date(w.at);
+      return '<div class="exp-grid"><div><div style="font-weight:600">' + esc(w.name) + '</div><div class="muted" style="font-size:12px">' + esc(w.refNo) + (w.note ? ' · ' + esc(w.note) : '') + '</div></div>' +
+        '<div style="font-size:14px">' + thDate(fmtYmd(at)) + ' ' + String(at.getHours()).padStart(2, '0') + ':' + String(at.getMinutes()).padStart(2, '0') + '<div class="muted" style="font-size:12px">' + esc(w.by) + '</div></div>' +
+        '<div><span class="tag ' + (w.source === 'stock' ? 'blue' : 'gray') + '">' + (w.source === 'stock' ? 'เช็กสต็อก' : 'หน้าหมดอายุ') + '</span></div>' +
+        '<div class="r num">' + w.qty + ' ' + esc(w.unit) + ' · <b>฿' + money(w.cost) + '</b></div></div>';
+    }).join('') : '<div class="empty">ยังไม่มีการตัดของหมดอายุ</div>';
+    else if (S.expTab === 'done') box.innerHTML = d.done.length ? d.done.map(row).join('') : '<div class="empty">ยังไม่มี</div>';
     else {
       var ex = d.todo.filter(function (r) { return r.todo === 'expired'; }), nr = d.todo.filter(function (r) { return r.todo === 'near'; });
       box.innerHTML = (ex.length ? '<div class="exp-sec warn">หมดอายุ · เก็บออกจากชั้น</div>' + ex.map(row).join('') : '') +
@@ -1870,7 +1881,7 @@ function expSave() {
 
 var stockRows = [];
 var MOVE_TH = { OPEN: 'สต็อกเปิด', RECEIVE: 'รับเข้า', SALE: 'ขาย', VOID: 'ยกเลิกบิล', ADJUST: 'ปรับยอด/ตรวจนับ', WRITEOFF: 'ตัดเสีย' };
-var WO_REASONS = ['เสียหาย', 'สูญหาย', 'ใช้ในร้าน'];
+var WO_REASONS = ['หมดอายุ', 'เสียหาย', 'สูญหาย', 'ใช้ในร้าน'];
 
 function renderStock() {
   var tab = S.stockTab || 'list';
@@ -2072,7 +2083,7 @@ function drawWriteOff() {
   var w = S.wo = S.wo || { sku: '', qty: '', reason: 'เสียหาย', lotId: '' };
   var p = w.sku ? S.idx.bySku[w.sku] : null;
   var est = p ? round2((Number(w.qty) || 0) * p.cost) : 0;
-  box.innerHTML = '<h2>ตัดของเสีย</h2>' +
+  box.innerHTML = '<h2>ตัดของเสีย / หมดอายุ</h2>' +
     '<div class="field" style="position:relative"><label for="wo-q">สินค้า</label>' +
     (p ? '<div class="row" style="justify-content:space-between;border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px"><b>' + esc(p.name) + '</b>' +
       (w.lotId ? '<span class="tag amber">เฉพาะล็อตนี้</span>' : '') + '<button class="btn sm ghost" data-act="woClear" aria-label="เปลี่ยนสินค้า">เปลี่ยน</button></div>'
@@ -2081,6 +2092,7 @@ function drawWriteOff() {
     '<div class="row" style="flex-wrap:wrap;gap:6px">' + WO_REASONS.map(function (r) {
       return '<button class="chip' + (w.reason === r ? ' on' : '') + '" data-act="woReason" data-r="' + r + '" style="height:34px">' + r + '</button>';
     }).join('') + '</div>' +
+    (w.reason === 'หมดอายุ' ? '<div class="hintbox">เจอของหมดอายุตอนเช็กสต็อก — ตัดได้เลย รายการนี้จะขึ้นในรายงานหน้า "หมดอายุ" ด้วย</div>' : '') +
     '<div class="row" style="justify-content:space-between;padding:10px 12px;background:var(--bg);border-radius:8px"><span>มูลค่าที่สูญเสีย (ประมาณ)</span><b class="num" id="wo-est">฿' + money(est) + '</b></div>' +
     '<button class="btn primary" data-act="woCommit"' + (p ? '' : ' disabled') + '>บันทึกตัดสต็อก</button>';
 }

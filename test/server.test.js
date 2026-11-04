@@ -458,6 +458,18 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq([es.warnDays['นม'], es.warnDays['*'], es.markdownPct], [12, 2, 40], 'expiry settings');
   eq(m6('expiryList', T6).todo.map(r => r.expiryDate), ['2026-11-15'], 'milk now warned 12 days ahead');
   f6(/เจ้าของ/, 'saveExpirySettings', C6, {}, 30);
+
+  // found expired goods during a stock check -> write off on the Stock page; it shows on the Expiry page too
+  m6('receive', T6, { receiptUid: 'E2', lines: [{ sku: M, qty: 3, unitCost: 11, expiryDate: '2026-11-04' }] });
+  const old = m6('expiryList', T6).todo.find(r => r.expiryDate === '2026-11-04');
+  ok(old && old.todo === 'expired', 'past-dated lot is due');
+  m6('writeOff', T6, { sku: M, qty: 3, reason: 'หมดอายุ', lotId: old.lotId });
+  m6('writeOff', T6, { sku: M, qty: 1, reason: 'เสียหาย' });
+  ex = m6('expiryList', T6);
+  ok(!ex.todo.some(r => r.lotId === old.lotId), 'stock-page expiry write-off closes the lot to-do');
+  eq(ex.done.find(r => r.lotId === old.lotId).status, 'WRITEOFF', 'lot shown as written off');
+  eq(ex.writeoffs.map(w => [w.source, w.qty, w.cost]), [['stock', 3, 33], ['expiry', 4, 40]], 'expiry write-off history from both pages (not damaged goods)');
+  eq(ex.stats.lossMonth, 73, 'expiry loss this month = 33 + 40');
 }
 
 console.log('server tests passed:', pass);

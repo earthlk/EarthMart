@@ -401,7 +401,6 @@ call('importProducts', T, [
     { sku: 'D0102', qty: 3, unitCost: 9, expiryDate: ymd(-1) }] });
   await page.click('nav button[data-v=stock]');
   await page.waitForSelector('#sexp.has');
-  assert.doesNotMatch(await page.textContent('#swo'), /หมดอายุ/, 'stock write-off has no expiry reason');
   await page.click('#sexp');
   await page.waitForSelector('#xrows .exp-grid');
   assert.strictEqual(await page.locator('#xrows .exp-grid').count(), 2, 'two lots to handle');
@@ -422,6 +421,22 @@ call('importProducts', T, [
   await page.click('[data-act=expTab][data-t=done]');
   await page.waitForFunction(() => document.querySelectorAll('#xrows .exp-grid').length === 2);
   await shot('09o-expiry-done');
+  // expired goods found during a stock check -> write off on the Stock page -> listed on the Expiry page too
+  await page.click('nav button[data-v=stock]');
+  await page.fill('#wo-q', 'น้ำดื่ม');
+  await page.waitForSelector('#wo-sug button');
+  await page.keyboard.press('Enter');
+  await page.fill('#wo-n', '1');
+  await page.click('[data-act=woReason][data-r="หมดอายุ"]');
+  assert.match(await page.textContent('#swo'), /ขึ้นในรายงานหน้า "หมดอายุ"/);
+  await page.click('[data-act=woCommit]');
+  await page.click('[data-x=yes]');
+  await page.waitForSelector('.toast:has-text("ตัดแล้ว")');
+  await page.click('#sexp');
+  await page.click('[data-act=expTab][data-t=wo]');
+  await page.waitForFunction(() => document.querySelectorAll('#xrows .exp-grid').length === 2);
+  assert.match(await page.textContent('#xrows'), /น้ำดื่ม[\s\S]*เช็กสต็อก[\s\S]*กาแฟเย็น[\s\S]*หน้าหมดอายุ/);
+  await shot('09q-expiry-writeoffs');
   // till: markdown chip on the water line (no PIN)
   await page.click('nav button[data-v=sale]');
   await page.fill('#scan', '8851234567890'); await page.keyboard.press('Enter');
