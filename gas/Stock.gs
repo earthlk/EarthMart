@@ -83,7 +83,51 @@ function api_stockMoves(token, sku) {
 /* Stock count (ตรวจนับ) and write-off (ตัดเสีย)                         */
 /* ------------------------------------------------------------------ */
 
-var WRITEOFF_REASONS = ['หมดอายุ', 'เสียหาย', 'สูญหาย', 'ใช้ในร้าน'];
+var WRITEOFF_REASONS = ['หมดอายุ', 'เสียหาย', 'สูญหาย'];
+
+/**
+ * Cost of goods that left the shop without a sale, this month, split into
+ * loss (damaged / lost), expiry, and store use (an expense, not a loss).
+ */
+function outflowMonth_(month) {
+  var kind = {};
+  readAll_('StockMoves').forEach(function (m) {
+    if (m.type === 'STORE_USE') kind[m.refNo] = 'use';
+    else if (m.type === 'WRITEOFF') kind[m.refNo] = String(m.note).indexOf('หมดอายุ') === 0 ? 'expiry'
+      : String(m.note).indexOf('ใช้ในร้าน') === 0 ? 'use' : 'loss';   // old write-offs with reason ใช้ในร้าน
+  });
+  var out = { loss: 0, expiry: 0, use: 0 };
+  readAll_('LotUse').forEach(function (u) {
+    var k = kind[u.refNo];
+    if (k && u.createdAt instanceof Date && fmtDate_(u.createdAt, 'yyyy-MM') === month) out[k] += num_(u.qty) * num_(u.unitCost);
+  });
+  Object.keys(out).forEach(function (k) { out[k] = round2_(out[k]); });
+  return out;
+}
+
+/** เบิกใช้ในร้าน: goods taken from the shelf for the shop's own use. su: { sku, qty, note, approvalId } */
+function api_storeUse(token, su) {
+  return respond_(function () {
+    var s = session_(token);
+    if (!su || !su.sku) throw new Error('เลือกสินค้า');
+    var qty = num_(su.qty);
+    if (!(qty > 0) || Math.round(qty) !== qty) throw new Error('จำนวนต้องเป็นจำนวนเต็มมากกว่า 0');
+    var note = String(su.note || '').trim().slice(0, 100);
+    var approver = consumeApproval_(s, su.approvalId, 'STOCK_ADJUST');
+    return withLock_(function () {
+      var p = readAll_('Products').filter(function (x) { return String(x.sku) === String(su.sku); })[0];
+      if (!p) throw new Error('ไม่พบสินค้า');
+      if (p.type === 'recipe') throw new Error('สูตรผสมไม่มีสต็อกของตัวเอง — เบิกที่ส่วนประกอบแทน');
+      var ref = uid_('SU');
+      var ctx = fifoOpen_();
+      var cost = fifoTake_(ctx, su.sku, qty, ref, p);
+      fifoFlush_(ctx);
+      addStockMoves_(s, [{ sku: String(su.sku), qtyPieces: -qty, type: 'STORE_USE', refNo: ref, note: note }]);
+      log_(s, 'STORE_USE', ref, p.name + ' ' + qty + ' ' + (p.unit || 'ชิ้น') + (note ? ' · ' + note : '') + ' · ทุน ' + cost + ' บาท', approver);
+      return { refNo: ref, cost: cost };
+    });
+  });
+}
 
 /** Value of what is left in lots, per sku. */
 function lotValues_() {
@@ -187,12 +231,7 @@ function api_stockOverview(token, expiryDays) {
   return respond_(function () {
     session_(token);
     var month = fmtDate_(now_(), 'yyyy-MM');
-    var lossMonth = 0;
-    readAll_('LotUse').forEach(function (u) {
-      if (String(u.refNo).indexOf('WO') === 0 && u.createdAt instanceof Date && fmtDate_(u.createdAt, 'yyyy-MM') === month) {
-        lossMonth += num_(u.qty) * num_(u.unitCost);
-      }
-    });
+    var out = outflowMonth_(month);
     var products = {};
     readAll_('Products').forEach(function (p) { products[String(p.sku)] = p; });
     var users = {};
@@ -205,7 +244,7 @@ function api_stockOverview(token, expiryDays) {
     var values = lotValues_();
     return {
       stockValue: round2_(Object.keys(values).reduce(function (a, k) { return a + values[k]; }, 0)),
-      values: values, lossMonth: round2_(lossMonth), moves: moves,
+      values: values, lossMonth: out.loss, expiryMonth: out.expiry, useMonth: out.use, moves: moves,
       expiryTodo: expiryTodoCount_(), expiring: expiringLots_(num_(expiryDays) || 7, products)
     };
   });

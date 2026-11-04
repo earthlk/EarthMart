@@ -372,7 +372,7 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(m4('stockCount', T5, { countUid: 'CNT-1', lines: [{ sku: A, counted: 1 }] }).duplicate, true, 'count idempotent');
 
   const ov = m4('stockOverview', T5, 7);
-  eq(ov.lossMonth, 52, 'write-off value this month 22 + 30');
+  eq([ov.lossMonth, ov.expiryMonth, ov.useMonth], [30, 22, 0], 'this month: damaged 30, expired 22');
   eq(ov.expiring.map(l => [l.name, l.daysLeft]), [['นม', 1], ['นม', 7]], 'lots within 7 days (inclusive), bread on day 15 excluded');
   ok(ov.moves.some(m => m.type === 'WRITEOFF') && ov.moves.some(m => m.type === 'ADJUST'), 'recent moves');
   eq(round(ov.stockValue), round(m4('lots', T5, A).reduce((a, l) => a + l.qtyLeft * l.unitCost, 0) + 7 * 8), 'stock value from lots');
@@ -383,6 +383,17 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   const C5 = m4('login', m4('listUsers', T5).find(u => u.name === 'แคช').userId, '2222', DEV).token;
   f4(/อนุมัติ/, 'writeOff', C5, { sku: B, qty: 1, reason: 'เสียหาย' });
   f4(/อนุมัติ/, 'stockCount', C5, { countUid: 'CNT-2', lines: [{ sku: B, counted: 1 }] });
+
+  // store use (เบิกใช้ในร้าน) is separate from write-off: an expense, not a loss
+  f4(/เหตุผล/, 'writeOff', T5, { sku: B, qty: 1, reason: 'ใช้ในร้าน' });
+  f4(/อนุมัติ/, 'storeUse', C5, { sku: B, qty: 1, note: 'น้ำให้ช่าง' });
+  const su = m4('storeUse', T5, { sku: B, qty: 2, note: 'น้ำให้ช่าง' });
+  eq(su.cost, 16, 'store use 2 @8');
+  eq(on(B), 5, 'stock 7 - 2');
+  const ov2 = m4('stockOverview', T5, 7);
+  eq([ov2.lossMonth, ov2.expiryMonth, ov2.useMonth], [30, 22, 16], 'store use counted on its own');
+  ok(ov2.moves[0].type === 'STORE_USE' && ov2.moves[0].note === 'น้ำให้ช่าง', 'store use in moves');
+  ok(m4('dailyReport', T5, '2026-11-05').exceptions.some(x => x.action === 'STORE_USE'), 'store use in exceptions');
 }
 
 // ===================== Expiry management =====================

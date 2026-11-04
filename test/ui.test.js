@@ -205,8 +205,22 @@ call('importProducts', T, [
   await page.click('[data-act=woReason][data-r="เสียหาย"]');
   await page.click('[data-act=woCommit]');
   await page.click('[data-x=yes]');
-  await page.waitForFunction(() => /ของเสียเดือนนี้/.test(document.querySelector('#skpi').textContent) && !/฿0\.00$/.test(document.querySelectorAll('#skpi .kpi')[3].textContent));
+  await page.waitForFunction(() => /ของเสียเดือนนี้/.test(document.querySelector('#skpi').textContent) && /฿18\.00/.test(document.querySelectorAll('#skpi .kpi')[2].textContent));
   assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'D0102').onHand, 3, 'written off 2');
+  // store use is its own mode and its own KPI
+  await page.click('[data-act=woMode][data-m=use]');
+  await page.fill('#wo-q', 'น้ำดื่ม');
+  await page.waitForSelector('#wo-sug button');
+  await page.keyboard.press('Enter');
+  await page.fill('#wo-n', '1');
+  await page.click('[data-act=woNote][data-n="ให้พนักงาน"]');
+  await shot('09l2-store-use');
+  await page.click('[data-act=woCommit]');
+  await page.click('[data-x=yes]');
+  await page.waitForFunction(() => /฿4\.20/.test(document.querySelectorAll('#skpi .kpi')[3].textContent));
+  assert.match(await page.textContent('#skpi .kpi:nth-child(3)'), /฿18\.00/, 'store use not counted as loss');
+  assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'W0001').onHand, 11, 'water 12 - 1');
+  await page.click('[data-act=woMode][data-m=loss]');
   await page.click('[data-act=stockTab][data-t=moves]');
   await page.waitForSelector('#stab td:has-text("ตัดเสีย")');
   await shot('09m-stock');
