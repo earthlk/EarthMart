@@ -1699,37 +1699,267 @@ function showLots(sku) {
 /* =================================================================== */
 
 var stockRows = [];
+var MOVE_TH = { OPEN: 'สต็อกเปิด', RECEIVE: 'รับเข้า', SALE: 'ขาย', VOID: 'ยกเลิกบิล', ADJUST: 'ปรับยอด/ตรวจนับ', WRITEOFF: 'ตัดเสีย' };
+var WO_REASONS = ['หมดอายุ', 'เสียหาย', 'สูญหาย', 'ใช้ในร้าน'];
+
 function renderStock() {
-  var cats = categories().map(function (c) { return '<option ' + (S.stockFilter.cat === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('');
-  return '<div class="page" style="flex-direction:column"><div class="row" style="flex-wrap:wrap">' +
-    '<label class="sr" for="sq">ค้นหา</label><input id="sq" placeholder="ค้นหาสินค้า" value="' + esc(S.stockFilter.q) + '" data-input="stockQ" style="width:280px">' +
-    '<label class="sr" for="scat">หมวด</label><select id="scat" data-change="stockCat"><option value="">ทุกหมวด</option>' + cats + '</select>' +
-    '<label class="row" style="color:var(--ink)"><input type="checkbox" data-change="stockLow" ' + (S.stockFilter.low ? 'checked' : '') + '> เฉพาะใกล้หมด</label>' +
-    '<span class="grow"></span><span class="muted" id="ssum"></span></div>' +
-    '<div class="card" style="flex:1;overflow:auto"><table class="table"><thead><tr><th>SKU</th><th>สินค้า</th><th>หมวด</th><th class="r">คงเหลือ</th>' +
-    '<th class="r">ขั้นต่ำ</th><th class="r">มูลค่าทุน</th><th></th></tr></thead><tbody id="srows"><tr><td colspan="7" class="muted">กำลังโหลด…</td></tr></tbody></table></div></div>';
+  var tab = S.stockTab || 'list';
+  var tabs = [['list', 'คงเหลือ'], ['count', 'ตรวจนับ'], ['moves', 'ประวัติเคลื่อนไหว']].map(function (t) {
+    return '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-act="stockTab" data-t="' + t[0] + '">' + t[1] + '</button>';
+  }).join('');
+  return '<div class="page" style="flex-direction:column"><div class="kpis" id="skpi"></div>' +
+    '<div class="stk"><section class="card stk-main"><div class="tabs">' + tabs + '</div><div id="stab" class="stk-tab"></div></section>' +
+    '<aside class="stk-side"><div class="card pad" id="swo"></div><div class="card pad" id="sexp"><span class="muted">กำลังโหลด…</span></div></aside></div></div>';
 }
 
-function loadStock() { api('stockList', S.token).then(function (rows) { stockRows = rows; renderStockRows(); }).catch(fail); }
+function loadStock() {
+  drawStockTab();
+  drawWriteOff();
+  Promise.all([api('stockList', S.token), api('stockOverview', S.token, 7)]).then(function (r) {
+    stockRows = r[0]; S.ov = r[1];
+    drawStockKpis(); drawStockTab(); drawExpiring();
+  }).catch(fail);
+}
 
-function renderStockRows() {
-  var tb = $('#srows');
-  if (!tb) return;
-  var q = S.stockFilter.q.toLowerCase();
-  var rows = stockRows.filter(function (r) {
-    if (S.stockFilter.cat && r.category !== S.stockFilter.cat) return false;
+function drawStockKpis() {
+  var box = $('#skpi');
+  if (!box || !S.ov) return;
+  var low = stockRows.filter(function (r) { return r.minStock > 0 && r.onHand <= r.minStock; }).length;
+  var k = function (label, v, warn) {
+    return '<div class="card kpi"' + (warn ? ' style="background:var(--warn-soft);border-color:var(--warn-line)"' : '') + '><div class="' + (warn ? 'warn-text' : 'muted') + '">' + label +
+      '</div><div class="v num' + (warn ? ' warn-text' : '') + '">' + v + '</div></div>';
+  };
+  box.innerHTML = k('มูลค่าสต็อก (ทุน FIFO)', '฿' + money(S.ov.stockValue)) + k('รายการทั้งหมด', stockRows.length) + k('ใกล้หมด', low, low > 0) + k('ของเสียเดือนนี้', '฿' + money(S.ov.lossMonth));
+}
+
+function stockCats() {
+  var c = {};
+  stockRows.forEach(function (r) { var k = r.category || 'ไม่มีหมวด'; c[k] = (c[k] || 0) + 1; });
+  var f = S.stockFilter.cat;
+  return '<div class="chips"><span class="muted" style="font-size:13px">หมวด</span><button class="chip' + (!f ? ' on' : '') + '" data-act="stockCat" data-c="">ทั้งหมด ' + stockRows.length + '</button>' +
+    Object.keys(c).sort().map(function (k) { return '<button class="chip' + (f === k ? ' on' : '') + '" data-act="stockCat" data-c="' + esc(k) + '">' + esc(k) + ' ' + c[k] + '</button>'; }).join('') + '</div>';
+}
+
+function stockFiltered() {
+  var q = S.stockFilter.q.toLowerCase().trim(), cat = S.stockFilter.cat;
+  return stockRows.filter(function (r) {
+    if (cat && (r.category || 'ไม่มีหมวด') !== cat) return false;
     if (S.stockFilter.low && !(r.minStock > 0 && r.onHand <= r.minStock)) return false;
     return !q || r.name.toLowerCase().indexOf(q) >= 0 || r.sku.toLowerCase().indexOf(q) >= 0;
   });
-  var value = rows.reduce(function (a, r) { return a + Math.max(0, r.onHand) * r.cost; }, 0);
-  $('#ssum').textContent = rows.length + ' รายการ · มูลค่าทุน ฿' + money(value);
-  tb.innerHTML = rows.length ? rows.map(function (r) {
+}
+
+function drawStockTab() {
+  var box = $('#stab');
+  if (!box) return;
+  var tab = S.stockTab || 'list';
+  if (tab === 'moves') {
+    var mv = S.ov ? S.ov.moves : null;
+    box.innerHTML = '<div style="overflow:auto;flex:1"><table class="table"><thead><tr><th>เวลา</th><th>สินค้า</th><th>ประเภท</th><th class="r">จำนวน</th><th>อ้างอิง</th><th>หมายเหตุ</th><th>โดย</th></tr></thead><tbody>' +
+      (!mv ? '<tr><td colspan="7" class="muted">กำลังโหลด…</td></tr>' : mv.map(function (m) {
+        return '<tr><td class="num" style="white-space:nowrap">' + dateTime(m.createdAt) + '</td><td>' + esc(m.name) + '</td><td>' + (MOVE_TH[m.type] || m.type) + '</td>' +
+          '<td class="r num ' + (m.qtyPieces < 0 ? 'warn-text' : 'brand-text') + '">' + (m.qtyPieces > 0 ? '+' : '') + m.qtyPieces + '</td><td class="num">' + esc(m.refNo) + '</td><td>' + esc(m.note) + '</td><td>' + esc(m.user) + '</td></tr>';
+      }).join('') || '<tr><td colspan="7" class="muted">ยังไม่มี</td></tr>') + '</tbody></table></div>';
+    return;
+  }
+  if (tab === 'count') return drawCountTab(box);
+  box.innerHTML = stockCats() + '<div class="row stk-tools"><label class="sr" for="sq">ค้นหา</label><input id="sq" placeholder="ค้นหาสินค้า" value="' + esc(S.stockFilter.q) + '" data-input="stockQ" class="grow">' +
+    '<label class="row" style="color:var(--ink);white-space:nowrap"><input type="checkbox" data-change="stockLow" ' + (S.stockFilter.low ? 'checked' : '') + '> เฉพาะใกล้หมด</label></div>' +
+    '<div class="stk-grid head"><div>สินค้า</div><div>หมวด</div><div class="r">คงเหลือ</div><div class="r">ขั้นต่ำ</div><div class="r">มูลค่า</div><div>สถานะ</div><div></div></div><div id="srows" class="stk-rows"></div>';
+  renderStockRows();
+}
+
+function renderStockRows() {
+  var box = $('#srows');
+  if (!box) return;
+  var rows = stockFiltered();
+  var val = S.ov ? S.ov.values : {};
+  box.innerHTML = rows.length ? rows.map(function (r) {
     var low = r.minStock > 0 && r.onHand <= r.minStock;
-    return '<tr><td class="num">' + esc(r.sku) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.category) + '</td><td class="r num ' +
-      (low || r.onHand < 0 ? 'warn-text' : '') + '"><b>' + r.onHand + '</b> ' + esc(r.unit) + '</td><td class="r num">' + (r.minStock || '—') +
-      '</td><td class="r num">' + money(Math.max(0, r.onHand) * r.cost) + '</td><td class="r"><button class="btn sm" data-act="countStock" data-sku="' + esc(r.sku) +
-      '">ปรับยอด</button> <button class="btn sm ghost" data-act="stockHist" data-sku="' + esc(r.sku) + '">ประวัติ</button></td></tr>';
-  }).join('') : '<tr><td colspan="7" class="muted">ไม่พบรายการ</td></tr>';
+    var tag = r.onHand < 0 ? '<span class="tag warn">ติดลบ</span>' : low ? '<span class="tag warn">ใกล้หมด</span>' : '<span class="tag green">ปกติ</span>';
+    return '<div class="stk-grid"><div>' + esc(r.name) + (r.forSale === false ? ' <span class="tag gray">วัตถุดิบ</span>' : '') + '</div><div class="muted">' + esc(r.category) + '</div>' +
+      '<div class="r num' + (low || r.onHand < 0 ? ' warn-text' : '') + '" style="font-weight:600">' + r.onHand + ' <span class="muted" style="font-weight:400;font-size:13px">' + esc(r.unit) + '</span></div>' +
+      '<div class="r num">' + (r.minStock || '—') + '</div><div class="r num">' + money(val[r.sku] || 0) + '</div><div>' + tag + '</div>' +
+      '<div class="r" style="white-space:nowrap"><button class="btn sm" data-act="countStock" data-sku="' + esc(r.sku) + '">ปรับยอด</button> ' +
+      '<button class="btn sm ghost" data-act="stockHist" data-sku="' + esc(r.sku) + '">ประวัติ</button></div></div>';
+  }).join('') : '<div class="empty">ไม่พบรายการ</div>';
+}
+
+/* ------------------------------ Count ----------------------------- */
+
+function cntDraft() {
+  if (!S.cnt) {
+    try { S.cnt = JSON.parse(store('em_count') || 'null'); } catch (e) { S.cnt = null; }
+    if (!S.cnt) S.cnt = { uid: 'CNT' + Date.now().toString(36) + randomId(4), counts: {}, note: '' };
+  }
+  return S.cnt;
+}
+function cntSave() { store('em_count', JSON.stringify(S.cnt)); }
+
+function cntSummary() {
+  var d = cntDraft(), n = 0, diff = 0, plus = 0, minus = 0;
+  stockRows.forEach(function (r) {
+    var c = d.counts[r.sku];
+    if (c === undefined || c === '') return;
+    n++;
+    var x = Number(c) - r.onHand;
+    if (x) { diff++; if (x > 0) plus += x * r.cost; else minus += -x * r.cost; }
+  });
+  return { n: n, diff: diff, plus: plus, minus: minus };
+}
+
+function drawCountTab(box) {
+  var d = cntDraft();
+  box.innerHTML = stockCats() + '<div class="row stk-tools"><label for="cscan" style="white-space:nowrap">สแกนนับ</label>' +
+    '<input id="cscan" class="grow" autocomplete="off" placeholder="สแกนบาร์โค้ด = +1 (สแกนแพ็ค = +12) หรือพิมพ์จำนวนในช่องนับได้">' +
+    '<label class="sr" for="cnote">หมายเหตุ</label><input id="cnote" data-cnt-note value="' + esc(d.note) + '" placeholder="หมายเหตุ เช่น นับสิ้นเดือน" style="width:200px"></div>' +
+    '<div class="stk-grid cnt head"><div>สินค้า</div><div class="r">ในระบบ</div><div class="r">นับได้</div><div class="r">ส่วนต่าง</div><div class="r">มูลค่า (ประมาณ)</div></div>' +
+    '<div id="crows" class="stk-rows"></div><div class="cnt-foot" id="cfoot"></div>';
+  drawCountRows();
+}
+
+function drawCountRows() {
+  var box = $('#crows');
+  if (!box) return;
+  var d = cntDraft();
+  var rows = stockFiltered();
+  box.innerHTML = rows.length ? rows.map(function (r) {
+    var c = d.counts[r.sku];
+    var has = c !== undefined && c !== '';
+    var x = has ? round2(Number(c) - r.onHand) : 0;
+    return '<div class="stk-grid cnt" data-sku="' + esc(r.sku) + '"><div>' + esc(r.name) + ' <span class="muted" style="font-size:13px">' + esc(r.unit) + '</span></div>' +
+      '<div class="r num">' + r.onHand + '</div><div class="r"><input data-cnt="' + esc(r.sku) + '" value="' + (has ? esc(c) : '') + '" type="number" min="0" inputmode="numeric" placeholder="—" aria-label="นับได้ ' + esc(r.name) + '" style="width:90px;height:36px;text-align:right"></div>' +
+      '<div class="r num" data-cdiff style="font-weight:600;color:' + (!has || !x ? 'var(--muted)' : x < 0 ? 'var(--warn)' : 'var(--brand-text)') + '">' + (has ? (x > 0 ? '+' : '') + x : '') + '</div>' +
+      '<div class="r num" data-cval>' + (has && x ? (x > 0 ? '+' : '−') + money(Math.abs(x) * r.cost) : '') + '</div></div>';
+  }).join('') : '<div class="empty">ไม่พบรายการ</div>';
+  drawCountFoot();
+}
+
+function drawCountFoot() {
+  var f = $('#cfoot');
+  if (!f) return;
+  var s = cntSummary();
+  f.innerHTML = '<span>นับแล้ว <b>' + s.n + '</b> รายการ · ต่างจากระบบ <b>' + s.diff + '</b></span>' +
+    '<span class="brand-text">เกิน +฿' + money(s.plus) + '</span><span class="warn-text">ขาด −฿' + money(s.minus) + '</span><span class="grow"></span>' +
+    (s.n ? '<button class="btn sm ghost" data-act="cntClear">ล้าง</button>' : '') +
+    '<button class="btn primary" data-act="cntCommit"' + (s.n ? '' : ' disabled') + '>บันทึกผลตรวจนับ</button>';
+}
+
+function cntSet(sku, v) {
+  var d = cntDraft();
+  if (v === '' || v === null) delete d.counts[sku]; else d.counts[sku] = v;
+  cntSave();
+  var row = $('#crows [data-sku="' + sku + '"]');
+  var r = stockRows.filter(function (x) { return x.sku === sku; })[0];
+  if (row && r) {
+    var has = v !== '' && v !== null, x = has ? round2(Number(v) - r.onHand) : 0;
+    var inp = $('[data-cnt]', row); if (inp && document.activeElement !== inp) inp.value = has ? v : '';
+    var dd = $('[data-cdiff]', row); dd.textContent = has ? (x > 0 ? '+' : '') + x : ''; dd.style.color = !has || !x ? 'var(--muted)' : x < 0 ? 'var(--warn)' : 'var(--brand-text)';
+    $('[data-cval]', row).textContent = has && x ? (x > 0 ? '+' : '−') + money(Math.abs(x) * r.cost) : '';
+  }
+  drawCountFoot();
+}
+
+function cntScan(v) {
+  v = String(v || '').trim();
+  if (!v) return;
+  var code = S.barcodes.filter(function (b) { return b.barcode === v; })[0];
+  var sku = code ? code.sku : (S.products.filter(function (p) { return p.plu === v || p.sku === v; })[0] || {}).sku;
+  var r = sku && stockRows.filter(function (x) { return x.sku === sku; })[0];
+  if (!r) { beep(); return toast('ไม่พบสินค้า ' + v, true); }
+  var d = cntDraft();
+  var cur = Number(d.counts[sku] || 0);
+  cntSet(sku, String(cur + (code ? code.multiplier : 1)));
+  var row = $('#crows [data-sku="' + sku + '"]');
+  if (!row) { S.stockFilter.cat = ''; S.stockFilter.q = ''; drawStockTab(); row = $('#crows [data-sku="' + sku + '"]'); }
+  if (row) { row.scrollIntoView({ block: 'nearest' }); row.classList.add('flash'); setTimeout(function () { row.classList.remove('flash'); }, 500); }
+  toast(r.name + ' = ' + d.counts[sku]);
+}
+
+function cntCommit() {
+  var d = cntDraft(), s = cntSummary();
+  var lines = Object.keys(d.counts).filter(function (k) { return d.counts[k] !== ''; }).map(function (k) { return { sku: k, counted: Number(d.counts[k]) }; });
+  confirm2('บันทึกผลตรวจนับ', 'นับ ' + s.n + ' รายการ · ต่างจากระบบ ' + s.diff + ' รายการ · เกิน ฿' + money(s.plus) + ' ขาด ฿' + money(s.minus) +
+    ' — สต็อกจะถูกปรับตามที่นับได้ (สินค้าที่ไม่ได้นับจะไม่ถูกแตะ)', 'บันทึก').then(function (ok) {
+    if (!ok) return;
+    return approval('STOCK_ADJUST', 'อนุมัติผลตรวจนับ').then(function (id) {
+      if (id === null) return;
+      return api('stockCount', S.token, { countUid: d.uid, note: d.note, lines: lines, approvalId: id }).then(function (r) {
+        S.cnt = null; store('em_count', null);
+        toast('บันทึกแล้ว · ปรับ ' + r.changed + ' รายการ · สุทธิ ฿' + money(r.netValue));
+        return reloadCatalog().then(loadStock);
+      });
+    });
+  }).catch(fail);
+}
+
+/* ---------------------------- Write-off --------------------------- */
+
+function drawWriteOff() {
+  var box = $('#swo');
+  if (!box) return;
+  var w = S.wo = S.wo || { sku: '', qty: '', reason: 'หมดอายุ', lotId: '' };
+  var p = w.sku ? S.idx.bySku[w.sku] : null;
+  var est = p ? round2((Number(w.qty) || 0) * p.cost) : 0;
+  box.innerHTML = '<h2>ตัดของเสีย / หมดอายุ</h2>' +
+    '<div class="field" style="position:relative"><label for="wo-q">สินค้า</label>' +
+    (p ? '<div class="row" style="justify-content:space-between;border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px"><b>' + esc(p.name) + '</b>' +
+      (w.lotId ? '<span class="tag amber">เฉพาะล็อตนี้</span>' : '') + '<button class="btn sm ghost" data-act="woClear" aria-label="เปลี่ยนสินค้า">เปลี่ยน</button></div>'
+      : '<input id="wo-q" autocomplete="off" placeholder="พิมพ์ชื่อ / สแกนบาร์โค้ด"><div id="wo-sug"></div>') + '</div>' +
+    '<div class="field"><label for="wo-n">จำนวน (' + esc(p ? p.unit || 'ชิ้น' : 'ชิ้น') + ')</label><input id="wo-n" data-wo-qty type="number" min="1" inputmode="numeric" value="' + esc(w.qty) + '"></div>' +
+    '<div class="row" style="flex-wrap:wrap;gap:6px">' + WO_REASONS.map(function (r) {
+      return '<button class="chip' + (w.reason === r ? ' on' : '') + '" data-act="woReason" data-r="' + r + '" style="height:34px">' + r + '</button>';
+    }).join('') + '</div>' +
+    '<div class="row" style="justify-content:space-between;padding:10px 12px;background:var(--bg);border-radius:8px"><span>มูลค่าที่สูญเสีย (ประมาณ)</span><b class="num" id="wo-est">฿' + money(est) + '</b></div>' +
+    '<button class="btn primary" data-act="woCommit"' + (p ? '' : ' disabled') + '>บันทึกตัดสต็อก</button>';
+}
+
+function woSuggest(q) {
+  var box = $('#wo-sug');
+  if (!box) return;
+  q = q.trim().toLowerCase();
+  var code = S.barcodes.filter(function (b) { return b.barcode === q; })[0];
+  var list = q ? S.products.filter(function (p) {
+    return p.active && p.type !== 'recipe' && (code ? p.sku === code.sku : p.name.toLowerCase().indexOf(q) >= 0 || p.plu === q);
+  }).slice(0, 6) : [];
+  box.innerHTML = list.length ? '<div class="suggest" style="top:62px;left:0;right:0">' + list.map(function (p) {
+    return '<button data-act="woPick" data-sku="' + esc(p.sku) + '"><span>' + esc(p.name) + '</span><span class="muted num">เหลือ ' + p.onHand + '</span></button>';
+  }).join('') + '</div>' : '';
+}
+
+function woCommit() {
+  var w = S.wo, p = S.idx.bySku[w.sku];
+  var qty = Number(w.qty);
+  if (!(qty > 0)) return toast('ใส่จำนวน', true);
+  confirm2('ตัดสต็อก', p.name + ' ' + qty + ' ' + (p.unit || 'ชิ้น') + ' · ' + w.reason, 'ตัดสต็อก', true).then(function (ok) {
+    if (!ok) return;
+    return approval('STOCK_ADJUST', 'อนุมัติตัดสต็อก').then(function (id) {
+      if (id === null) return;
+      return api('writeOff', S.token, { sku: w.sku, qty: qty, reason: w.reason, lotId: w.lotId || '', approvalId: id }).then(function (r) {
+        S.wo = null;
+        toast('ตัดแล้ว · ทุนที่สูญเสีย ฿' + money(r.cost));
+        return reloadCatalog().then(loadStock);
+      });
+    });
+  }).catch(fail);
+}
+
+function expiryText(l) {
+  return l.daysLeft < 0 ? 'หมดอายุแล้ว ' + (-l.daysLeft) + ' วัน' : l.daysLeft === 0 ? 'หมดอายุวันนี้' : 'อีก ' + l.daysLeft + ' วัน';
+}
+
+function drawExpiring() {
+  var box = $('#sexp');
+  if (!box || !S.ov) return;
+  var ex = S.ov.expiring;
+  box.innerHTML = '<div class="row" style="justify-content:space-between"><h2 style="margin:0">ล็อตใกล้หมดอายุ</h2><span class="muted" style="font-size:13px">ภายใน 7 วัน · ' + ex.length + '</span></div>' +
+    (ex.length ? ex.slice(0, 8).map(function (l) {
+      var d = l.expiryDate.split('-');
+      return '<div class="row" style="justify-content:space-between;align-items:flex-start;padding:4px 0;border-top:1px solid var(--line-soft)"><div><div>' + esc(l.name) + '</div>' +
+        '<div class="muted" style="font-size:12px">' + esc(l.receiptNo) + ' · ' + expiryText(l) + '</div></div>' +
+        '<div class="row" style="gap:6px"><span class="num ' + (l.daysLeft <= 0 ? 'warn-text' : '') + '" style="font-weight:600">' + d[2] + '/' + d[1] + ' · ' + l.qtyLeft + '</span>' +
+        '<button class="btn sm" data-act="woLot" data-lot="' + esc(l.lotId) + '" data-sku="' + esc(l.sku) + '" data-q="' + l.qtyLeft + '">ตัดเสีย</button></div></div>';
+    }).join('') : '<div class="muted" style="font-size:14px">ไม่มี — ใส่วันหมดอายุตอนรับสินค้าเพื่อให้ขึ้นที่นี่</div>');
 }
 
 function countStock(sku) {
@@ -1746,7 +1976,7 @@ function countStock(sku) {
     approval('STOCK_ADJUST', 'อนุมัติปรับสต็อก').then(function (id) {
       if (id === null) return;
       return api('setStockCount', S.token, sku, cnt, why, id).then(function (res) {
-        closeModal(); toast('ปรับแล้ว (' + (res.diff > 0 ? '+' : '') + res.diff + ')'); loadStock(); reloadCatalog();
+        closeModal(); toast('ปรับแล้ว (' + (res.diff > 0 ? '+' : '') + res.diff + ')'); reloadCatalog().then(loadStock);
       });
     }).catch(fail);
   };
@@ -1757,7 +1987,7 @@ function countStock(sku) {
 function stockHist(sku) {
   var p = S.idx.bySku[sku];
   api('stockMoves', S.token, sku).then(function (rows) {
-    var names = { OPEN: 'สต็อกเปิด', SALE: 'ขาย', VOID: 'ยกเลิกบิล', ADJUST: 'ปรับยอด' };
+    var names = MOVE_TH;
     var m = openModal('<header><h1>ประวัติ: ' + esc(p ? p.name : sku) + '</h1></header><div class="body"><table class="table"><thead><tr><th>เวลา</th><th>ประเภท</th>' +
       '<th class="r">จำนวน</th><th>อ้างอิง</th><th>หมายเหตุ</th></tr></thead><tbody>' +
       (rows.map(function (r) {
@@ -2027,6 +2257,15 @@ var ACTIONS = {
   billDiscount: function () { askDiscount('bill'); },
   lineDisc: function (el) { S.cart.sel = Number(el.getAttribute('data-i')); askDiscount('line'); },
   holdBill: holdBill,
+  stockTab: function (el) { S.stockTab = el.getAttribute('data-t'); render(); loadStock(); },
+  stockCat: function (el) { S.stockFilter.cat = el.getAttribute('data-c'); drawStockTab(); },
+  cntCommit: cntCommit,
+  cntClear: function () { confirm2('ล้างการนับ', 'ลบตัวเลขที่นับไว้ทั้งหมด?', 'ล้าง', true).then(function (ok) { if (ok) { S.cnt = null; store('em_count', null); drawStockTab(); } }); },
+  woPick: function (el) { S.wo = { sku: el.getAttribute('data-sku'), qty: '', reason: (S.wo || {}).reason || 'หมดอายุ', lotId: '' }; drawWriteOff(); var n = $('#wo-n'); if (n) n.focus(); },
+  woClear: function () { S.wo = null; drawWriteOff(); var q = $('#wo-q'); if (q) q.focus(); },
+  woReason: function (el) { S.wo.reason = el.getAttribute('data-r'); drawWriteOff(); },
+  woLot: function (el) { S.wo = { sku: el.getAttribute('data-sku'), qty: el.getAttribute('data-q'), reason: 'หมดอายุ', lotId: el.getAttribute('data-lot') }; drawWriteOff(); var n = $('#wo-n'); if (n) { n.focus(); n.select(); } },
+  woCommit: woCommit,
   openCustomer: function () {
     if (!CustomerDisplay.pos.open()) return toast('เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาต pop-up ให้เว็บนี้ก่อน', true);
     toast('ลากหน้าต่างไปจอที่ 2 แล้วดับเบิลคลิกเพื่อเต็มจอ');
@@ -2167,6 +2406,10 @@ document.addEventListener('input', function (e) {
   var k = t.getAttribute('data-input');
   if (k === 'prodQ') { S.prodFilter.q = t.value; renderProductRows(); }
   if (k === 'stockQ') { S.stockFilter.q = t.value; renderStockRows(); }
+  if (t.hasAttribute('data-cnt')) cntSet(t.getAttribute('data-cnt'), t.value);
+  if (t.hasAttribute('data-cnt-note')) { cntDraft().note = t.value; cntSave(); }
+  if (t.id === 'wo-q') woSuggest(t.value);
+  if (t.hasAttribute('data-wo-qty') && S.wo) { S.wo.qty = t.value; var p0 = S.idx.bySku[S.wo.sku]; var e0 = $('#wo-est'); if (e0) e0.textContent = '฿' + money(p0 ? (Number(t.value) || 0) * p0.cost : 0); }
 });
 
 document.addEventListener('change', function (e) {
@@ -2174,7 +2417,6 @@ document.addEventListener('change', function (e) {
   if (k === 'billsDay') { S.billsDay = t.value; loadBills(); }
   if (k === 'reportDay') { S.reportDay = t.value; loadReport(); }
   if (k === 'prodCat') { S.prodFilter.cat = t.value; renderProductRows(); }
-  if (k === 'stockCat') { S.stockFilter.cat = t.value; renderStockRows(); }
   if (k === 'stockLow') { S.stockFilter.low = t.checked; renderStockRows(); }
   if (k === 'drawerPin') { CashDrawer.save({ pin: Number(t.value) }); }
   if (k === 'drawerBaud') { CashDrawer.save({ baud: Number(t.value) }); }
@@ -2189,6 +2431,10 @@ document.addEventListener('keydown', function (e) {
     else if (e.key === 'Backspace') { e.preventDefault(); pinKey('del'); }
     else if (e.key === 'Enter') { e.preventDefault(); pinKey('ok'); }
     return;
+  }
+  if (S.view === 'stock' && !modalStack.length && e.key === 'Enter') {
+    if (e.target.id === 'cscan') { e.preventDefault(); cntScan(e.target.value); e.target.value = ''; return; }
+    if (e.target.id === 'wo-q') { e.preventDefault(); var fb = $('#wo-sug button'); if (fb) fb.click(); else toast('ไม่พบสินค้า', true); return; }
   }
   if (S.view === 'receive' && !modalStack.length && e.target.id === 'rscan' && e.key === 'Enter') {
     e.preventDefault();

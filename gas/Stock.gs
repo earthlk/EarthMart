@@ -78,3 +78,147 @@ function api_stockMoves(token, sku) {
       .slice(-50).reverse();
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Stock count (ตรวจนับ) and write-off (ตัดเสีย)                         */
+/* ------------------------------------------------------------------ */
+
+var WRITEOFF_REASONS = ['หมดอายุ', 'เสียหาย', 'สูญหาย', 'ใช้ในร้าน'];
+
+/** Value of what is left in lots, per sku. */
+function lotValues_() {
+  var v = {};
+  readAll_('Lots').forEach(function (l) {
+    var q = num_(l.qtyLeft);
+    if (q > 0) v[String(l.sku)] = (v[String(l.sku)] || 0) + q * num_(l.unitCost);
+  });
+  return v;
+}
+
+/**
+ * Count many products at once. lines: [{ sku, counted }] — only products actually counted.
+ * Every difference becomes an ADJUST move under one reference, lots follow FIFO.
+ * Cashiers need one owner approval ('STOCK_ADJUST') for the whole count.
+ */
+function api_stockCount(token, cnt) {
+  return respond_(function () {
+    var s = session_(token);
+    if (!cnt || !cnt.countUid) throw new Error('ข้อมูลไม่ครบ');
+    var lines = (cnt.lines || []).filter(function (l) { return l && l.sku && l.counted !== '' && l.counted !== null && l.counted !== undefined; });
+    if (!lines.length) throw new Error('ยังไม่ได้นับสินค้า');
+    return withLock_(function () {
+      var dup = readAll_('StockMoves').filter(function (m) { return m.refNo === cnt.countUid; })[0];
+      if (dup) return { refNo: cnt.countUid, duplicate: true };
+      var products = {};
+      readAll_('Products').forEach(function (p) { products[String(p.sku)] = p; });
+      var ctx = fifoOpen_();
+      var moves = [], plus = 0, minus = 0, changed = 0;
+      var diffs = lines.map(function (l) {
+        var p = products[String(l.sku)];
+        if (!p) throw new Error('ไม่พบสินค้า ' + l.sku);
+        if (p.type === 'recipe') throw new Error(p.name + ' เป็นสูตรผสม — นับที่ส่วนประกอบแทน');
+        var counted = num_(l.counted);
+        if (counted < 0) throw new Error('จำนวนของ ' + p.name + ' ติดลบไม่ได้');
+        return { p: p, sku: String(l.sku), counted: counted, diff: round2_(counted - num_(p.onHand)) };
+      }).filter(function (d) { return d.diff !== 0; });
+      var approver = diffs.length ? consumeApproval_(s, cnt.approvalId, 'STOCK_ADJUST') : '';
+      diffs.forEach(function (d) {
+        if (d.diff < 0) minus += fifoTake_(ctx, d.sku, -d.diff, cnt.countUid, d.p);
+        else {
+          var add = round2_(d.counted - fifoLeft_(ctx, d.sku));
+          var c = fifoLastCost_(ctx, d.sku, d.p);
+          if (add > 0) fifoAddLot_(ctx, { sku: d.sku, receiptNo: cnt.countUid, qtyIn: add, unitCost: c, note: 'ตรวจนับ' });
+          plus += d.diff * c;
+        }
+        moves.push({ sku: d.sku, qtyPieces: d.diff, type: 'ADJUST', refNo: cnt.countUid, note: 'ตรวจนับ' + (cnt.note ? ': ' + cnt.note : '') });
+        changed++;
+      });
+      if (moves.length) {
+        fifoFlush_(ctx);
+        addStockMoves_(s, moves);
+      }
+      var net = round2_(plus - minus);
+      log_(s, 'STOCK_COUNT', cnt.countUid, 'นับ ' + lines.length + ' รายการ · ต่าง ' + changed + ' · มูลค่าส่วนต่าง ' + net + ' บาท' + (cnt.note ? ' · ' + cnt.note : ''), approver);
+      return { refNo: cnt.countUid, counted: lines.length, changed: changed, plusValue: round2_(plus), minusValue: round2_(minus), netValue: net };
+    });
+  });
+}
+
+/**
+ * Write off damaged / expired / lost stock. wo: { sku, qty, reason, lotId?, note?, approvalId? }
+ * With lotId the pieces come out of that lot (expiry page); otherwise oldest lots first.
+ */
+function api_writeOff(token, wo) {
+  return respond_(function () {
+    var s = session_(token);
+    if (!wo || !wo.sku) throw new Error('เลือกสินค้า');
+    var qty = num_(wo.qty);
+    if (!(qty > 0)) throw new Error('จำนวนต้องมากกว่า 0');
+    var reason = String(wo.reason || '');
+    if (WRITEOFF_REASONS.indexOf(reason) < 0) throw new Error('เลือกเหตุผล');
+    var approver = consumeApproval_(s, wo.approvalId, 'STOCK_ADJUST');
+    return withLock_(function () {
+      var p = readAll_('Products').filter(function (x) { return String(x.sku) === String(wo.sku); })[0];
+      if (!p) throw new Error('ไม่พบสินค้า');
+      if (p.type === 'recipe') throw new Error('สูตรผสมไม่มีสต็อกของตัวเอง — ตัดที่ส่วนประกอบแทน');
+      var ref = uid_('WO');
+      var ctx = fifoOpen_();
+      var cost;
+      if (wo.lotId) {
+        var lot = (ctx.open[String(wo.sku)] || []).filter(function (l) { return l.lotId === wo.lotId; })[0];
+        if (!lot) throw new Error('ล็อตนี้ไม่มีของเหลือแล้ว');
+        if (qty > num_(lot.qtyLeft)) throw new Error('ล็อตนี้เหลือ ' + num_(lot.qtyLeft) + ' ชิ้น');
+        // move the chosen lot to the front so FIFO takes from it
+        ctx.open[String(wo.sku)] = [lot].concat(ctx.open[String(wo.sku)].filter(function (l) { return l !== lot; }));
+      }
+      cost = fifoTake_(ctx, wo.sku, qty, ref, p);
+      if (wo.lotId) ctx.open[String(wo.sku)].sort(function (a, b) { return (a._row || 1e9) - (b._row || 1e9); });
+      fifoFlush_(ctx);
+      addStockMoves_(s, [{ sku: String(wo.sku), qtyPieces: -qty, type: 'WRITEOFF', refNo: ref, note: reason + (wo.note ? ': ' + wo.note : '') }]);
+      log_(s, 'WRITEOFF', ref, p.name + ' ' + qty + ' ' + (p.unit || 'ชิ้น') + ' · ' + reason + ' · ทุน ' + cost + ' บาท', approver);
+      return { refNo: ref, cost: cost };
+    });
+  });
+}
+
+/** KPIs + recent moves + lots expiring soon for the stock screen. */
+function api_stockOverview(token, expiryDays) {
+  return respond_(function () {
+    session_(token);
+    var month = fmtDate_(now_(), 'yyyy-MM');
+    var lossMonth = 0;
+    readAll_('LotUse').forEach(function (u) {
+      if (String(u.refNo).indexOf('WO') === 0 && u.createdAt instanceof Date && fmtDate_(u.createdAt, 'yyyy-MM') === month) {
+        lossMonth += num_(u.qty) * num_(u.unitCost);
+      }
+    });
+    var products = {};
+    readAll_('Products').forEach(function (p) { products[String(p.sku)] = p; });
+    var users = {};
+    readAll_('Users').forEach(function (u) { users[u.userId] = u.name; });
+    var moves = readAll_('StockMoves').slice(-150).reverse().map(function (m) {
+      var p = products[String(m.sku)] || {};
+      return { createdAt: m.createdAt, sku: String(m.sku), name: p.name || m.sku, unit: p.unit || '', qtyPieces: num_(m.qtyPieces),
+               type: m.type, refNo: m.refNo, note: m.note, user: users[m.userId] || '' };
+    });
+    var values = lotValues_();
+    return {
+      stockValue: round2_(Object.keys(values).reduce(function (a, k) { return a + values[k]; }, 0)),
+      values: values, lossMonth: round2_(lossMonth), moves: moves,
+      expiring: expiringLots_(num_(expiryDays) || 7, products)
+    };
+  });
+}
+
+/** Open lots with an expiry date within `days` from today (past ones included), soonest first. */
+function expiringLots_(days, products) {
+  var today = fmtDate_(now_(), 'yyyy-MM-dd');
+  var limit = fmtDate_(new Date(now_().getTime() + days * 86400000), 'yyyy-MM-dd');
+  return readAll_('Lots').filter(function (l) { return num_(l.qtyLeft) > 0 && l.expiryDate; }).map(function (l) {
+    var exp = l.expiryDate instanceof Date ? fmtDate_(l.expiryDate, 'yyyy-MM-dd') : String(l.expiryDate);
+    var p = products[String(l.sku)] || {};
+    var daysLeft = Math.round((new Date(exp + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
+    return { lotId: l.lotId, sku: String(l.sku), name: p.name || l.sku, unit: p.unit || '', receiptNo: l.receiptNo,
+             qtyLeft: num_(l.qtyLeft), unitCost: num_(l.unitCost), expiryDate: exp, daysLeft: daysLeft };
+  }).filter(function (l) { return l.expiryDate <= limit; }).sort(function (a, b) { return a.expiryDate < b.expiryDate ? -1 : 1; });
+}

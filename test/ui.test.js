@@ -181,7 +181,36 @@ call('importProducts', T, [
 
   // 9. Stock page, then products: list + side editor
   await page.click('nav button[data-v=stock]');
-  await page.waitForFunction(() => document.querySelectorAll('#srows tr').length >= 3);
+  await page.waitForFunction(() => document.querySelectorAll('#srows .stk-grid').length >= 3);
+  await page.waitForSelector('#skpi .kpi');
+  // count tab: type one count, scan another (pack barcode = +12)
+  await page.click('[data-act=stockTab][data-t=count]');
+  await page.waitForSelector('#crows [data-cnt]');
+  await page.fill('#crows [data-sku="D0102"] [data-cnt]', '5');
+  await page.fill('#cscan', '8851234567906'); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#crows [data-sku="W0001"] [data-cnt]').value === '12');
+  assert.match(await page.textContent('#cfoot'), /นับแล้ว 2/);
+  await shot('09l-count');
+  await page.click('[data-act=cntCommit]');
+  await page.click('[data-x=yes]');
+  await page.waitForFunction(() => !document.querySelector('#crows [data-sku="D0102"] [data-cnt]') || document.querySelector('#crows [data-sku="D0102"] [data-cnt]').value === '');
+  let bs = call('bootstrap', T);
+  assert.strictEqual(bs.products.find(p => p.sku === 'D0102').onHand, 5, 'counted coffee');
+  assert.strictEqual(bs.products.find(p => p.sku === 'W0001').onHand, 12, 'counted water');
+  // write-off by search
+  await page.fill('#wo-q', 'กาแฟ');
+  await page.waitForSelector('#wo-sug button');
+  await page.keyboard.press('Enter');
+  await page.fill('#wo-n', '2');
+  await page.click('[data-act=woReason][data-r="เสียหาย"]');
+  await page.click('[data-act=woCommit]');
+  await page.click('[data-x=yes]');
+  await page.waitForFunction(() => /ของเสียเดือนนี้/.test(document.querySelector('#skpi').textContent) && !/฿0\.00$/.test(document.querySelectorAll('#skpi .kpi')[3].textContent));
+  assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'D0102').onHand, 3, 'written off 2');
+  await page.click('[data-act=stockTab][data-t=moves]');
+  await page.waitForSelector('#stab td:has-text("ตัดเสีย")');
+  await shot('09m-stock');
+  await page.click('[data-act=stockTab][data-t=list]');
   await page.click('nav button[data-v=products]');
   await page.waitForSelector('#prows .prod-grid');
   await page.click('#prows .prod-grid:has-text("น้ำดื่ม")');

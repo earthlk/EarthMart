@@ -335,4 +335,54 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(m3('lots', T4, oldSku).length, 1, 'migration runs once');
 }
 
+// ===================== Stock count, write-off, expiring lots =====================
+{
+  const h = makeContext({ now: '2026-11-05T03:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c4 = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m4 = (fn, ...a) => { const r = c4(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  const f4 = (re, fn, ...a) => { const r = c4(fn, ...a); ok(!r.ok && re.test(r.error), fn + ' should fail ' + re + ' got ' + JSON.stringify(r)); };
+  h.createOwner('O', '1111');
+  const DEV = 'Dcounter4xxxxxxxxxx';
+  const T5 = m4('login', m4('status').users[0].userId, '1111', DEV).token;
+  m4('registerDevice', T5, DEV, 'เครื่อง');
+  const A = m4('saveProduct', T5, { name: 'นม', type: 'nobarcode', price: 14 }, []).sku;
+  const B = m4('saveProduct', T5, { name: 'ขนมปัง', type: 'nobarcode', price: 15 }, []).sku;
+  m4('receive', T5, { receiptUid: 'R1', lines: [{ sku: A, qty: 10, unitCost: 10, expiryDate: '2026-11-06' }, { sku: B, qty: 5, unitCost: 8, expiryDate: '2026-11-20' }] });
+  m4('receive', T5, { receiptUid: 'R2', lines: [{ sku: A, qty: 10, unitCost: 11, expiryDate: '2026-11-12' }] });
+  const on = sku => m4('bootstrap', T5).products.find(p => p.sku === sku).onHand;
+
+  // write-off from a specific (later) lot, then FIFO
+  const lotsA = m4('lots', T5, A);
+  const wo1 = m4('writeOff', T5, { sku: A, qty: 2, reason: 'หมดอายุ', lotId: lotsA[1].lotId });
+  eq(wo1.cost, 22, 'write-off from chosen lot @11');
+  eq(m4('lots', T5, A).map(l => l.qtyLeft), [10, 8], 'chosen lot reduced, oldest untouched');
+  const wo2 = m4('writeOff', T5, { sku: A, qty: 3, reason: 'เสียหาย' });
+  eq(wo2.cost, 30, 'FIFO write-off from oldest @10');
+  f4(/เหตุผล/, 'writeOff', T5, { sku: A, qty: 1, reason: 'อื่นๆ' });
+  f4(/เหลือ/, 'writeOff', T5, { sku: A, qty: 99, reason: 'หมดอายุ', lotId: lotsA[1].lotId });
+  eq(on(A), 15, 'onHand 20 - 5');
+
+  // count: A counted 12 (−3), B counted 7 (+2), B again no diff
+  const cnt = m4('stockCount', T5, { countUid: 'CNT-1', note: 'สิ้นเดือน', lines: [{ sku: A, counted: 12 }, { sku: B, counted: 7 }, { sku: B, counted: '' }] });
+  eq([cnt.counted, cnt.changed, cnt.minusValue, cnt.plusValue], [2, 2, 30, 16], 'count result: A -3 @10, B +2 @8');
+  eq([on(A), on(B)], [12, 7], 'counted quantities');
+  eq(m4('lots', T5, A).reduce((a, l) => a + l.qtyLeft, 0), 12, 'lots follow count');
+  eq(m4('stockCount', T5, { countUid: 'CNT-1', lines: [{ sku: A, counted: 1 }] }).duplicate, true, 'count idempotent');
+
+  const ov = m4('stockOverview', T5, 7);
+  eq(ov.lossMonth, 52, 'write-off value this month 22 + 30');
+  eq(ov.expiring.map(l => [l.name, l.daysLeft]), [['นม', 1], ['นม', 7]], 'lots within 7 days (inclusive), bread on day 15 excluded');
+  ok(ov.moves.some(m => m.type === 'WRITEOFF') && ov.moves.some(m => m.type === 'ADJUST'), 'recent moves');
+  eq(round(ov.stockValue), round(m4('lots', T5, A).reduce((a, l) => a + l.qtyLeft * l.unitCost, 0) + 7 * 8), 'stock value from lots');
+  ok(m4('dailyReport', T5, '2026-11-05').exceptions.some(x => x.action === 'WRITEOFF'), 'write-off in exceptions');
+
+  // cashier needs approval
+  m4('addUser', T5, 'แคช', 'cashier', '2222');
+  const C5 = m4('login', m4('listUsers', T5).find(u => u.name === 'แคช').userId, '2222', DEV).token;
+  f4(/อนุมัติ/, 'writeOff', C5, { sku: B, qty: 1, reason: 'เสียหาย' });
+  f4(/อนุมัติ/, 'stockCount', C5, { countUid: 'CNT-2', lines: [{ sku: B, counted: 1 }] });
+}
+
 console.log('server tests passed:', pass);
