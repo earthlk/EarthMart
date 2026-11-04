@@ -626,7 +626,7 @@ function renderSale() {
     '<div class="scan-hint">พิมพ์จำนวนแล้วกด * ก่อนสแกน เช่น 6* = 6 ชิ้น</div><div id="suggest"></div></div>' +
     '<div class="cart-head"><div>รายการ</div><div style="text-align:center">จำนวน</div><div class="r">รวม</div><div class="r" style="font-size:12px">ลด</div></div>' +
     '<div class="lines" id="lines"></div>' +
-    '<div class="cart-actions"><button class="btn" data-act="billDiscount">ส่วนลดท้ายบิล</button><button class="btn" data-act="holdBill">พักบิล</button>' +
+    '<div class="cart-actions"><button class="btn" data-act="billDiscount">ส่วนลดท้ายบิล</button><button class="btn" data-act="holdBill">พักบิล</button><button class="btn" data-act="storeUse">เบิกใช้</button>' +
     '<button class="btn" data-act="noSale">เปิดลิ้นชัก</button><button class="btn warn" data-act="clearCart">ล้างบิล</button></div></section>' +
     '<section class="sell"><div class="row" style="flex-wrap:wrap">' + chips + '</div><div class="keys">' + keys + '</div>' +
     '<div class="card total" id="totalbar"></div></section></div></div>';
@@ -999,6 +999,91 @@ function showReceipt(rc, autoPrint) {
 function openDrawer(silent) {
   if (!window.CashDrawer) return Promise.resolve(false);
   return CashDrawer.open().catch(function (e) { if (!silent) fail(e); else toast('เปิดลิ้นชักไม่ได้: ' + e.message, true); return false; });
+}
+
+/* ---------------------- เบิกใช้ในร้าน (store use) ----------------------- */
+
+/** Scan / search goods taken for the shop's own use. Works from the local catalog — no extra loading. */
+function storeUseModal() {
+  var st = { lines: [], note: '', uid: 'U' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), busy: false };
+  var m = openModal('<header><h1>เบิกใช้ในร้าน</h1><span class="muted" style="font-size:13px">ของในร้านที่หยิบไปใช้เอง — ไม่ใช่การขาย</span></header>' +
+    '<div class="body" style="gap:12px"><div class="field" style="position:relative"><label for="su-q">สแกน / ค้นหาสินค้า</label>' +
+    '<input id="su-q" autocomplete="off" autofocus placeholder="สแกนบาร์โค้ด หรือพิมพ์ชื่อ"><div id="su-sug"></div></div>' +
+    '<div id="su-lines" class="su-lines"></div>' +
+    '<div class="field"><label for="su-note">ใช้ทำอะไร</label><input id="su-note" maxlength="100" autocomplete="off" placeholder="เช่น น้ำให้ช่างซ่อมแอร์">' +
+    '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">' + USE_NOTES.map(function (n) {
+      return '<button type="button" class="chip" data-n="' + n + '" style="height:32px;font-size:13px;padding:0 12px">' + n + '</button>';
+    }).join('') + '</div></div>' +
+    '<div class="hintbox">ฝา หลอด แก้วของเครื่องดื่มชง ระบบตัดให้ตอนขายแล้ว ไม่ต้องเบิก · ถ้าหยิบไปใช้แล้วไม่บันทึก ตอนตรวจนับจะกลายเป็น "สูญหาย"</div></div>' +
+    '<footer><span class="grow muted" id="su-cost" style="font-size:13px"></span><button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">บันทึกเบิกใช้</button></footer>');
+  var q = $('#su-q', m), note = $('#su-note', m);
+  var unitCost = function (l) { var p = S.idx.bySku[l.sku]; return round2((p && p.cost || 0) * l.mult); };
+  var draw = function () {
+    $('#su-lines', m).innerHTML = st.lines.length ? st.lines.map(function (l, i) {
+      return '<div class="su-line"><div><b>' + esc(l.name) + '</b><div class="muted" style="font-size:12px">' + esc(l.unitName) + (l.mult > 1 ? ' (' + l.mult + ' ชิ้น)' : '') + ' · ทุน ฿' + money(unitCost(l)) + '</div></div>' +
+        '<div class="qty"><button type="button" data-q="' + i + '" data-d="-1" aria-label="ลด">−</button><span class="n num">' + l.qty + '</span><button type="button" data-q="' + i + '" data-d="1" aria-label="เพิ่ม">+</button></div></div>';
+    }).join('') : '<div class="empty" style="padding:18px">ยังไม่มีรายการ</div>';
+    var cost = st.lines.reduce(function (a, l) { return a + unitCost(l) * l.qty; }, 0);
+    $('#su-cost', m).textContent = st.lines.length ? st.lines.length + ' รายการ · ทุนประมาณ ฿' + money(cost) : '';
+  };
+  var add = function (p, b) {
+    var key = p.sku + '|' + (b ? b.barcode : '');
+    var l = st.lines.filter(function (x) { return x.key === key; })[0];
+    if (l) l.qty++;
+    else st.lines.push({ key: key, sku: p.sku, barcode: b ? b.barcode : '', name: p.name, unitName: b ? b.unitName : (p.unit || 'ชิ้น'), mult: b ? b.multiplier : 1, qty: 1 });
+    q.value = ''; $('#su-sug', m).innerHTML = ''; draw(); q.focus();
+  };
+  var matches = function (v) {
+    v = v.trim().toLowerCase();
+    if (!v) return [];
+    return S.products.filter(function (p) { return p.active && (p.name.toLowerCase().indexOf(v) >= 0 || p.plu === v || p.sku.toLowerCase() === v); }).slice(0, 6);
+  };
+  q.oninput = function () {
+    var list = matches(q.value);
+    $('#su-sug', m).innerHTML = list.length ? '<div class="suggest" style="top:62px;left:0;right:0">' + list.map(function (p) {
+      return '<button type="button" data-sku="' + esc(p.sku) + '"><span>' + esc(p.name) + '</span><span class="muted num">เหลือ ' + p.onHand + '</span></button>';
+    }).join('') + '</div>' : '';
+  };
+  q.onkeydown = function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    var v = q.value.trim();
+    var b = S.idx.byBarcode[v];
+    if (b && S.idx.bySku[b.sku]) return add(S.idx.bySku[b.sku], b.multiplier > 1 ? b : null);
+    var f = $('#su-sug button', m);
+    if (f) f.click(); else if (v) { beep(); toast('ไม่พบสินค้า', true); }
+  };
+  m.addEventListener('click', function (e) {
+    var t = e.target.closest('button');
+    if (!t) return;
+    if (t.hasAttribute('data-sku')) add(S.idx.bySku[t.getAttribute('data-sku')], null);
+    else if (t.hasAttribute('data-q')) {
+      var i = Number(t.getAttribute('data-q')), l = st.lines[i];
+      l.qty += Number(t.getAttribute('data-d'));
+      if (l.qty <= 0) st.lines.splice(i, 1);
+      draw();
+    } else if (t.hasAttribute('data-n')) {
+      note.value = t.getAttribute('data-n');
+      $all('[data-n]', m).forEach(function (c) { c.classList.toggle('on', c === t); });
+    } else if (t.getAttribute('data-x') === 'no') closeModal();
+    else if (t.getAttribute('data-x') === 'ok') save();
+  });
+  var save = function () {
+    if (st.busy) return;
+    if (!st.lines.length) { toast('ยังไม่มีรายการ', true); q.focus(); return; }
+    if (!note.value.trim()) { toast('ใส่ว่าใช้ทำอะไร', true); note.focus(); return; }
+    approval('STOCK_ADJUST', 'อนุมัติเบิกใช้ในร้าน').then(function (id) {
+      if (id === null) return;
+      st.busy = true;
+      return api('storeUse', S.token, { useUid: st.uid, note: note.value.trim(), approvalId: id,
+        lines: st.lines.map(function (l) { return { sku: l.sku, barcode: l.barcode, qty: l.qty }; }) }).then(function (r) {
+        closeModal();
+        toast('เบิกแล้ว ' + r.items + ' รายการ · ทุน ฿' + money(r.cost));
+        return reloadCatalog();
+      });
+    }).catch(function (e) { st.busy = false; fail(e); });
+  };
+  draw();
 }
 
 function noSale() {
@@ -1917,7 +2002,7 @@ function drawStockKpis() {
   box.innerHTML = k('มูลค่าสต็อก (ทุน FIFO)', '฿' + money(S.ov.stockValue)).replace(/<\/div>$/, sub(stockRows.length + ' รายการ') + '</div>') +
     k('ใกล้หมด', low, low > 0) +
     k('ของเสียเดือนนี้', '฿' + money(loss)).replace(/<\/div>$/, sub('เสียหาย/สูญหาย ฿' + money(S.ov.lossMonth || 0) + ' · หมดอายุ ฿' + money(S.ov.expiryMonth || 0)) + '</div>') +
-    k('เบิกใช้ในร้านเดือนนี้', '฿' + money(S.ov.useMonth || 0)).replace(/<\/div>$/, sub('ค่าใช้จ่าย ไม่ใช่ของเสีย') + '</div>');
+    k('เบิกใช้ในร้านเดือนนี้', '฿' + money(S.ov.useMonth || 0)).replace(/<\/div>$/, sub('ค่าใช้จ่าย · เบิกจากหน้าขาย') + '</div>');
 }
 
 function stockCats() {
@@ -2086,28 +2171,21 @@ function cntCommit() {
 function drawWriteOff() {
   var box = $('#swo');
   if (!box) return;
-  var w = S.wo = S.wo || { sku: '', qty: '', reason: 'เสียหาย', lotId: '', mode: S.woMode || 'loss', note: '' };
-  var use = w.mode === 'use';
+  var w = S.wo = S.wo || { sku: '', qty: '', reason: 'เสียหาย', lotId: '' };
   var p = w.sku ? S.idx.bySku[w.sku] : null;
   var est = p ? round2((Number(w.qty) || 0) * p.cost) : 0;
-  box.innerHTML = '<div class="seg-sm"><button class="' + (use ? '' : 'on') + '" data-act="woMode" data-m="loss">ตัดของเสีย</button><button class="' + (use ? 'on' : '') + '" data-act="woMode" data-m="use">เบิกใช้ในร้าน</button></div>' +
-    '<h2>' + (use ? 'เบิกใช้ในร้าน' : 'ตัดของเสีย / หมดอายุ') + '</h2>' +
-    (use ? '<div class="muted" style="font-size:13px;margin-top:-4px">หยิบสินค้าที่วางขายไปใช้เอง เช่น น้ำให้พนักงาน ถุงขยะ ทิชชู่ — นับเป็นค่าใช้จ่าย ไม่ใช่ของเสีย (ฝา หลอด แก้วของเครื่องดื่มชง ระบบตัดให้ตอนขายแล้ว)</div>' : '') +
+  box.innerHTML = '<h2>ตัดของเสีย / หมดอายุ</h2>' +
     '<div class="field" style="position:relative"><label for="wo-q">สินค้า</label>' +
     (p ? '<div class="row" style="justify-content:space-between;border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px"><b>' + esc(p.name) + '</b>' +
       (w.lotId ? '<span class="tag amber">เฉพาะล็อตนี้</span>' : '') + '<button class="btn sm ghost" data-act="woClear" aria-label="เปลี่ยนสินค้า">เปลี่ยน</button></div>'
       : '<input id="wo-q" autocomplete="off" placeholder="พิมพ์ชื่อ / สแกนบาร์โค้ด"><div id="wo-sug"></div>') + '</div>' +
     '<div class="field"><label for="wo-n">จำนวน (' + esc(p ? p.unit || 'ชิ้น' : 'ชิ้น') + ')</label><input id="wo-n" data-wo-qty type="number" min="1" inputmode="numeric" value="' + esc(w.qty) + '"></div>' +
-    (use ? '<div class="field"><label for="wo-note">ใช้ทำอะไร</label><input id="wo-note" data-wo-note autocomplete="off" maxlength="100" value="' + esc(w.note) + '" placeholder="เช่น น้ำให้ช่างซ่อมแอร์">' +
-        '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">' + USE_NOTES.map(function (n) {
-          return '<button class="chip' + (w.note === n ? ' on' : '') + '" data-act="woNote" data-n="' + n + '" style="height:30px;font-size:13px;padding:0 10px">' + n + '</button>';
-        }).join('') + '</div></div>'
-      : '<div class="row" style="flex-wrap:wrap;gap:6px">' + WO_REASONS.map(function (r) {
-          return '<button class="chip' + (w.reason === r ? ' on' : '') + '" data-act="woReason" data-r="' + r + '" style="height:34px">' + r + '</button>';
-        }).join('') + '</div>' +
-        (w.reason === 'หมดอายุ' ? '<div class="hintbox">เจอของหมดอายุตอนเช็กสต็อก — ตัดได้เลย รายการนี้จะขึ้นในรายงานหน้า "หมดอายุ" ด้วย</div>' : '')) +
-    '<div class="row" style="justify-content:space-between;padding:10px 12px;background:var(--bg);border-radius:8px"><span>' + (use ? 'ต้นทุน (ประมาณ)' : 'มูลค่าที่สูญเสีย (ประมาณ)') + '</span><b class="num" id="wo-est">฿' + money(est) + '</b></div>' +
-    '<button class="btn primary" data-act="woCommit"' + (p ? '' : ' disabled') + '>' + (use ? 'บันทึกเบิกใช้' : 'บันทึกตัดสต็อก') + '</button>';
+    '<div class="row" style="flex-wrap:wrap;gap:6px">' + WO_REASONS.map(function (r) {
+      return '<button class="chip' + (w.reason === r ? ' on' : '') + '" data-act="woReason" data-r="' + r + '" style="height:34px">' + r + '</button>';
+    }).join('') + '</div>' +
+    (w.reason === 'หมดอายุ' ? '<div class="hintbox">เจอของหมดอายุตอนเช็กสต็อก — ตัดได้เลย รายการนี้จะขึ้นในรายงานหน้า "หมดอายุ" ด้วย</div>' : '') +
+    '<div class="row" style="justify-content:space-between;padding:10px 12px;background:var(--bg);border-radius:8px"><span>มูลค่าที่สูญเสีย (ประมาณ)</span><b class="num" id="wo-est">฿' + money(est) + '</b></div>' +
+    '<button class="btn primary" data-act="woCommit"' + (p ? '' : ' disabled') + '>บันทึกตัดสต็อก</button>';
 }
 
 function woSuggest(q) {
@@ -2127,17 +2205,13 @@ function woCommit() {
   var w = S.wo, p = S.idx.bySku[w.sku];
   var qty = Number(w.qty);
   if (!(qty > 0)) return toast('ใส่จำนวน', true);
-  var use = w.mode === 'use';
-  if (use && !String(w.note || '').trim()) { toast('ใส่ว่าใช้ทำอะไร', true); var ni = $('#wo-note'); if (ni) ni.focus(); return; }
-  confirm2(use ? 'เบิกใช้ในร้าน' : 'ตัดสต็อก', p.name + ' ' + qty + ' ' + (p.unit || 'ชิ้น') + ' · ' + (use ? w.note : w.reason), use ? 'เบิกใช้' : 'ตัดสต็อก', !use).then(function (ok) {
+  confirm2('ตัดสต็อก', p.name + ' ' + qty + ' ' + (p.unit || 'ชิ้น') + ' · ' + w.reason, 'ตัดสต็อก', true).then(function (ok) {
     if (!ok) return;
-    return approval('STOCK_ADJUST', use ? 'อนุมัติเบิกใช้ในร้าน' : 'อนุมัติตัดสต็อก').then(function (id) {
+    return approval('STOCK_ADJUST', 'อนุมัติตัดสต็อก').then(function (id) {
       if (id === null) return;
-      var call = use ? api('storeUse', S.token, { sku: w.sku, qty: qty, note: w.note, approvalId: id })
-        : api('writeOff', S.token, { sku: w.sku, qty: qty, reason: w.reason, lotId: w.lotId || '', approvalId: id });
-      return call.then(function (r) {
+      return api('writeOff', S.token, { sku: w.sku, qty: qty, reason: w.reason, lotId: w.lotId || '', approvalId: id }).then(function (r) {
         S.wo = null;
-        toast((use ? 'เบิกแล้ว · ทุน ฿' : 'ตัดแล้ว · ทุนที่สูญเสีย ฿') + money(r.cost));
+        toast('ตัดแล้ว · ทุนที่สูญเสีย ฿' + money(r.cost));
         return reloadCatalog().then(loadStock);
       });
     });
@@ -2470,9 +2544,7 @@ var ACTIONS = {
   stockCat: function (el) { S.stockFilter.cat = el.getAttribute('data-c'); drawStockTab(); },
   cntCommit: cntCommit,
   cntClear: function () { confirm2('ล้างการนับ', 'ลบตัวเลขที่นับไว้ทั้งหมด?', 'ล้าง', true).then(function (ok) { if (ok) { S.cnt = null; store('em_count', null); drawStockTab(); } }); },
-  woMode: function (el) { S.woMode = el.getAttribute('data-m'); S.wo = Object.assign(S.wo || {}, { mode: S.woMode, lotId: '' }); drawWriteOff(); },
-  woNote: function (el) { S.wo.note = el.getAttribute('data-n'); drawWriteOff(); },
-  woPick: function (el) { var o = S.wo || {}; S.wo = { sku: el.getAttribute('data-sku'), qty: '', reason: o.reason || 'เสียหาย', lotId: '', mode: o.mode || S.woMode || 'loss', note: o.note || '' }; drawWriteOff(); var n = $('#wo-n'); if (n) n.focus(); },
+  woPick: function (el) { S.wo = { sku: el.getAttribute('data-sku'), qty: '', reason: (S.wo || {}).reason || 'เสียหาย', lotId: '' }; drawWriteOff(); var n = $('#wo-n'); if (n) n.focus(); },
   woClear: function () { S.wo = Object.assign(S.wo, { sku: '', lotId: '' }); drawWriteOff(); var q = $('#wo-q'); if (q) q.focus(); },
   woReason: function (el) { S.wo.reason = el.getAttribute('data-r'); drawWriteOff(); },
   woCommit: woCommit,
@@ -2522,6 +2594,7 @@ var ACTIONS = {
   },
   pay: openPay,
   noSale: noSale,
+  storeUse: function () { storeUseModal(); },
   reload: function () { location.reload(); },
   connect: function () { showConnect(''); },
   copyConnect: function () {
@@ -2619,7 +2692,6 @@ document.addEventListener('input', function (e) {
   if (t.hasAttribute('data-cnt')) cntSet(t.getAttribute('data-cnt'), t.value);
   if (t.hasAttribute('data-cnt-note')) { cntDraft().note = t.value; cntSave(); }
   if (t.id === 'wo-q') woSuggest(t.value);
-  if (t.hasAttribute('data-wo-note') && S.wo) S.wo.note = t.value;
   if (t.hasAttribute('data-xq') && S.expSel) { S.expSel.found = t.value; }
   if (t.hasAttribute('data-wo-qty') && S.wo) { S.wo.qty = t.value; var p0 = S.idx.bySku[S.wo.sku]; var e0 = $('#wo-est'); if (e0) e0.textContent = '฿' + money(p0 ? (Number(t.value) || 0) * p0.cost : 0); }
 });

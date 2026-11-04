@@ -394,6 +394,10 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq([ov2.lossMonth, ov2.expiryMonth, ov2.useMonth], [30, 22, 16], 'store use counted on its own');
   ok(ov2.moves[0].type === 'STORE_USE' && ov2.moves[0].note === 'น้ำให้ช่าง', 'store use in moves');
   ok(m4('dailyReport', T5, '2026-11-05').exceptions.some(x => x.action === 'STORE_USE'), 'store use in exceptions');
+  f4(/ใช้ทำอะไร/, 'storeUse', T5, { lines: [{ sku: B, qty: 1 }] });
+  const su2 = m4('storeUse', T5, { useUid: 'U-1', note: 'ทำความสะอาด', lines: [{ sku: A, qty: 1 }, { sku: B, qty: 1 }] });
+  eq(m4('storeUse', T5, { useUid: 'U-1', note: 'ทำความสะอาด', lines: [{ sku: A, qty: 1 }, { sku: B, qty: 1 }] }).refNo, su2.refNo, 'store use idempotent');
+  eq([on(A), on(B)], [11, 4], 'several lines in one go');
 }
 
 // ===================== Expiry management =====================

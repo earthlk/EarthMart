@@ -207,20 +207,6 @@ call('importProducts', T, [
   await page.click('[data-x=yes]');
   await page.waitForFunction(() => /ของเสียเดือนนี้/.test(document.querySelector('#skpi').textContent) && /฿18\.00/.test(document.querySelectorAll('#skpi .kpi')[2].textContent));
   assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'D0102').onHand, 3, 'written off 2');
-  // store use is its own mode and its own KPI
-  await page.click('[data-act=woMode][data-m=use]');
-  await page.fill('#wo-q', 'น้ำดื่ม');
-  await page.waitForSelector('#wo-sug button');
-  await page.keyboard.press('Enter');
-  await page.fill('#wo-n', '1');
-  await page.click('[data-act=woNote][data-n="ให้พนักงาน"]');
-  await shot('09l2-store-use');
-  await page.click('[data-act=woCommit]');
-  await page.click('[data-x=yes]');
-  await page.waitForFunction(() => /฿4\.20/.test(document.querySelectorAll('#skpi .kpi')[3].textContent));
-  assert.match(await page.textContent('#skpi .kpi:nth-child(3)'), /฿18\.00/, 'store use not counted as loss');
-  assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'W0001').onHand, 11, 'water 12 - 1');
-  await page.click('[data-act=woMode][data-m=loss]');
   await page.click('[data-act=stockTab][data-t=moves]');
   await page.waitForSelector('#stab td:has-text("ตัดเสีย")');
   await shot('09m-stock');
@@ -403,6 +389,25 @@ call('importProducts', T, [
   await page.waitForSelector('.modal tbody tr:nth-child(2)');
   await shot('09k-lots');
   await page.keyboard.press('Escape');
+
+  // 9w. Store use from the sale screen (modal, local catalog): pack barcode + search, note required
+  const waterBefore = call('bootstrap', T).products.find(p => p.sku === 'W0001').onHand;
+  await page.click('nav button[data-v=sale]');
+  await page.click('[data-act=storeUse]');
+  await page.waitForSelector('#su-q:focus');
+  await page.keyboard.type('8851234567890'); await page.keyboard.press('Enter');
+  await page.keyboard.type('8851234567890'); await page.keyboard.press('Enter');
+  await page.waitForSelector('.su-line .n:text("2")');
+  await page.click('[data-x=ok]');
+  await page.waitForSelector('#su-note:focus');
+  await page.click('.modal [data-n="ให้ช่าง/ผู้มาติดต่อ"]');
+  await shot('09l2-store-use');
+  await page.click('[data-x=ok]');
+  await page.waitForSelector('.toast:has-text("เบิกแล้ว 1 รายการ")');
+  assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'W0001').onHand, waterBefore - 2, 'water - 2');
+  await page.click('nav button[data-v=stock]');
+  await page.waitForFunction(() => /฿8\.40/.test(document.querySelectorAll('#skpi .kpi')[3].textContent));
+  assert.match(await page.textContent('#skpi .kpi:nth-child(3)'), /฿18\.00/, 'store use not counted as loss');
 
   // 9x. Expiry page: one lot near expiry (markdown), one expired (write off); markdown used at the till
   const ymd = d => new Date(Date.now() + 7 * 3600e3 + d * 86400e3).toISOString().slice(0, 10);

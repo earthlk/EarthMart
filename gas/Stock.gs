@@ -105,26 +105,55 @@ function outflowMonth_(month) {
   return out;
 }
 
-/** เบิกใช้ในร้าน: goods taken from the shelf for the shop's own use. su: { sku, qty, note, approvalId } */
+/**
+ * เบิกใช้ในร้าน: goods taken for the shop's own use (opened from the sale screen).
+ * su: { useUid, lines: [{ sku, barcode?, qty }], note, approvalId }
+ * Pack barcodes count their pieces; a recipe item takes its components. Idempotent by useUid.
+ */
 function api_storeUse(token, su) {
   return respond_(function () {
     var s = session_(token);
-    if (!su || !su.sku) throw new Error('เลือกสินค้า');
-    var qty = num_(su.qty);
-    if (!(qty > 0) || Math.round(qty) !== qty) throw new Error('จำนวนต้องเป็นจำนวนเต็มมากกว่า 0');
+    if (!su) throw new Error('ข้อมูลไม่ครบ');
+    var inLines = su.lines || (su.sku ? [{ sku: su.sku, qty: su.qty }] : []);
+    if (!inLines.length) throw new Error('ยังไม่มีสินค้า');
     var note = String(su.note || '').trim().slice(0, 100);
+    if (!note) throw new Error('ใส่ว่าใช้ทำอะไร');
+    var cache = CacheService.getScriptCache();
+    var key = su.useUid ? 'su:' + su.useUid : '';
+    if (key && cache.get(key)) return JSON.parse(cache.get(key));
     var approver = consumeApproval_(s, su.approvalId, 'STOCK_ADJUST');
     return withLock_(function () {
-      var p = readAll_('Products').filter(function (x) { return String(x.sku) === String(su.sku); })[0];
-      if (!p) throw new Error('ไม่พบสินค้า');
-      if (p.type === 'recipe') throw new Error('สูตรผสมไม่มีสต็อกของตัวเอง — เบิกที่ส่วนประกอบแทน');
+      if (key && cache.get(key)) return JSON.parse(cache.get(key));
+      var products = {};
+      readAll_('Products').forEach(function (p) { products[String(p.sku)] = p; });
+      var codes = {};
+      readAll_('Barcodes').forEach(function (b) { codes[String(b.barcode)] = b; });
+      var rec = recipesMap_();
       var ref = uid_('SU');
       var ctx = fifoOpen_();
-      var cost = fifoTake_(ctx, su.sku, qty, ref, p);
+      var cost = 0, names = [];
+      var lines = inLines.map(function (l) {
+        var b = l.barcode ? codes[String(l.barcode)] : null;
+        var sku = String(b ? b.sku : l.sku);
+        var p = products[sku];
+        if (!p) throw new Error('ไม่พบสินค้า ' + (l.barcode || l.sku));
+        var qty = num_(l.qty);
+        if (!(qty > 0) || Math.round(qty) !== qty) throw new Error('จำนวนของ ' + p.name + ' ต้องเป็นจำนวนเต็มมากกว่า 0');
+        var mult = b ? num_(b.multiplier) || 1 : 1;
+        var pieces = qty * mult;
+        var comps = rec[sku];
+        if (comps && comps.length) comps.forEach(function (c) { cost += fifoTake_(ctx, c.sku, pieces * c.qty, ref, products[c.sku]); });
+        else cost += fifoTake_(ctx, sku, pieces, ref, p);
+        names.push(p.name + ' ' + pieces);
+        return { sku: sku, name: p.name, qty: qty, multiplier: mult };
+      });
       fifoFlush_(ctx);
-      addStockMoves_(s, [{ sku: String(su.sku), qtyPieces: -qty, type: 'STORE_USE', refNo: ref, note: note }]);
-      log_(s, 'STORE_USE', ref, p.name + ' ' + qty + ' ' + (p.unit || 'ชิ้น') + (note ? ' · ' + note : '') + ' · ทุน ' + cost + ' บาท', approver);
-      return { refNo: ref, cost: cost };
+      addStockMoves_(s, explodeMoves_(lines, -1, 'STORE_USE', ref, note));
+      cost = round2_(cost);
+      log_(s, 'STORE_USE', ref, names.join(', ') + ' · ' + note + ' · ทุน ' + cost + ' บาท', approver);
+      var out = { refNo: ref, cost: cost, items: lines.length };
+      if (key) cache.put(key, JSON.stringify(out), 21600);
+      return out;
     });
   });
 }
