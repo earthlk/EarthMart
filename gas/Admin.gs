@@ -96,7 +96,11 @@ function api_auditLog(token, limit) {
 /* Backup                                                              */
 /* ------------------------------------------------------------------ */
 
-/** Copies the whole spreadsheet into the backup folder and removes copies older than backupKeepDays. */
+/**
+ * Copies every sheet (data only) into a new spreadsheet in the backup folder and removes backups older
+ * than backupKeepDays. It does NOT copy the file itself: copying the file would also copy the bound
+ * Apps Script, leaving a new "EarthMart" script project behind every night.
+ */
 function backupNow() {
   var ss = ss_();
   var folderId = getSetting_('backupFolderId');
@@ -108,7 +112,11 @@ function backupNow() {
     saveSettingRaw_('backupFolderId', folder.getId());
   }
   var name = ss.getName() + ' backup ' + fmtDate_(now_(), 'yyyy-MM-dd HHmm');
-  DriveApp.getFileById(ss.getId()).makeCopy(name, folder);
+  var dest = SpreadsheetApp.create(name);
+  var blank = dest.getSheets();
+  ss.getSheets().forEach(function (sh) { sh.copyTo(dest).setName(sh.getName()); });
+  blank.forEach(function (sh) { dest.deleteSheet(sh); });
+  DriveApp.getFileById(dest.getId()).moveTo(folder);
 
   var keep = num_(getSetting_('backupKeepDays')) || 30;
   var cutoff = new Date(now_().getTime() - keep * 24 * 60 * 60 * 1000);

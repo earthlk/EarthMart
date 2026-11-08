@@ -61,12 +61,19 @@ class Sheet {
   }
   appendRow(row) { new Range(this, this.getLastRow() + 1, 1, 1, row.length).setValues([row]); }
   setFrozenRows() {}
+  copyTo(dest) {
+    const s = dest.insertSheet('Copy of ' + this.name);
+    s.data = this.data.map(r => r.slice());
+    return s;
+  }
+  setName(n) { this.name = n; return this; }
+  getName() { return this.name; }
 }
 
 class Spreadsheet {
   constructor() { this.sheets = [new Sheet('Sheet1')]; this.id = 'SS1'; }
   getId() { return this.id; }
-  getName() { return 'EarthMart DB'; }
+  getName() { return this.name || 'EarthMart DB'; }
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
   insertSheet(n) { const s = new Sheet(n); this.sheets.push(s); return s; }
   getSheets() { return this.sheets.slice(); }
@@ -78,13 +85,15 @@ function makeContext(opts = {}) {
   const props = {};
   const cache = {};
   const fetches = [];
+  const backups = [];
   let clock = opts.now ? new Date(opts.now).getTime() : Date.now();
 
   const ctx = {
     console,
-    __ss: ss, __fetches: fetches, __cache: cache, __props: props,
+    __ss: ss, __fetches: fetches, __cache: cache, __props: props, __backups: backups,
     __advance(ms) { clock += ms; },
-    SpreadsheetApp: { getActiveSpreadsheet: () => ss, openById: () => ss },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ss, openById: () => ss,
+      create: n => { const b = new Spreadsheet(); b.id = 'BK' + backups.length; b.name = n; backups.push(b); return b; } },
     PropertiesService: { getScriptProperties: () => ({
       getProperty: k => (k in props ? props[k] : null),
       setProperty: (k, v) => { props[k] = String(v); },
@@ -115,7 +124,7 @@ function makeContext(opts = {}) {
     DriveApp: {
       createFolder: n => ({ getId: () => 'F1', getFiles: () => ({ hasNext: () => false }) }),
       getFolderById: () => ({ getId: () => 'F1', getFiles: () => ({ hasNext: () => false }) }),
-      getFileById: () => ({ makeCopy: (n) => ({ getName: () => n }) })
+      getFileById: id => ({ makeCopy: (n) => { throw new Error('makeCopy copies the bound script too — do not use'); }, moveTo: () => {} })
     },
     ScriptApp: { getProjectTriggers: () => [], deleteTrigger: () => {}, newTrigger: () => ({ timeBased: () => ({ everyDays: () => ({ atHour: () => ({ create: () => {} }) }) }) }) },
     ContentService: {

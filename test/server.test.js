@@ -184,6 +184,11 @@ ok(must('auditLog', T, 100).length > 5, 'audit log');
 must('setUserActive', T, mew.userId, false);
 mustFail(/PIN|ผู้ใช้/, 'login', mew.userId, '5678', DEV);
 ok(must('backupNow', T), 'backup');
+{
+  const bk = g.__backups[g.__backups.length - 1];
+  ok(bk && bk.getSheetByName('Products') && !bk.getSheetByName('Sheet1'), 'backup = new spreadsheet with the same sheets (no script copy)');
+  eq(bk.getSheetByName('Users').data.length, g.__ss.getSheetByName('Users').data.length, 'backup copies data');
+}
 must('logout', T);
 mustFail(/เข้าสู่ระบบ/, 'bootstrap', T);
 
