@@ -570,6 +570,12 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   const a0 = onH('A1');
   m7('returnSale', T, { returnUid: 'R7', billNo: sp.billNo, refundMethod: 'transfer', reason: 'x', lines: [{ lineNo: 1, qty: 3, damaged: 1 }] });
   eq(onH('A1'), a0 + 3, 'all returned pieces back in stock (damaged is ignored)');
+  // made-to-order drinks (recipes) cannot be returned
+  const drink = m7('saveProduct', T, { name: 'กาแฟเย็น', type: 'recipe', price: 30 }, [], [{ sku: 'A1', qty: 1 }]).sku;
+  m7('openShift', C, 500, '');
+  const bd = m7('commitSale', C, { saleUid: 'SP9', payMethod: 'cash', received: 50, lines: [{ sku: drink, qty: 1 }, { sku: 'B1', qty: 1 }] });
+  f7(/คืนสินค้าไม่ได้/, 'returnSale', T, { returnUid: 'R9', billNo: bd.billNo, refundMethod: 'cash', reason: 'x', lines: [{ lineNo: 1, qty: 1 }] });
+  eq(m7('returnSale', T, { returnUid: 'R10', billNo: bd.billNo, refundMethod: 'cash', reason: 'x', lines: [{ lineNo: 2, qty: 1 }] }).total, 20, 'other lines of that bill still return');
 }
 
 console.log('server tests passed:', pass);

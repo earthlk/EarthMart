@@ -1429,7 +1429,7 @@ function billDetail(no) {
       }).join('') + '</div>' : '') +
       '</div><footer><button class="btn" data-x="print">พิมพ์ซ้ำ</button>' +
       (rc.status === 'VOID' ? '' : !S.isCounter ? '<button class="btn" disabled title="คืนสินค้าได้เฉพาะเครื่องหน้าร้าน">คืนสินค้า</button>'
-        : rc.lines.some(function (l) { return l.qty > (l.returnedQty || 0); }) ? '<button class="btn" data-x="return">คืนสินค้า</button>' : '') +
+        : rc.lines.some(function (l) { return l.qty > (l.returnedQty || 0) && !isRecipeSku(l.sku); }) ? '<button class="btn" data-x="return">คืนสินค้า</button>' : '') +
       (rc.status !== 'VOID' && S.isCounter && !rc.returnedTotal ? '<button class="btn warn" data-x="void">ยกเลิกบิล</button>' : '') +
       '<button class="btn primary" data-x="close">ปิด</button></footer>', { wide: false });
     $('[data-x=print]', m).onclick = function () { printReceipt(rc); };
@@ -1457,6 +1457,8 @@ function billDetail(no) {
 var RETURN_REASONS = ['ลูกค้าเปลี่ยนใจ', 'สินค้าชำรุด', 'คิดเงินผิด', 'หมดอายุ'];
 
 /** Partial return: pick quantities per line, refund by cash (from this shift's drawer) or transfer. */
+function isRecipeSku(sku) { var p = S.idx.bySku[sku]; return !!(p && p.type === 'recipe'); }
+
 function returnModal(rc) {
   var st = { uid: 'R' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), q: {}, method: S.shift ? 'cash' : 'transfer', busy: false };
   var sumLT = rc.lines.reduce(function (a, l) { return a + l.lineTotal; }, 0);
@@ -1466,7 +1468,7 @@ function returnModal(rc) {
     '<div class="body" style="gap:12px"><div class="su-lines" id="rt-lines"></div>' +
     (billDisc > 0 ? '<div class="muted" style="font-size:13px">บิลนี้มีส่วนลดท้ายบิล ฿' + money(billDisc) + ' — เงินคืนหักส่วนลดตามสัดส่วนแล้ว</div>' : '') +
     '<div class="field"><label>คืนเงินเป็น</label><div class="seg-sm" id="rt-m"><button data-m="cash"' + (S.shift ? '' : ' disabled title="ต้องเปิดกะก่อน"') + '>เงินสด (จากลิ้นชัก)</button><button data-m="transfer">โอนคืน</button></div></div>' +
-    '<div class="muted" style="font-size:13px">ของที่คืนกลับเข้าสต็อกทั้งหมด (เครื่องดื่มชงไม่คืนสต็อก) · ถ้ามีชิ้นที่เสีย ไปตัดที่หน้าสต็อก › ตัดของเสีย ทีหลังได้ ลูกค้าไม่ต้องรอ</div>' +
+    '<div class="muted" style="font-size:13px">ของที่คืนกลับเข้าสต็อกทั้งหมด · ถ้ามีชิ้นที่เสีย ไปตัดที่หน้าสต็อก › ตัดของเสีย ทีหลังได้ ลูกค้าไม่ต้องรอ · เครื่องดื่มชงคืนไม่ได้</div>' +
     '<div class="field"><label for="rt-why">เหตุผล</label><input id="rt-why" maxlength="100" autocomplete="off" placeholder="เช่น ลูกค้าซื้อเกิน">' +
     '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">' + RETURN_REASONS.map(function (r) {
       return '<button type="button" class="chip" data-why="' + r + '" style="height:32px;font-size:13px;padding:0 12px">' + r + '</button>';
@@ -1475,10 +1477,10 @@ function returnModal(rc) {
     '<button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">บันทึกคืนสินค้า</button></footer>');
   var draw = function () {
     $('#rt-lines', m).innerHTML = rc.lines.map(function (l) {
-      var left = l.qty - l.returnedQty, q = st.q[l.lineNo] || 0;
+      var left = l.qty - l.returnedQty, q = st.q[l.lineNo] || 0, made = isRecipeSku(l.sku);
       return '<div class="su-line"><div><b>' + esc(l.name) + '</b> <span class="muted">' + esc(l.unitName) + '</span><div class="muted" style="font-size:12px">ซื้อ ' + l.qty +
         (l.returnedQty ? ' · คืนแล้ว ' + l.returnedQty : '') + ' · ' + money(l.lineTotal) + ' บาท</div></div>' +
-        (left > 0 ? '<div class="row" style="gap:10px"><span class="num muted" style="font-size:13px">' + (q ? '−' + money(refundOf(l, q)) : '') + '</span><div class="qty"><button type="button" data-l="' + l.lineNo + '" data-d="-1" aria-label="ลด">−</button>' +
+        (made ? '<span class="tag gray" title="ชงแล้วขายต่อไม่ได้">เครื่องดื่มชง · คืนไม่ได้</span>' : left > 0 ? '<div class="row" style="gap:10px"><span class="num muted" style="font-size:13px">' + (q ? '−' + money(refundOf(l, q)) : '') + '</span><div class="qty"><button type="button" data-l="' + l.lineNo + '" data-d="-1" aria-label="ลด">−</button>' +
           '<span class="n num">' + q + '</span><button type="button" data-l="' + l.lineNo + '" data-d="1" aria-label="เพิ่ม">+</button></div></div>' : '<span class="tag gray">คืนครบแล้ว</span>') + '</div>';
     }).join('');
     var total = rc.lines.reduce(function (a, l) { return a + (st.q[l.lineNo] ? refundOf(l, st.q[l.lineNo]) : 0); }, 0);

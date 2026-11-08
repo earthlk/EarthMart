@@ -349,7 +349,7 @@ var REFUND_METHODS = ['cash', 'transfer'];
  * Refund per piece = line total less its share of the bill discount.
  * Returned goods always go back into stock as a new FIFO lot at the cost they were sold at, so the customer is not
  * kept waiting; anything spoiled is written off later on the Stock page (one place for all write-offs).
- * Recipe items are never restocked. Owner approval 'RETURN'.
+ * Recipe items (made-to-order drinks) cannot be returned. Owner approval 'RETURN'.
  */
 function api_returnSale(token, ret) {
   return respond_(function () {
@@ -387,8 +387,8 @@ function api_returnSale(token, ret) {
         var refund = round2_(net * q / num_(l.qty));
         var mult = num_(l.multiplier) || 1;
         var cost = round2_(num_(l.cost) * q / num_(l.qty));
-        var isRecipe = !!(rec[String(l.sku)] && rec[String(l.sku)].length);
-        var restocked = !isRecipe;
+        if (rec[String(l.sku)] && rec[String(l.sku)].length) throw new Error(l.name + ' เป็นเครื่องดื่มชง/สูตรผสม คืนสินค้าไม่ได้');
+        var restocked = true;
         if (restocked) {
           var pcs = q * mult;
           fifoAddLot_(ctx, { sku: l.sku, qtyIn: pcs, unitCost: pcs ? cost / pcs : 0, receiptNo: returnNo, note: 'คืนจากบิล ' + h.billNo });
