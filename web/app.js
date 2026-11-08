@@ -2697,7 +2697,8 @@ var ACTION_TH = { VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วน�
   STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า' };
 
 function repState() {
-  if (!S.rep) S.rep = { f: { from: today(), to: today(), slowDays: 30 }, tab: 'overview', preset: 'today', sort: 'revenue' };
+  if (!S.rep) S.rep = { f: { from: today(), to: today(), slowDays: 30 }, tab: 'overview', preset: 'today', sort: 'revenue',
+    showF: store('em_repfilters') === '1', chartMode: 'day', chartSplit: false };
   return S.rep;
 }
 
@@ -2717,11 +2718,55 @@ function renderReports() {
   return '<div class="page" style="flex-direction:column;gap:12px"><div class="row" style="flex-wrap:wrap;gap:8px">' +
     presets.map(function (p) { return '<button class="chip' + (r.preset === p[0] ? ' on' : '') + '" data-act="repPreset" data-k="' + p[0] + '">' + p[1] + '</button>'; }).join('') +
     '<span class="row" style="gap:6px;margin-left:6px"><label class="sr" for="rf-from">ตั้งแต่</label><input id="rf-from" type="date" data-rf="from" value="' + r.f.from + '" style="width:160px;height:38px">' +
-    '<span class="muted">ถึง</span><label class="sr" for="rf-to">ถึง</label><input id="rf-to" type="date" data-rf="to" value="' + r.f.to + '" style="width:160px;height:38px"></span></div>' +
-    '<div class="card rep-f"><div id="rf-sel" class="rep-sel"></div><button class="btn sm ghost" data-act="repClear" style="align-self:flex-end;white-space:nowrap">ล้างตัวกรอง</button></div>' +
+    '<span class="muted">ถึง</span><label class="sr" for="rf-to">ถึง</label><input id="rf-to" type="date" data-rf="to" value="' + r.f.to + '" style="width:160px;height:38px"></span>' +
+    '<span class="grow"></span><button class="btn sm' + (r.showF ? ' on' : '') + '" data-act="repToggleF" aria-expanded="' + r.showF + '" id="rf-btn">ตัวกรองเพิ่มเติม' + repFilterBadge() + ' ' + (r.showF ? '▴' : '▾') + '</button></div>' +
+    '<div class="card rep-f' + (r.showF ? '' : ' hidden') + '"><div id="rf-sel" class="rep-sel"></div><button class="btn sm ghost" data-act="repClear" style="align-self:flex-end;white-space:nowrap">ล้างตัวกรอง</button></div>' +
     '<div class="tabs card rep-tabs">' + REP_TABS.map(function (t) {
       return '<button class="tab' + (r.tab === t[0] ? ' on' : '') + '" data-act="repTab" data-t="' + t[0] + '">' + t[1] + '</button>';
     }).join('') + '</div><div id="report" class="col" style="gap:14px"><span class="muted">กำลังโหลด…</span></div></div>';
+}
+
+function repFilterBadge() {
+  var f = repState().f, n = ['category', 'sku', 'userId', 'shiftId', 'pay', 'deviceId', 'billType'].filter(function (k) { return f[k]; }).length;
+  return n ? ' <span class="badge-n">' + n + '</span>' : '';
+}
+
+var CHART_COLORS = ['#2F7D59', '#3B6FB6', '#D08A2C', '#B34B6E', '#6C5BB8', '#2A9C9C', '#9A6B3F', '#8C939B'];
+var TH_MON_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+
+/** Bar chart: total, or stacked by category. series = { keys, total, cats: [{ category, values, sum }] } */
+function chartHtml(series, split, kind) {
+  var n = series.keys.length;
+  var lab = function (k, i) {
+    if (kind === 'hour') return i % 6 === 0 ? String(i).padStart(2, '0') + ':00' : '';
+    if (kind === 'month') return TH_MON_SHORT[Number(k.slice(5)) - 1] + (k.slice(5) === '01' || i === 0 ? ' ' + String(Number(k.slice(0, 4)) + 543).slice(2) : '');
+    var step = n > 20 ? Math.ceil(n / 10) : 1, d = Number(k.slice(8));
+    return i % step === 0 || i === n - 1 ? d + (d === 1 || i === 0 ? ' ' + TH_MON_SHORT[Number(k.slice(5, 7)) - 1] : '') : '';
+  };
+  var tip = function (k) {
+    if (kind === 'hour') return String(k).padStart(2, '0') + ':00–' + String(Number(k) + 1).padStart(2, '0') + ':00';
+    if (kind === 'month') return TH_MONTH[Number(k.slice(5)) - 1] + ' ' + (Number(k.slice(0, 4)) + 543);
+    return dayLabel(k);
+  };
+  var tops = series.keys.map(function (_, i) {
+    return split ? series.cats.reduce(function (a, c) { return a + Math.max(0, c.values[i]); }, 0) : Math.max(0, series.total[i]);
+  });
+  var max = Math.max.apply(null, tops.concat([1]));
+  var bars = series.keys.map(function (k, i) {
+    var t = tip(k) + ' · ฿' + money(series.total[i]);
+    var segs = split ? series.cats.map(function (c, ci) {
+      var v = Math.max(0, c.values[i]);
+      return v ? '<span style="height:' + (v / max * 100) + '%;background:' + CHART_COLORS[ci % CHART_COLORS.length] + '" title="' + esc(t + '\n' + c.category + ' ฿' + money(c.values[i])) + '"></span>' : '';
+    }).join('') : '<span style="height:' + (tops[i] / max * 100) + '%;background:var(--brand)" title="' + esc(t) + '"></span>';
+    return '<div class="cb">' + segs + '</div>';
+  }).join('');
+  var labels = series.keys.map(function (k, i) { return '<span>' + lab(k, i) + '</span>'; }).join('');
+  var legend = split ? '<div class="legend">' + series.cats.map(function (c, ci) {
+    return '<span><i style="background:' + CHART_COLORS[ci % CHART_COLORS.length] + '"></i>' + esc(c.category) + ' <b class="num">฿' + money(c.sum) + '</b></span>';
+  }).join('') + '</div>' : '';
+  var empty = !series.total.some(function (v) { return v; });
+  return '<div class="chart"><div class="ymax muted">฿' + money(max) + '</div><div class="cbars" style="--n:' + n + '">' + bars + '</div><div class="clabels" style="--n:' + n + '">' + labels + '</div></div>' +
+    (empty ? '<div class="muted" style="font-size:13px;text-align:center">ยังไม่มียอดขายในช่วงนี้</div>' : legend);
 }
 
 function repSelects(o) {
@@ -2749,6 +2794,7 @@ function loadReport() {
     r.data = d;
     if (!$('#report')) return;
     repSelects(d.options);
+    var fb = $('#rf-btn'); if (fb) fb.innerHTML = 'ตัวกรองเพิ่มเติม' + repFilterBadge() + ' ' + (r.showF ? '▴' : '▾');
     drawReport();
   }).catch(fail);
 }
@@ -2768,18 +2814,21 @@ function drawReport() {
   };
   var html = '';
   if (r.tab === 'overview') {
-    var series = d.oneDay ? d.hourly.map(function (v, h) { return { v: v, t: h + ':00' }; }) : d.daily.map(function (x) { return { v: x.net, t: x.day }; });
-    var max = Math.max.apply(null, series.map(function (x) { return x.v; }).concat([1]));
+    var mode = r.chartMode, ser = d.chart ? d.chart[mode] : null;
+    var kind = mode === 'month' ? 'month' : d.oneDay ? 'hour' : 'day';
+    var title = mode === 'month' ? 'ยอดขายรายเดือน · 12 เดือนถึง ' + TH_MONTH[Number(d.to.slice(5, 7)) - 1] : d.oneDay ? 'ยอดขายรายชั่วโมง' : 'ยอดขายรายวัน';
+    var seg = function (key, opts) {
+      return '<div class="seg-sm">' + opts.map(function (o) { return '<button class="' + (String(r[key]) === String(o[0]) ? 'on' : '') + '" data-act="repChart" data-key="' + key + '" data-v="' + o[0] + '">' + o[1] + '</button>'; }).join('') + '</div>';
+    };
+    var chartCard = '<div class="card pad"><div class="row chart-head" style="flex-wrap:wrap;gap:10px;margin-bottom:8px"><h2 style="margin:0">' + title + '</h2><span class="grow"></span>' +
+      seg('chartMode', [['day', d.oneDay ? 'รายชั่วโมง' : 'รายวัน'], ['month', 'รายเดือน']]) + seg('chartSplit', [['false', 'รวม'], ['true', 'แยกตามหมวด']]) + '</div>' +
+      (ser ? chartHtml(ser, r.chartSplit, kind) : '<span class="muted">กำลังโหลด…</span>') + '</div>';
     var payT = Math.max(1, d.byPay.cash + d.byPay.qr + d.byPay.transfer);
     html = '<div class="kpis">' + kpi('ยอดขายสุทธิ', '฿' + money(sm.net), sm.refunds ? 'ขาย ฿' + money(sm.gross) + ' − คืน ฿' + money(sm.refunds) : '', 'brand-text') +
       kpi('จำนวนบิล', sm.bills, sm.bills ? 'เฉลี่ย ฿' + money(sm.avgBill) + ' / บิล' : '') +
       kpi('กำไรขั้นต้น', '฿' + money(sm.profit) + ' ' + pct(sm.margin), 'ต้นทุน ฿' + money(sm.cost)) +
       kpi('ยกเลิก / คืน', sm.voids + ' / ' + sm.returns, 'ยกเลิก ฿' + money(sm.voidTotal) + (sm.discount ? ' · ส่วนลด ฿' + money(sm.discount) : '')) + '</div>' +
-      '<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px">' +
-      '<div class="card pad"><h2>' + (d.oneDay ? 'ยอดขายรายชั่วโมง' : 'ยอดขายรายวัน') + '</h2><div class="bars">' + series.map(function (x) {
-        return '<div title="' + x.t + ' ฿' + money(x.v) + '" style="height:' + Math.max(0, x.v / max * 100) + '%"></div>';
-      }).join('') + '</div><div class="row muted" style="justify-content:space-between;font-size:12px">' +
-      (d.oneDay ? '<span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>' : '<span>' + thDate(d.from) + '</span><span>' + thDate(d.to) + '</span>') + '</div></div>' +
+      chartCard + '<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px">' +
       '<div class="card pad"><h2>ช่องทางชำระ</h2><div class="paybar">' + ['cash', 'qr', 'transfer'].map(function (k) {
         return '<span class="pb-' + k + '" style="width:' + Math.max(0, d.byPay[k] / payT * 100) + '%"></span>';
       }).join('') + '</div>' + ['cash', 'qr', 'transfer'].map(function (k) {
@@ -3062,6 +3111,12 @@ var ACTIONS = {
   repSort: function (el) { repState().sort = el.getAttribute('data-k'); drawReport(); },
   repCat: function (el) { var rs = repState(); rs.f.category = el.getAttribute('data-c'); rs.f.sku = ''; rs.tab = 'products'; render(); loadReport(); },
   repSlow: function (el) { repState().f.slowDays = Number(el.getAttribute('data-n')); loadReport(); },
+  repToggleF: function () {
+    var rs = repState(); rs.showF = !rs.showF; store('em_repfilters', rs.showF ? '1' : '0');
+    $('.rep-f').classList.toggle('hidden', !rs.showF);
+    var b = $('#rf-btn'); b.classList.toggle('on', rs.showF); b.setAttribute('aria-expanded', rs.showF); b.innerHTML = 'ตัวกรองเพิ่มเติม' + repFilterBadge() + ' ' + (rs.showF ? '▴' : '▾');
+  },
+  repChart: function (el) { var rs = repState(), k = el.getAttribute('data-key'), v = el.getAttribute('data-v'); rs[k] = k === 'chartSplit' ? v === 'true' : v; drawReport(); },
   repClear: function () { var rs = repState(); rs.f = { from: rs.f.from, to: rs.f.to, slowDays: rs.f.slowDays }; loadReport(); },
   selProduct: function (el) { selectProduct(el.getAttribute('data-sku')); },
   csvTemplate: downloadCsvTemplate,

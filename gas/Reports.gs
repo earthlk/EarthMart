@@ -283,9 +283,19 @@ function api_report(token, f) {
         var k2 = fmtYmdUtc_(d); days.push({ day: k2, net: round2_(daily[k2] || 0) });
       }
     }
+    // ---- chart series: per hour (one day) or per day of the range, and per month for the 12 months up to `to`
+    var mStartD = new Date(Date.UTC(Number(to.slice(0, 4)), Number(to.slice(5, 7)) - 1 - 11, 1));   // first of the 12 months
+    var dayKeys = oneDay ? hourly.map(function (_, i) { return String(i); }) : days.map(function (x) { return x.day; });
+    var monthKeys = [];
+    for (var mi = 0; mi < 12; mi++) monthKeys.push(fmtYmdUtc_(new Date(Date.UTC(mStartD.getUTCFullYear(), mStartD.getUTCMonth() + mi, 1))).slice(0, 7));
+    var chart = {
+      day: chartSeries_(from, to, function (dt) { return oneDay ? fmtDate_(dt, 'H') : fmtDate_(dt, 'yyyy-MM-dd'); }, dayKeys, billOk, lineOk, products),
+      month: chartSeries_(fmtYmdUtc_(mStartD), to,
+        function (dt) { return fmtDate_(dt, 'yyyy-MM'); }, monthKeys, billOk, lineOk, products)
+    };
     var cost = round2_(S.cost);
     return {
-      from: from, to: to, oneDay: oneDay,
+      from: from, to: to, oneDay: oneDay, chart: chart,
       summary: { gross: round2_(S.gross), refunds: round2_(refunds), net: round2_(net), bills: S.bills, avgBill: S.bills ? round2_(S.gross / S.bills) : 0,
                  pieces: round2_(S.pieces), discount: round2_(S.discount), cost: cost, profit: round2_(net - cost),
                  margin: net ? Math.round((net - cost) / net * 1000) / 10 : 0,
@@ -308,3 +318,52 @@ function api_report(token, f) {
 }
 
 function fmtYmdUtc_(d) { return d.toISOString().slice(0, 10); }
+
+/**
+ * Net sales per bucket and per category between from..to (days, inclusive): lines net of the bill-discount share,
+ * minus refunds on the day of the return. keyOf(date) gives the bucket; keys fixes the order (empty buckets = 0).
+ * → { keys, total: [..], cats: [{ category, values: [..], sum }] } (categories by size, top 7 + "อื่น ๆ").
+ */
+function chartSeries_(from, to, keyOf, keys, billOk, lineOk, products) {
+  var inR = function (v) { if (!(v instanceof Date)) return false; var d = fmtDate_(v, 'yyyy-MM-dd'); return d >= from && d <= to; };
+  var idx = {};
+  keys.forEach(function (k, i) { idx[k] = i; });
+  var total = keys.map(function () { return 0; });
+  var cats = {};
+  var add = function (dt, cat, v) {
+    var i = idx[keyOf(dt)];
+    if (i === undefined) return;
+    total[i] += v;
+    var c = cats[cat] || (cats[cat] = keys.map(function () { return 0; }));
+    c[i] += v;
+  };
+  var bills = {};
+  readAll_('Sales').forEach(function (b) { if (b.status !== 'VOID' && billOk(b)) bills[b.billNo] = b; });
+  var lines = {};
+  readAll_('SaleLines').forEach(function (l) { var b = bills[l.billNo]; if (b && inR(b.createdAt)) (lines[l.billNo] = lines[l.billNo] || []).push(l); });
+  Object.keys(lines).forEach(function (no) {
+    var b = bills[no], ls = lines[no];
+    var sumLT = ls.reduce(function (a, l) { return a + num_(l.lineTotal); }, 0);
+    var disc = num_(b.discount) - ls.reduce(function (a, l) { return a + num_(l.lineDiscount); }, 0);
+    ls.forEach(function (l) {
+      if (!lineOk(l)) return;
+      var lt = num_(l.lineTotal);
+      add(b.createdAt, (products[String(l.sku)] || {}).category || 'ไม่มีหมวด', sumLT ? lt - disc * lt / sumLT : 0);
+    });
+  });
+  var rets = {};
+  readAll_('Returns').forEach(function (r) { if (inR(r.createdAt) && bills[r.billNo]) rets[r.returnNo] = r; });
+  readAll_('ReturnLines').forEach(function (l) {
+    var r = rets[l.returnNo];
+    if (r && lineOk(l)) add(r.createdAt, (products[String(l.sku)] || {}).category || 'ไม่มีหมวด', -num_(l.refund));
+  });
+  var list = Object.keys(cats).map(function (k) { return { category: k, values: cats[k], sum: cats[k].reduce(function (a, v) { return a + v; }, 0) }; })
+    .sort(function (a, b) { return b.sum - a.sum; });
+  if (list.length > 8) {
+    var rest = list.slice(7), other = { category: 'อื่น ๆ', values: keys.map(function () { return 0; }), sum: 0 };
+    rest.forEach(function (c) { c.values.forEach(function (v, i) { other.values[i] += v; }); other.sum += c.sum; });
+    list = list.slice(0, 7).concat([other]);
+  }
+  list.forEach(function (c) { c.values = c.values.map(round2_); c.sum = round2_(c.sum); });
+  return { keys: keys, total: total.map(round2_), cats: list };
+}

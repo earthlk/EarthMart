@@ -191,7 +191,18 @@ call('importProducts', T, [
   assert.match(await page.textContent('.kpis'), /171\.00/);
   assert.match(await page.textContent('#report'), /เปิดลิ้นชัก/);
   await page.waitForSelector('#rf-category option:nth-child(2)', { state: 'attached' });
+  assert.ok(await page.isHidden('.rep-f'), 'extra filters hidden by default');
+  await page.click('[data-act=repChart][data-key=chartSplit][data-v=true]');
+  await page.waitForSelector('#report .legend');
   await shot('08-report');
+  await page.click('[data-act=repChart][data-key=chartMode][data-v=month]');
+  await page.waitForSelector('#report h2:has-text("รายเดือน")');
+  assert.strictEqual(await page.locator('#report .cb').count(), 12, '12 months');
+  await shot('08a-report-month');
+  await page.click('[data-act=repChart][data-key=chartMode][data-v=day]');
+  await page.click('[data-act=repChart][data-key=chartSplit][data-v=false]');
+  await page.click('[data-act=repToggleF]');
+  await page.waitForSelector('.rep-f:not(.hidden)');
   await page.click('[data-act=repTab][data-t=products]');
   await page.waitForSelector('#report tr.sumrow');
   assert.match(await page.textContent('#report tr.sumrow'), /171\.00/);

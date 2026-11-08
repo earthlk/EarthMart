@@ -291,6 +291,18 @@ a{color:var(--brand-text)}
 .rep-sel .field label{font-size:12px}
 .rep-sel select{width:100%;height:36px;font-size:14px}
 .rep-tabs{display:flex;gap:2px;flex-wrap:wrap;padding:6px 8px 0}
+/* report chart */
+.chart{display:grid;grid-template-columns:auto 1fr;grid-template-rows:200px auto;column-gap:8px}
+.chart .ymax{grid-row:1;font-size:11px;align-self:start}
+.cbars{grid-column:2;display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:3px;align-items:end;border-bottom:1px solid var(--line);height:200px}
+.cb{display:flex;flex-direction:column-reverse;height:100%;justify-content:flex-start}
+.cb span{display:block;width:100%;min-height:0}
+.cb span:last-child{border-radius:3px 3px 0 0}
+.clabels{grid-column:2;display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:3px;font-size:11px;color:var(--muted);white-space:nowrap;overflow:visible}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:13px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:0}
+.badge-n{display:inline-block;min-width:18px;height:18px;line-height:18px;border-radius:9px;background:var(--brand);color:var(--brand-ink);font-size:11px;font-weight:700;text-align:center;padding:0 4px}
+.btn.on{border-color:var(--brand-line);color:var(--brand-text)}
 .paybar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--surface-muted);margin-bottom:8px}
 .paybar span{display:block;height:100%}
 .pb-cash{background:var(--brand)}
@@ -407,3 +419,5 @@ a{color:var(--brand-text)}
 .login .dots.shake{animation:pinShake .35s}
 @keyframes pinShake{0%,100%{transform:none}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
 @media (prefers-reduced-motion:reduce){.login .dots.busy span.on,.login .dots.shake{animation:none}}
+.chart-head .seg-sm{flex:0 0 auto}
+.chart-head .seg-sm button{white-space:nowrap;padding:0 14px;flex:0 0 auto}
