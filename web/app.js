@@ -463,6 +463,7 @@ function go(view) {
   if (view === 'stock') loadStock();
   if (view === 'receive') loadReceive();
   if (view === 'expiry') { S.expSel = null; loadExpiry(); }
+  if (view !== 'reports') killCharts();
   if (view === 'shift' && S.shift) loadShift();
   if (view === 'reports') loadReport();
   if (view === 'settings') loadSettings();
@@ -2694,7 +2695,8 @@ function printShift(s) {
 var REP_TABS = [['overview', 'ภาพรวม'], ['products', 'สินค้า'], ['categories', 'หมวด'], ['staff', 'พนักงาน'], ['shifts', 'กะ'], ['slow', 'ไม่เคลื่อนไหว'], ['stock', 'มูลค่าสต็อก']];
 var ACTION_TH = { VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
   STOCK_ADJUST: 'ปรับสต็อก', PRICE_CHANGE: 'แก้ราคา', APPROVE_FAIL: 'PIN อนุมัติผิด', NO_SALE: 'เปิดลิ้นชัก', WRITEOFF: 'ตัดของเสีย',
-  STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า' };
+  STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า',
+  BELOW_COST: 'ขายต่ำกว่าทุน', LOW_MARGIN: 'กำไรต่ำ' };
 
 function repState() {
   if (!S.rep) S.rep = { f: { from: today(), to: today(), slowDays: 30 }, tab: 'overview', preset: 'today', sort: 'revenue',
@@ -2765,39 +2767,234 @@ function repFilterBadge() {
 var CHART_COLORS = ['#2F7D59', '#3B6FB6', '#D08A2C', '#B34B6E', '#6C5BB8', '#2A9C9C', '#9A6B3F', '#8C939B'];
 var TH_MON_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 
-/** Bar chart: total, or stacked by category. series = { keys, total, cats: [{ category, values, sum }] } */
-function chartHtml(series, split, kind) {
-  var n = series.keys.length;
-  var lab = function (k, i) {
-    if (kind === 'hour') return i % 6 === 0 ? String(i).padStart(2, '0') + ':00' : '';
-    if (kind === 'month') return TH_MON_SHORT[Number(k.slice(5)) - 1] + (k.slice(5) === '01' || i === 0 ? ' ' + String(Number(k.slice(0, 4)) + 543).slice(2) : '');
-    var step = n > 20 ? Math.ceil(n / 10) : 1, d = Number(k.slice(8));
-    return i % step === 0 || i === n - 1 ? d + (d === 1 || i === 0 ? ' ' + TH_MON_SHORT[Number(k.slice(5, 7)) - 1] : '') : '';
+/* ---------------- Report charts (Chart.js, same look as the FIFO dashboard) ---------------- */
+var CHARTS = {};
+function tok(n) { var el = $('.ui') || document.body; return getComputedStyle(el).getPropertyValue(n).trim() || '#888'; }
+function rgba(c, a) {
+  var m = /^#?([0-9a-f]{6})$/i.exec(c || '');
+  if (!m) return c;
+  var n = parseInt(m[1], 16);
+  return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+function chartFont() { return getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif'; }
+function killCharts() { Object.keys(CHARTS).forEach(function (k) { try { CHARTS[k].destroy(); } catch (e) {} delete CHARTS[k]; }); }
+function themeDefaults() {
+  if (!window.Chart) return;
+  Chart.defaults.font.family = chartFont();
+  Chart.defaults.font.size = window.innerWidth < 700 ? 12 : 13;
+  Chart.defaults.color = tok('--muted');
+  Chart.defaults.borderColor = tok('--line-soft');
+  Chart.defaults.animation = false;
+}
+function areaFill(color) {
+  return function (ctx) {
+    var ch = ctx.chart, a = ch.chartArea;
+    if (!a) return 'transparent';
+    var g = ch.ctx.createLinearGradient(0, a.top, 0, a.bottom);
+    g.addColorStop(0, rgba(color, 0.18)); g.addColorStop(1, rgba(color, 0));
+    return g;
   };
-  var tip = function (k) {
-    if (kind === 'hour') return String(k).padStart(2, '0') + ':00–' + String(Number(k) + 1).padStart(2, '0') + ':00';
-    if (kind === 'month') return TH_MONTH[Number(k.slice(5)) - 1] + ' ' + (Number(k.slice(0, 4)) + 543);
-    return dayLabel(k);
-  };
-  var tops = series.keys.map(function (_, i) {
-    return split ? series.cats.reduce(function (a, c) { return a + Math.max(0, c.values[i]); }, 0) : Math.max(0, series.total[i]);
+}
+var crosshairPlugin = {
+  id: 'crosshair',
+  beforeDatasetsDraw: function (chart) {
+    var act = chart.tooltip && chart.tooltip.getActiveElements();
+    if (!act || !act.length) return;
+    var c = chart.ctx, a = chart.chartArea, x = act[0].element.x;
+    c.save(); c.strokeStyle = tok('--line'); c.lineWidth = 1;
+    c.beginPath(); c.moveTo(x, a.top); c.lineTo(x, a.bottom); c.stroke(); c.restore();
+  }
+};
+var refLinePlugin = {
+  id: 'refLine',
+  beforeDatasetsDraw: function (chart, args, o) {
+    if (!o || o.value == null) return;
+    var c = chart.ctx, a = chart.chartArea, py = chart.scales.y.getPixelForValue(o.value);
+    if (py < a.top || py > a.bottom) return;
+    c.save(); c.strokeStyle = tok('--muted'); c.setLineDash([4, 4]); c.lineWidth = 1;
+    c.beginPath(); c.moveTo(a.left, py); c.lineTo(a.right, py); c.stroke(); c.setLineDash([]);
+    c.font = '600 12px ' + chartFont(); c.fillStyle = tok('--muted'); c.textAlign = 'left'; c.textBaseline = 'bottom';
+    c.lineJoin = 'round'; c.strokeStyle = tok('--surface'); c.lineWidth = 4;
+    c.strokeText(o.label, a.left + 6, py - 4); c.fillText(o.label, a.left + 6, py - 4);
+    c.restore();
+  }
+};
+/** Labels only on the key points (latest / highest / lowest), never on every point. */
+var keyLabelsPlugin = {
+  id: 'keyLabels',
+  afterDatasetsDraw: function (chart, args, o) {
+    if (!o || !o.points) return;
+    var c = chart.ctx, a = chart.chartArea, meta = chart.getDatasetMeta(0), placed = [];
+    c.save(); c.font = '600 12px ' + chartFont(); c.textBaseline = 'middle'; c.lineJoin = 'round';
+    o.points.forEach(function (p) {
+      var el = meta.data[p.i]; if (!el) return;
+      var w = c.measureText(p.text).width, x = el.x, align = 'center';
+      if (x - w / 2 < a.left) { align = 'left'; x = Math.max(el.x - 4, a.left); }
+      if (x + w / 2 > a.right) { align = 'right'; x = Math.min(el.x + 4, a.right); }
+      var y = p.below ? el.y + 14 : el.y - 14;
+      var L = align === 'left' ? x : align === 'right' ? x - w : x - w / 2;
+      var rr = { l: L - 4, r: L + w + 4, t: y - 9, b: y + 9 };
+      if (placed.some(function (q) { return rr.l < q.r && rr.r > q.l && rr.t < q.b && rr.b > q.t; })) return;
+      placed.push(rr);
+      c.textAlign = align; c.strokeStyle = tok('--surface'); c.lineWidth = 4; c.strokeText(p.text, x, y);
+      c.fillStyle = p.strong ? tok('--ink') : tok('--muted'); c.fillText(p.text, x, y);
+      c.beginPath(); c.arc(el.x, el.y, 4, 0, Math.PI * 2); c.fillStyle = o.color || tok('--brand'); c.fill();
+      c.lineWidth = 2; c.strokeStyle = tok('--surface'); c.stroke();
+    });
+    c.restore();
+  }
+};
+function tooltipStyle() {
+  var f = chartFont();
+  return { backgroundColor: tok('--surface'), borderColor: tok('--line'), borderWidth: 1, titleColor: tok('--ink'), bodyColor: tok('--ink'),
+    footerColor: tok('--muted'), titleFont: { size: 14, weight: '700', family: f }, bodyFont: { size: 14, family: f }, footerFont: { size: 12, family: f, weight: '400' },
+    padding: 10, cornerRadius: 8, caretSize: 0, boxWidth: 8, boxHeight: 8, boxPadding: 4, usePointStyle: true };
+}
+function niceMax(v) {
+  if (!v) return 0;
+  var e = Math.pow(10, Math.floor(Math.log10(v)));
+  var ms = [1, 2, 2.5, 4, 5, 10];
+  for (var i = 0; i < ms.length; i++) if (v <= ms[i] * e) return ms[i] * e;
+  return 10 * e;
+}
+function bucketLabel(k, kind, long) {
+  if (kind === 'hour') return String(k).padStart(2, '0') + ':00' + (long ? '–' + String(Number(k) + 1).padStart(2, '0') + ':00' : '');
+  if (kind === 'month') return long ? TH_MONTH[Number(k.slice(5)) - 1] + ' ' + (Number(k.slice(0, 4)) + 543) : TH_MON_SHORT[Number(k.slice(5)) - 1] + ' ' + String(Number(k.slice(0, 4)) + 543).slice(2);
+  return long ? dayLabel(k) : Number(k.slice(8)) + ' ' + TH_MON_SHORT[Number(k.slice(5, 7)) - 1];
+}
+function moneyAxis(v) { return v >= 1000 ? (v / 1000).toLocaleString('th-TH', { maximumFractionDigits: 1 }) + 'k' : String(v); }
+
+/** Total trend: area line + average line + key labels (latest / highest / lowest). sub = id of the summary line. */
+function lineChart(id, series, kind, opts) {
+  var cv = $('#' + id); if (!cv || !window.Chart) return;
+  themeDefaults();
+  opts = opts || {};
+  var data = series.total, color = tok('--brand');
+  var nz = data.map(function (v, i) { return i; });
+  var avg = data.length ? data.reduce(function (a, v) { return a + v; }, 0) / data.length : 0;
+  var pts = [];
+  if (data.some(function (v) { return v; })) {
+    var hi = nz.reduce(function (a, i) { return data[i] > data[a] ? i : a; }, 0);
+    var lo = nz.reduce(function (a, i) { return data[i] < data[a] ? i : a; }, 0);
+    var last = opts.noLatest ? -1 : data.length - 1;
+    if (last >= 0) pts.push({ i: last, text: '฿' + money(data[last]), strong: true, below: data[last] < avg && last !== hi });
+    if (hi !== last) pts.push({ i: hi, text: 'สูงสุด ฿' + money(data[hi]) });
+    if (lo !== last && lo !== hi && data.length > 2) pts.push({ i: lo, text: 'ต่ำสุด ฿' + money(data[lo]), below: true });
+    if (opts.sub) $('#' + opts.sub).textContent = (opts.subPrefix || '') + 'เฉลี่ย ฿' + money(avg) + ' · สูงสุด ฿' + money(data[hi]) + ' (' + bucketLabel(series.keys[hi], kind) + ')' +
+      (data.length > 2 ? ' · ต่ำสุด ฿' + money(data[lo]) + ' (' + bucketLabel(series.keys[lo], kind) + ')' : '');
+  } else if (opts.sub) $('#' + opts.sub).textContent = 'ยังไม่มียอดขายในช่วงนี้';
+  CHARTS[id] = new Chart(cv, {
+    type: 'line',
+    data: { labels: series.keys.map(function (k) { return bucketLabel(k, kind); }),
+      datasets: [{ label: 'ยอดขาย', data: data, borderColor: color, borderWidth: 2, backgroundColor: areaFill(color), fill: 'origin', tension: 0,
+        pointRadius: data.length <= 16 ? 3 : 0, pointBackgroundColor: color, pointBorderColor: tok('--surface'), pointBorderWidth: 2,
+        pointHoverRadius: 6, pointHoverBorderWidth: 2, pointHoverBorderColor: tok('--surface'), pointHitRadius: 12 }] },
+    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 28, right: 12 } }, interaction: { mode: 'index', intersect: false },
+      onClick: opts.onClick ? function (e, els) { if (els.length) opts.onClick(series.keys[els[0].index]); } : undefined,
+      scales: { y: { beginAtZero: true, grace: '12%', border: { display: false }, grid: { color: tok('--line-soft'), drawTicks: false }, ticks: { padding: 8, maxTicksLimit: 6, callback: moneyAxis } },
+        x: { border: { color: tok('--line') }, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 16, padding: 6 } } },
+      plugins: { legend: { display: false }, refLine: { value: data.length > 1 ? avg : null, label: 'เฉลี่ย ฿' + money(avg) }, keyLabels: { points: pts, color: color },
+        tooltip: Object.assign(tooltipStyle(), { displayColors: false, callbacks: {
+          title: function (it) { return bucketLabel(series.keys[it[0].dataIndex], kind, true); },
+          label: function (c) { return 'ยอดขาย ฿' + money(c.parsed.y); },
+          footer: function (it) { return opts.footer ? opts.footer(series.keys[it[0].dataIndex]) : ''; } } }) } },
+    plugins: [crosshairPlugin, refLinePlugin, keyLabelsPlugin]
   });
-  var max = Math.max.apply(null, tops.concat([1]));
-  var bars = series.keys.map(function (k, i) {
-    var t = tip(k) + ' · ฿' + money(series.total[i]);
-    var segs = split ? series.cats.map(function (c, ci) {
-      var v = Math.max(0, c.values[i]);
-      return v ? '<span style="height:' + (v / max * 100) + '%;background:' + CHART_COLORS[ci % CHART_COLORS.length] + '" title="' + esc(t + '\n' + c.category + ' ฿' + money(c.values[i])) + '"></span>' : '';
-    }).join('') : '<span style="height:' + (tops[i] / max * 100) + '%;background:var(--brand)" title="' + esc(t) + '"></span>';
-    return '<div class="cb">' + segs + '</div>';
+}
+
+/** By category, "compare": ranking bars (whole range) + trend lines, one category highlighted. */
+function catCompare(prefix, series, kind, focus, onFocus) {
+  if (!window.Chart) return;
+  themeDefaults();
+  var cats = series.cats, total = cats.reduce(function (a, c) { return a + c.sum; }, 0) || 1;
+  var F = cats.some(function (c) { return c.category === focus; }) ? focus : (cats[0] || {}).category;
+  var colorOf = function (i) { return CHART_COLORS[i % CHART_COLORS.length]; };
+  var rb = $('#' + prefix + 'r'); if (rb) rb.parentNode.style.height = (cats.length * 38 + 40) + 'px';
+  var barLabels = { id: 'barLabels', afterDatasetsDraw: function (chart) {
+    var c = chart.ctx, meta = chart.getDatasetMeta(0);
+    c.save(); c.font = '600 12px ' + chartFont(); c.textBaseline = 'middle'; c.textAlign = 'left';
+    meta.data.forEach(function (el, i) { c.fillStyle = cats[i].category === F ? tok('--ink') : tok('--muted'); c.fillText('฿' + money(cats[i].sum) + ' · ' + Math.round(cats[i].sum / total * 100) + '%', el.x + 6, el.y); });
+    c.restore();
+  } };
+  var xMax = niceMax(Math.max.apply(null, cats.map(function (c) { return c.sum; }).concat([1])) * 1.45);
+  if (rb) CHARTS[prefix + 'r'] = new Chart(rb, {
+    type: 'bar',
+    data: { labels: cats.map(function (c) { return c.category; }), datasets: [{ data: cats.map(function (c) { return c.sum; }),
+      backgroundColor: cats.map(function (c, i) { return c.category === F ? colorOf(i) : rgba(colorOf(i), 0.3); }), hoverBackgroundColor: cats.map(function (c, i) { return colorOf(i); }),
+      borderRadius: { topRight: 4, bottomRight: 4 }, borderSkipped: 'start', barThickness: 20 }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, layout: { padding: { top: 6, right: 4 } },
+      onClick: function (e, els) { if (els.length) onFocus(cats[els[0].index].category); },
+      onHover: function (e, els) { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      scales: { x: { beginAtZero: true, max: xMax, border: { display: false }, grid: { color: tok('--line-soft'), drawTicks: false }, ticks: { maxTicksLimit: 4, padding: 4, callback: moneyAxis } },
+        y: { border: { color: tok('--line') }, grid: { display: false }, ticks: { color: function (c) { return cats[c.index] && cats[c.index].category === F ? tok('--ink') : tok('--muted'); },
+          font: function (c) { return { family: chartFont(), size: 13, weight: cats[c.index] && cats[c.index].category === F ? '700' : '400' }; } } } },
+      plugins: { legend: { display: false }, tooltip: Object.assign(tooltipStyle(), { displayColors: false, callbacks: { label: function (c) { return '฿' + money(c.parsed.x); } } }) } },
+    plugins: [barLabels]
+  });
+  var lc = $('#' + prefix + 'l');
+  if (!lc) return;
+  var order = cats.map(function (c, i) { return i; }).filter(function (i) { return cats[i].category !== F; }).concat(cats.map(function (c, i) { return i; }).filter(function (i) { return cats[i].category === F; }));
+  var ds = order.map(function (i) {
+    var on = cats[i].category === F, col = colorOf(i);
+    return { label: cats[i].category, data: cats[i].values, borderColor: on ? col : rgba(col, 0.35), borderWidth: on ? 3 : 1.5,
+      backgroundColor: on ? areaFill(col) : 'transparent', fill: on ? 'origin' : false, tension: 0, pointRadius: 0, pointHoverRadius: on ? 5 : 3, pointHitRadius: 8,
+      pointHoverBackgroundColor: col, pointHoverBorderColor: tok('--surface'), pointHoverBorderWidth: 2, _i: i };
+  });
+  var endLabel = { id: 'endLabel', afterDatasetsDraw: function (chart) {
+    var di = chart.data.datasets.length - 1, meta = chart.getDatasetMeta(di), d = chart.data.datasets[di].data, j = d.length - 1;
+    if (j < 0 || !meta.data[j]) return;
+    var el = meta.data[j], c = chart.ctx, a = chart.chartArea, t = F + ' ฿' + money(d[j]);
+    c.save(); c.font = '700 13px ' + chartFont(); c.textAlign = 'right'; c.textBaseline = 'bottom'; c.lineJoin = 'round';
+    var x = Math.min(el.x, a.right), y = Math.max(el.y - 8, a.top + 12);
+    c.strokeStyle = tok('--surface'); c.lineWidth = 4; c.strokeText(t, x, y); c.fillStyle = tok('--ink'); c.fillText(t, x, y);
+    c.restore();
+  } };
+  CHARTS[prefix + 'l'] = new Chart(lc, {
+    type: 'line',
+    data: { labels: series.keys.map(function (k) { return bucketLabel(k, kind); }), datasets: ds },
+    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16, right: 6 } }, interaction: { mode: 'index', intersect: false },
+      onClick: function (e) {
+        var near = CHARTS[prefix + 'l'].getElementsAtEventForMode(e, 'nearest', { intersect: false, axis: 'xy' }, false);
+        if (near.length) onFocus(ds[near[0].datasetIndex].label);
+      },
+      scales: { y: { beginAtZero: true, grace: '10%', border: { display: false }, grid: { color: tok('--line-soft'), drawTicks: false }, ticks: { padding: 8, maxTicksLimit: 6, callback: moneyAxis } },
+        x: { border: { color: tok('--line') }, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 16, padding: 6 } } },
+      plugins: { legend: { display: false }, tooltip: Object.assign(tooltipStyle(), {
+        itemSort: function (a, b) { return b.parsed.y - a.parsed.y; },
+        callbacks: { title: function (it) { return bucketLabel(series.keys[it[0].dataIndex], kind, true); },
+          label: function (c) { return ' ' + c.dataset.label + ': ฿' + money(c.parsed.y); },
+          labelColor: function (c) { var col = colorOf(c.dataset._i), v = c.dataset.label === F ? col : rgba(col, 0.45); return { borderColor: v, backgroundColor: v }; },
+          labelTextColor: function (c) { return c.dataset.label === F ? tok('--ink') : tok('--muted'); } } }) } },
+    plugins: [crosshairPlugin, endLabel]
+  });
+  var pk = $('#' + prefix + 'p');
+  if (pk) pk.innerHTML = cats.map(function (c, i) {
+    return '<button type="button" data-act="repFocus" data-c="' + esc(c.category) + '" class="' + (c.category === F ? 'on' : '') + '" style="--c:' + colorOf(i) + '"><i></i>' + esc(c.category) + '</button>';
   }).join('');
-  var labels = series.keys.map(function (k, i) { return '<span>' + lab(k, i) + '</span>'; }).join('');
-  var legend = split ? '<div class="legend">' + series.cats.map(function (c, ci) {
-    return '<span><i style="background:' + CHART_COLORS[ci % CHART_COLORS.length] + '"></i>' + esc(c.category) + ' <b class="num">฿' + money(c.sum) + '</b></span>';
-  }).join('') + '</div>' : '';
-  var empty = !series.total.some(function (v) { return v; });
-  return '<div class="chart"><div class="ymax muted">฿' + money(max) + '</div><div class="cbars" style="--n:' + n + '">' + bars + '</div><div class="clabels" style="--n:' + n + '">' + labels + '</div></div>' +
-    (empty ? '<div class="muted" style="font-size:13px;text-align:center">ยังไม่มียอดขายในช่วงนี้</div>' : legend);
+}
+
+/** By category, "cards": one small chart per category (category colour) with the total trend in grey to compare shape. */
+function catCards(boxId, series, kind) {
+  var box = $('#' + boxId); if (!box || !window.Chart) return;
+  themeDefaults();
+  var total = series.cats.reduce(function (a, c) { return a + c.sum; }, 0) || 1;
+  box.innerHTML = series.cats.length ? series.cats.map(function (c, i) {
+    return '<div class="mini"><div class="mini-h"><span class="mini-n"><i style="background:' + CHART_COLORS[i % CHART_COLORS.length] + '"></i>' + esc(c.category) + '</span>' +
+      '<span class="mini-v num">฿' + money(c.sum) + '</span></div><div class="muted" style="font-size:12px">' + Math.round(c.sum / total * 100) + '% ของยอดรวม</div>' +
+      '<div class="mini-c"><canvas></canvas></div><div class="mini-x muted"><span>' + bucketLabel(series.keys[0], kind) + '</span><span>' + bucketLabel(series.keys[series.keys.length - 1], kind) + '</span></div></div>';
+  }).join('') : '<div class="empty">ยังไม่มียอดขาย</div>';
+  box.querySelectorAll('.mini canvas').forEach(function (cv, i) {
+    var col = CHART_COLORS[i % CHART_COLORS.length], c = series.cats[i];
+    CHARTS[boxId + i] = new Chart(cv, {
+      type: 'line',
+      data: { labels: series.keys.map(function (k) { return bucketLabel(k, kind); }),
+        datasets: [{ label: c.category, data: c.values, borderColor: col, borderWidth: 2, backgroundColor: areaFill(col), fill: 'origin', tension: 0, pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 10 }] },
+      options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 4 } }, interaction: { mode: 'index', intersect: false },
+        scales: { x: { display: false }, y: { beginAtZero: true, grace: '10%', border: { display: false }, grid: { color: tok('--line-soft'), drawTicks: false }, ticks: { maxTicksLimit: 3, padding: 4, font: { size: 11 }, callback: moneyAxis } } },
+        plugins: { legend: { display: false }, tooltip: Object.assign(tooltipStyle(), { displayColors: false, callbacks: {
+          title: function (it) { return bucketLabel(series.keys[it[0].dataIndex], kind, true); }, label: function (x) { return '฿' + money(x.parsed.y); } } }) } }
+    });
+  });
 }
 
 function repSelects(o) {
@@ -2846,17 +3043,42 @@ function drawReport() {
       '</tr></thead><tbody>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols.length + '" class="muted">ไม่มีข้อมูลในช่วงนี้</td></tr>') + (foot || '') + '</tbody></table></div>';
   };
   var html = '';
+  var after = null;   // charts are drawn once the HTML is in place
   if (r.tab === 'overview') {
-    var ser = d.chart, kind = ser.kind;
-    var unit = kind === 'month' ? 'รายเดือน' : kind === 'hour' ? 'รายชั่วโมง' : 'รายวัน';
-    var chartCard = '<div class="rep-charts"><div class="card pad"><h2>ยอดขาย' + unit + ' · รวม</h2>' + chartHtml(ser, false, kind) + '</div>' +
-      '<div class="card pad"><h2>ยอดขาย' + unit + ' · แยกตามหมวด</h2>' + chartHtml(ser, true, kind) + '</div></div>';
+    var month = d.gran === 'month', kind = month ? 'month' : 'day';
     var payT = Math.max(1, d.byPay.cash + d.byPay.qr + d.byPay.transfer);
-    html = head + '<div class="kpis">' + kpi('ยอดขายสุทธิ', '฿' + money(sm.net), sm.refunds ? 'ขาย ฿' + money(sm.gross) + ' − คืน ฿' + money(sm.refunds) : '', 'brand-text') +
-      kpi('จำนวนบิล', sm.bills, sm.bills ? 'เฉลี่ย ฿' + money(sm.avgBill) + ' / บิล' : '') +
+    var lossAll = round2(sm.loss + sm.expiry + sm.use);
+    var histBy = {};
+    d.history.forEach(function (h) { histBy[h.key] = h; });
+    var unit = month ? 'รายเดือน' : 'รายวัน';
+    var catView = r.catView || 'compare';
+    html = head + '<div class="kpis kpis5">' + kpi('ยอดขายสุทธิ', '฿' + money(sm.net), sm.refunds ? 'ขาย ฿' + money(sm.gross) + ' − คืน ฿' + money(sm.refunds) : '', 'brand-text') +
+      kpi('จำนวนบิล', sm.bills, (sm.bills ? 'เฉลี่ย ฿' + money(sm.avgBill) + ' / บิล' : '') + (sm.voids ? ' · ยกเลิก ' + sm.voids : '')) +
       kpi('กำไรขั้นต้น', '฿' + money(sm.profit) + ' ' + pct(sm.margin), 'ต้นทุน ฿' + money(sm.cost)) +
-      kpi('ยกเลิก / คืน', sm.voids + ' / ' + sm.returns, 'ยกเลิก ฿' + money(sm.voidTotal) + (sm.discount ? ' · ส่วนลด ฿' + money(sm.discount) : '')) + '</div>' +
-      chartCard + '<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px">' +
+      kpi('ของเสีย · หมดอายุ · เบิกใช้', '฿' + money(lossAll), 'เสีย ฿' + money(sm.loss) + ' · หมดอายุ ฿' + money(sm.expiry) + ' · เบิก ฿' + money(sm.use), lossAll ? 'warn-text' : '') +
+      kpi('กำไรหลังหัก', '฿' + money(sm.after), sm.net ? (Math.round(sm.after / sm.net * 1000) / 10) + '% ของยอดขาย' : '') + '</div>' +
+      '<div class="card pad chart-card"><div class="ch-h"><h2>ยอดขาย' + unit + '</h2><span class="muted" id="c-trend-s"></span></div><div class="ch-box"><canvas id="c-trend"></canvas></div></div>' +
+      '<div class="card pad chart-card"><div class="ch-h"><h2>ยอดขาย' + unit + ' แยกตามหมวด</h2><span class="grow"></span><div class="seg-sm">' +
+        [['compare', 'เทียบกัน'], ['cards', 'แยกการ์ด']].map(function (o) { return '<button class="' + (catView === o[0] ? 'on' : '') + '" data-act="repCatView" data-v="' + o[0] + '">' + o[1] + '</button>'; }).join('') + '</div></div>' +
+        (catView === 'compare' ? '<div class="cmp"><div><div class="muted ch-cap">อันดับทั้งช่วง (แตะเพื่อเน้น)</div><div class="ch-rank"><canvas id="c-catr"></canvas></div></div>' +
+          '<div><div class="muted ch-cap">แนวโน้ม</div><div class="ch-box"><canvas id="c-catl"></canvas></div><div class="cmp-pick" id="c-catp"></div></div></div>'
+          : '<div class="minis" id="c-cards"></div>') + '</div>' +
+      (month ? '' : '<div class="card pad chart-card"><div class="ch-h"><h2>ยอดขายรายชั่วโมง</h2><span class="muted" id="c-hour-s"></span></div><div class="ch-box"><canvas id="c-hour"></canvas></div></div>') +
+      '<div class="card pad"><div class="ch-h"><h2>ตารางย้อนหลัง' + unit + '</h2><span class="muted" style="font-size:13px">แตะแถวเพื่อดู' + (month ? 'รายวันของเดือนนั้น' : 'เฉพาะวันนั้น') + '</span></div>' +
+      '<div style="overflow:auto"><table class="table"><thead><tr><th>' + (month ? 'เดือน' : 'วันที่') + '</th><th class="r">บิล</th><th class="r">ยอดสุทธิ</th><th class="r">เทียบก่อนหน้า</th><th class="r">ต้นทุน</th>' +
+      '<th class="r">กำไร</th><th class="r">%</th><th class="r">เสีย/หมดอายุ/เบิก</th><th class="r">กำไรหลังหัก</th></tr></thead><tbody>' +
+      d.history.map(function (h, i) {
+        var prev = d.history[i + 1], ch = '';
+        if (prev && prev.net) { var pc = Math.round((h.net - prev.net) / prev.net * 1000) / 10; ch = '<span class="' + (pc >= 0 ? 'up' : 'down') + '">' + (pc >= 0 ? '▲ ' : '▼ ') + Math.abs(pc) + '%</span>'; }
+        else if (prev && h.net) ch = '<span class="up">ใหม่</span>';
+        var l = round2(h.loss + h.expiry + h.use);
+        return '<tr class="click" data-act="repHist" data-k="' + h.key + '"><td><b>' + bucketLabel(h.key, kind, true) + '</b></td><td class="r num">' + h.bills + '</td><td class="r num"><b>' + money(h.net) + '</b></td>' +
+          '<td class="r num">' + (ch || '<span class="muted">–</span>') + '</td><td class="r num">' + money(h.cost) + '</td><td class="r num">' + money(h.profit) + '</td><td class="r num">' + h.margin + '%</td>' +
+          '<td class="r num">' + (l ? '<span class="warn-text">−' + money(l) + '</span>' : '<span class="muted">–</span>') + '</td><td class="r num"><b class="' + (h.after < 0 ? 'warn-text' : '') + '">' + money(h.after) + '</b></td></tr>';
+      }).join('') +
+      '<tr class="sumrow"><td><b>รวม</b></td><td class="r num"><b>' + sm.bills + '</b></td><td class="r num"><b>' + money(sm.net) + '</b></td><td></td><td class="r num">' + money(sm.cost) + '</td><td class="r num">' + money(sm.profit) +
+      '</td><td class="r num">' + sm.margin + '%</td><td class="r num">' + (lossAll ? '−' + money(lossAll) : '–') + '</td><td class="r num"><b>' + money(sm.after) + '</b></td></tr></tbody></table></div></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
       '<div class="card pad"><h2>ช่องทางชำระ</h2><div class="paybar">' + ['cash', 'qr', 'transfer'].map(function (k) {
         return '<span class="pb-' + k + '" style="width:' + Math.max(0, d.byPay[k] / payT * 100) + '%"></span>';
       }).join('') + '</div>' + ['cash', 'qr', 'transfer'].map(function (k) {
@@ -2864,11 +3086,19 @@ function drawReport() {
       }).join('') + '</div>' +
       '<div class="card pad"><h2>สินค้าขายดี</h2><table class="table"><tbody>' + (d.products.slice(0, 10).map(function (t, i) {
         return '<tr><td class="muted">' + (i + 1) + '</td><td>' + esc(t.name) + '</td><td class="r num">' + t.qty + ' ' + esc(t.unit) + '</td><td class="r num">฿' + money(t.revenue) + '</td></tr>';
-      }).join('') || '<tr><td class="muted">ยังไม่มีการขาย</td></tr>') + '</tbody></table></div>' +
-      '<div class="card pad"><h2>รายการผิดปกติ</h2><table class="table"><tbody>' + (d.exceptions.slice(0, 30).map(function (x) {
-        return '<tr><td class="num">' + (d.oneDay ? timeOf(x.createdAt) : dateTime(x.createdAt)) + '</td><td><b>' + (ACTION_TH[x.action] || x.action) + '</b> ' + esc(x.detail) + '</td><td>' + esc(x.user) +
-          (x.approvedBy ? ' · อนุมัติ ' + esc(x.approvedBy) : '') + '</td></tr>';
-      }).join('') || '<tr><td class="muted">ไม่มี</td></tr>') + '</tbody></table></div></div>';
+      }).join('') || '<tr><td class="muted">ยังไม่มีการขาย</td></tr>') + '</tbody></table></div></div>' +
+      '<div class="card pad"><h2>รายการผิดปกติ</h2><table class="table"><tbody>' + (d.exceptions.slice(0, 40).map(function (x) {
+        var alert = x.action === 'BELOW_COST' || x.action === 'LOW_MARGIN';
+        return '<tr' + (alert ? ' class="alert-row"' : '') + '><td class="num">' + (alert ? '<span class="tag ' + (x.action === 'BELOW_COST' ? 'warn' : 'amber') + '">ราคา</span>' : d.oneDay ? timeOf(x.createdAt) : dateTime(x.createdAt)) +
+          '</td><td><b>' + (ACTION_TH[x.action] || x.action) + '</b> ' + esc(x.detail) + '</td><td>' + esc(x.user) + (x.approvedBy ? ' · อนุมัติ ' + esc(x.approvedBy) : '') + '</td></tr>';
+      }).join('') || '<tr><td class="muted">ไม่มี</td></tr>') + '</tbody></table></div>';
+    after = function () {
+      lineChart('c-trend', d.trend, kind, { sub: 'c-trend-s', onClick: function (k) { repDrill(k); },
+        footer: function (k) { var h = histBy[k]; return h ? h.bills + ' บิล · กำไร ฿' + money(h.profit) : ''; } });
+      if (catView === 'compare') catCompare('c-cat', d.trend, kind, r.catFocus, function (c) { r.catFocus = c; drawReport(); });
+      else catCards('c-cards', d.trend, kind);
+      if (!month) lineChart('c-hour', d.hours, 'hour', { sub: 'c-hour-s', noLatest: true, subPrefix: d.hours.days > 1 ? 'รวม ' + d.hours.days + ' วัน · ' : '' });
+    };
   } else if (r.tab === 'products') {
     var key = r.sort, list = d.products.slice().sort(function (a, b) { return b[key] - a[key]; });
     var tot = list.reduce(function (a, x) { a.qty += x.qty; a.revenue += x.revenue; a.cost += x.cost; a.profit += x.profit; return a; }, { qty: 0, revenue: 0, cost: 0, profit: 0 });
@@ -2916,7 +3146,17 @@ function drawReport() {
           '</b></td><td style="min-width:160px"><div class="sharebar"><span style="width:' + c.share + '%"></span></div><span class="muted" style="font-size:12px">' + c.share + '%</span></td></tr>';
       }), '<tr class="sumrow"><td><b>รวม</b></td><td></td><td></td><td class="r num"><b>' + money(d.stock.total) + '</b></td><td></td></tr>');
   }
+  killCharts();
   box.innerHTML = html;
+  if (after) after();
+}
+
+/** Tap a day / month (table row or chart point): day → just that day; month → its days. */
+function repDrill(k) {
+  var rs = repState();
+  if (k.length === 7) { rs.gran = 'day'; rs.preset = ''; rs.f.gran = 'day'; rs.f.from = k + '-01'; var e = new Date(Number(k.slice(0, 4)), Number(k.slice(5, 7)), 0); rs.f.to = fmtYmd(e) > today() ? today() : fmtYmd(e); }
+  else { rs.preset = ''; rs.f.gran = 'day'; rs.f.from = rs.f.to = k; }
+  render(); loadReport();
 }
 
 /* =================================================================== */
@@ -3151,6 +3391,9 @@ var ACTIONS = {
     if (g === 'month') repMonthPreset(rs.mPreset || 'month'); else repPreset(rs.preset || 'today');
     render(); loadReport();
   },
+  repCatView: function (el) { repState().catView = el.getAttribute('data-v'); drawReport(); },
+  repFocus: function (el) { repState().catFocus = el.getAttribute('data-c'); drawReport(); },
+  repHist: function (el) { repDrill(el.getAttribute('data-k')); },
   repMonthPreset: function (el) { repMonthPreset(el.getAttribute('data-k')); render(); loadReport(); },
   repClear: function () { var rs = repState(); rs.f = { from: rs.f.from, to: rs.f.to, slowDays: rs.f.slowDays }; loadReport(); },
   selProduct: function (el) { selectProduct(el.getAttribute('data-sku')); },

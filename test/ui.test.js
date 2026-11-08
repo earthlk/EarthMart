@@ -192,18 +192,28 @@ call('importProducts', T, [
   assert.match(await page.textContent('#report'), /เปิดลิ้นชัก/);
   await page.waitForSelector('#rf-category option:nth-child(2)', { state: 'attached' });
   assert.ok(await page.isHidden('.rep-f'), 'extra filters hidden by default');
-  assert.strictEqual(await page.locator('#report .rep-charts .card').count(), 2, 'two charts: total and by category');
-  await page.waitForSelector('#report .legend');
+  await page.waitForSelector('#c-trend');
+  assert.ok(await page.$('#c-catr') && await page.$('#c-catl') && await page.$('#c-hour'), 'daily: trend, category compare, hourly');
+  assert.ok(await page.evaluate(() => !!(window.Chart && Chart.getChart(document.querySelector('#c-trend')))), 'Chart.js drew the trend');
+  assert.match(await page.textContent('#report .kpis'), /กำไรหลังหัก/);
+  assert.ok(await page.$('#report tr[data-act=repHist]'), 'history table');
   await shot('08-report');
+  await page.click('[data-act=repCatView][data-v=cards]');
+  await page.waitForSelector('#c-cards .mini canvas');
+  await page.click('[data-act=repCatView][data-v=compare]');
   await page.click('[data-act=repGran][data-g=month]');                // month mode: whole page by month
   await page.waitForSelector('#rm-from');
   await page.waitForSelector('#report h2:has-text("รายเดือน")');
+  assert.ok(!(await page.$('#c-hour')), 'no hourly chart in month mode');
   assert.match(await page.textContent('#report .kpis'), /171\.00/);
   await page.click('[data-act=repMonthPreset][data-k="3m"]');
-  await page.waitForFunction(() => document.querySelectorAll('#report .rep-charts .card:first-child .cb').length === 3);
+  await page.waitForFunction(() => document.querySelectorAll('#report tr[data-act=repHist]').length === 3);
   await shot('08a-report-month');
-  await page.click('[data-act=repGran][data-g=day]');
+  await page.click('#report tr[data-act=repHist] >> nth=0');            // drill into this month's days
   await page.waitForSelector('#rf-from');
+  await page.waitForSelector('#report h2:has-text("รายวัน")');
+  await page.waitForSelector('#c-hour');
+  await shot('08d-report-days');
   await page.click('[data-act=repToggleF]');
   await page.waitForSelector('.rep-f:not(.hidden)');
   await page.click('[data-act=repTab][data-t=products]');

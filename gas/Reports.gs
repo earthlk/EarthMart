@@ -283,36 +283,97 @@ function api_report(token, f) {
         var k2 = fmtYmdUtc_(d); days.push({ day: k2, net: round2_(daily[k2] || 0) });
       }
     }
-    // ---- chart series for the range: per month (gran 'month'), per hour (one day) or per day
-    var chart;
-    if (f.gran === 'month') {
-      var monthKeys = [];
-      for (var mk = from.slice(0, 7); mk <= to.slice(0, 7) && monthKeys.length < 60;) {
-        monthKeys.push(mk);
-        var nx = new Date(Date.UTC(Number(mk.slice(0, 4)), Number(mk.slice(5, 7)), 1));
-        mk = fmtYmdUtc_(nx).slice(0, 7);
+    // ---- charts: trend per day / per month over the range; hours of the day summed over the whole range
+    var month = f.gran === 'month';
+    var keyOfB = function (dt) { return month ? fmtDate_(dt, 'yyyy-MM') : fmtDate_(dt, 'yyyy-MM-dd'); };
+    var bucketKeys = [];
+    if (month) {
+      for (var mk = from.slice(0, 7); mk <= to.slice(0, 7) && bucketKeys.length < 60;) {
+        bucketKeys.push(mk);
+        mk = fmtYmdUtc_(new Date(Date.UTC(Number(mk.slice(0, 4)), Number(mk.slice(5, 7)), 1))).slice(0, 7);
       }
-      chart = chartSeries_(from, to, function (dt) { return fmtDate_(dt, 'yyyy-MM'); }, monthKeys, billOk, lineOk, products);
-      chart.kind = 'month';
     } else {
-      var dayKeys = oneDay ? hourly.map(function (_, i) { return String(i); }) : days.map(function (x) { return x.day; });
-      chart = chartSeries_(from, to, function (dt) { return oneDay ? fmtDate_(dt, 'H') : fmtDate_(dt, 'yyyy-MM-dd'); }, dayKeys, billOk, lineOk, products);
-      chart.kind = oneDay ? 'hour' : 'day';
+      for (var dd = new Date(from + 'T00:00:00Z'); fmtYmdUtc_(dd) <= to && bucketKeys.length < 400; dd = new Date(dd.getTime() + 86400000)) bucketKeys.push(fmtYmdUtc_(dd));
     }
+    var trend = chartSeries_(from, to, keyOfB, bucketKeys, billOk, lineOk, products);
+    trend.kind = month ? 'month' : 'day';
+    var hours = chartSeries_(from, to, function (dt) { return fmtDate_(dt, 'H'); }, hourly.map(function (_, i) { return String(i); }), billOk, lineOk, products);
+    hours.kind = 'hour'; hours.days = bucketKeys.length;
+
+    // ---- history table: one row per day / month with profit and the cost of goods lost
+    var lost = outflowBy_(from, to, keyOfB);
+    var hist = {};
+    bucketKeys.forEach(function (k) { hist[k] = { key: k, bills: 0, net: 0, cost: 0, loss: 0, expiry: 0, use: 0 }; });
+    paid.forEach(function (b) {
+      var k = keyOfB(b.createdAt), hrow = hist[k];
+      if (!hrow) return;
+      var ls = linesBy[b.billNo] || [];
+      var sumLT = ls.reduce(function (a, l) { return a + num_(l.lineTotal); }, 0);
+      var billDisc = num_(b.discount) - ls.reduce(function (a, l) { return a + num_(l.lineDiscount); }, 0);
+      var any = false;
+      ls.forEach(function (l) {
+        if (!lineOk(l)) return;
+        any = true;
+        var lt = num_(l.lineTotal);
+        hrow.net += sumLT ? lt - billDisc * lt / sumLT : 0;
+        hrow.cost += num_(l.cost);
+      });
+      if (any) hrow.bills++;
+    });
+    readAll_('ReturnLines').forEach(function (l) {
+      var r = retNo[l.returnNo];
+      if (!r || !lineOk(l)) return;
+      var hrow = hist[keyOfB(r.createdAt)];
+      if (!hrow) return;
+      hrow.net -= num_(l.refund);
+      if (bool_(l.restocked)) hrow.cost -= num_(l.cost);
+    });
+    var lineFilter = !!(f.sku || f.category);
+    Object.keys(lost.rows).forEach(function (k) {
+      if (!hist[k]) return;
+      var o = lost.rows[k];
+      hist[k].loss += lineFilter ? o.bySku(f.sku, f.category, products).loss : o.loss;
+      hist[k].expiry += lineFilter ? o.bySku(f.sku, f.category, products).expiry : o.expiry;
+      hist[k].use += lineFilter ? o.bySku(f.sku, f.category, products).use : o.use;
+    });
+    var history = bucketKeys.slice().reverse().map(function (k) {
+      var h = hist[k];
+      ['net', 'cost', 'loss', 'expiry', 'use'].forEach(function (q) { h[q] = round2_(h[q]); });
+      h.profit = round2_(h.net - h.cost);
+      h.margin = h.net ? Math.round(h.profit / h.net * 1000) / 10 : 0;
+      h.after = round2_(h.profit - h.loss - h.expiry - h.use);
+      return h;
+    });
+    var lossT = history.reduce(function (a, h) { a.loss += h.loss; a.expiry += h.expiry; a.use += h.use; return a; }, { loss: 0, expiry: 0, use: 0 });
+
+    // ---- price alerts for the exception list: selling below cost / thin margin
+    var alerts = [];
+    Object.keys(products).forEach(function (k) {
+      var p = products[k];
+      if (!bool_(p.active) || !forSale_(p)) return;
+      var c = p.type === 'recipe' ? recipeCost_(rec[k], products) : num_(p.cost);
+      if (c > 0 && num_(p.price) > 0 && num_(p.price) < c) alerts.push({ action: 'BELOW_COST', ref: k, detail: p.name + ' ราคา ' + num_(p.price) + ' ต่ำกว่าทุน ' + round2_(c) + ' บาท', user: '', approvedBy: '', createdAt: '' });
+    });
+    plist.forEach(function (x) {
+      if (x.revenue > 0 && x.margin < 10 && !alerts.some(function (a) { return a.ref === x.sku; }))
+        alerts.push({ action: 'LOW_MARGIN', ref: x.sku, detail: x.name + ' กำไร ' + x.margin + '% (ขาย ' + x.revenue + ' ทุน ' + x.cost + ')', user: '', approvedBy: '', createdAt: '' });
+    });
     var cost = round2_(S.cost);
     return {
-      from: from, to: to, oneDay: oneDay, chart: chart,
+      from: from, to: to, oneDay: oneDay, gran: month ? 'month' : 'day', trend: trend, hours: hours, history: history,
       summary: { gross: round2_(S.gross), refunds: round2_(refunds), net: round2_(net), bills: S.bills, avgBill: S.bills ? round2_(S.gross / S.bills) : 0,
                  pieces: round2_(S.pieces), discount: round2_(S.discount), cost: cost, profit: round2_(net - cost),
                  margin: net ? Math.round((net - cost) / net * 1000) / 10 : 0,
-                 voids: voids.length, voidTotal: round2_(voids.reduce(function (a, b) { return a + num_(b.total); }, 0)), returns: retCount },
+                 voids: voids.length, voidTotal: round2_(voids.reduce(function (a, b) { return a + num_(b.total); }, 0)), returns: retCount,
+                 loss: round2_(lossT.loss), expiry: round2_(lossT.expiry), use: round2_(lossT.use),
+                 after: round2_(net - cost - lossT.loss - lossT.expiry - lossT.use) },
       byPay: { cash: round2_(byPay.cash), qr: round2_(byPay.qr), transfer: round2_(byPay.transfer) },
       hourly: hourly.map(round2_), daily: days,
       products: plist, categories: clist,
       staff: Object.keys(staff).map(function (k) { var x = staff[k]; ['net', 'discount', 'voidTotal', 'refunds'].forEach(function (q) { x[q] = round2_(x[q]); }); x.net = round2_(x.net - x.refunds); return x; })
         .sort(function (a, b) { return b.net - a.net; }),
       shifts: shifts, stock: { total: stockTotal, categories: scList }, slow: slow.slice(0, 200), slowDays: slowDays,
-      exceptions: exceptions,
+      exceptions: alerts.concat(exceptions),
       options: {
         categories: Object.keys(Object.keys(products).reduce(function (a, k) { if (products[k].category) a[products[k].category] = 1; return a; }, {})).sort(),
         users: Object.keys(users).map(function (k) { return { userId: k, name: users[k] }; }),
@@ -372,4 +433,38 @@ function chartSeries_(from, to, keyOf, keys, billOk, lineOk, products) {
   }
   list.forEach(function (c) { c.values = c.values.map(round2_); c.sum = round2_(c.sum); });
   return { keys: keys, total: total.map(round2_), cats: list };
+}
+
+/**
+ * Cost of goods that left without a sale, per bucket: loss (damaged / lost), expiry, store use.
+ * → { rows: { key: { loss, expiry, use, bySku(sku, category, products) } } }
+ */
+function outflowBy_(from, to, keyOf) {
+  var kind = {};
+  readAll_('StockMoves').forEach(function (m) {
+    if (m.type === 'STORE_USE') kind[m.refNo] = 'use';
+    else if (m.type === 'WRITEOFF') kind[m.refNo] = String(m.note).indexOf('หมดอายุ') === 0 ? 'expiry'
+      : String(m.note).indexOf('ใช้ในร้าน') === 0 ? 'use' : 'loss';
+  });
+  var rows = {};
+  readAll_('LotUse').forEach(function (u) {
+    var k = kind[u.refNo];
+    if (!k || !(u.createdAt instanceof Date)) return;
+    var d = fmtDate_(u.createdAt, 'yyyy-MM-dd');
+    if (d < from || d > to) return;
+    var b = keyOf(u.createdAt);
+    var r = rows[b] || (rows[b] = { loss: 0, expiry: 0, use: 0, items: [], bySku: function (sku, cat, products) {
+      var o = { loss: 0, expiry: 0, use: 0 };
+      this.items.forEach(function (it) {
+        if (sku && it.sku !== String(sku)) return;
+        if (cat && ((products[it.sku] || {}).category || '') !== cat) return;
+        o[it.kind] += it.v;
+      });
+      return o;
+    } });
+    var v = num_(u.qty) * num_(u.unitCost);
+    r[k] += v;
+    r.items.push({ sku: String(u.sku), kind: k, v: v });
+  });
+  return { rows: rows };
 }
