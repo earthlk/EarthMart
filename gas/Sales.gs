@@ -270,6 +270,22 @@ function api_billSummary(token, period) {
   });
 }
 
+/** Find bills by (part of) the bill number, newest first. "123" finds 2611-000123; "2611-0001" finds that run. */
+function api_findBills(token, q) {
+  return respond_(function () {
+    session_(token);
+    var t = String(q || '').trim().replace(/\s+/g, '');
+    if (t.length < 2) throw new Error('พิมพ์เลขบิลอย่างน้อย 2 ตัว');
+    var users = {};
+    readAll_('Users').forEach(function (u) { users[u.userId] = u.name; });
+    return readAll_('Sales').filter(function (b) { return String(b.billNo).indexOf(t) >= 0; }).reverse().slice(0, 50).map(function (b) {
+      return { billNo: b.billNo, createdAt: b.createdAt, itemsCount: num_(b.itemsCount), total: num_(b.total),
+               payMethod: b.payMethod, status: b.status, cashier: users[b.userId] || '', shiftId: b.shiftId,
+               returnedTotal: num_(b.returnedTotal), payments: payParts_(b) };
+    });
+  });
+}
+
 function api_billDetail(token, billNo) {
   return respond_(function () {
     session_(token);
@@ -328,10 +344,13 @@ function api_voidSale(token, billNo, reason, approvalId) {
 var REFUND_METHODS = ['cash', 'transfer'];
 
 /**
- * ret = { returnUid, billNo, lines: [{ lineNo, qty }], refundMethod: 'cash'|'transfer', restock: bool, reason, approvalId }
+ * ret = { returnUid, billNo, lines: [{ lineNo, qty, damaged? }], refundMethod: 'cash'|'transfer', reason, approvalId }
  * Any bill (also from closed shifts). A cash refund comes out of this device's open shift drawer.
- * Refund per piece = line total less its share of the bill discount. Restocked goods go back as a new
- * FIFO lot at the cost they were sold at; recipe items are never restocked. Owner approval 'RETURN'.
+ * Refund per piece = line total less its share of the bill discount.
+ * Per line, `damaged` of the returned qty is spoiled: everything comes back as a new FIFO lot at the cost it was
+ * sold at, then the damaged pieces are written off from that lot (reason เสียหาย), so the loss shows in the stock
+ * reports. Recipe items are never restocked. Older clients may send restock:false instead (= all damaged).
+ * Owner approval 'RETURN'.
  */
 function api_returnSale(token, ret) {
   return respond_(function () {
@@ -370,16 +389,27 @@ function api_returnSale(token, ret) {
         var mult = num_(l.multiplier) || 1;
         var cost = round2_(num_(l.cost) * q / num_(l.qty));
         var isRecipe = !!(rec[String(l.sku)] && rec[String(l.sku)].length);
-        var restocked = !!ret.restock && !isRecipe;
-        if (restocked) {
-          var pcs = q * mult;
-          fifoAddLot_(ctx, { sku: l.sku, qtyIn: pcs, unitCost: pcs ? cost / pcs : 0, receiptNo: returnNo, note: 'คืนจากบิล ' + h.billNo });
+        var bad = w.damaged !== undefined ? num_(w.damaged) : (ret.restock === false ? q : 0);
+        if (Math.round(bad) !== bad || bad < 0 || bad > q) throw new Error(l.name + ': จำนวนของเสียต้องอยู่ระหว่าง 0–' + q);
+        if (isRecipe) bad = 0;
+        var good = q - bad;
+        var restocked = !isRecipe && good > 0;
+        var goodCost = round2_(cost * good / q);
+        if (!isRecipe) {
+          var pcs = q * mult, badPcs = bad * mult, unit = pcs ? cost / pcs : 0;
+          var lot = fifoAddLot_(ctx, { sku: l.sku, qtyIn: pcs, qtyLeft: pcs - badPcs, unitCost: unit, receiptNo: returnNo, note: 'คืนจากบิล ' + h.billNo });
           moves.push({ sku: String(l.sku), qtyPieces: pcs, type: 'RETURN', refNo: returnNo, note: 'คืนจากบิล ' + h.billNo });
+          if (badPcs > 0) {
+            var wo = uid_('WO');
+            ctx.uses.push({ refNo: wo, lotId: lot.lotId, sku: String(l.sku), qty: badPcs, unitCost: lot.unitCost });
+            moves.push({ sku: String(l.sku), qtyPieces: -badPcs, type: 'WRITEOFF', refNo: wo, note: 'เสียหาย · คืนจากบิล ' + h.billNo });
+            log_(s, 'WRITEOFF', wo, l.name + ' ' + badPcs + ' · เสียหาย (ลูกค้าคืน บิล ' + h.billNo + ') · ทุน ' + round2_(badPcs * unit) + ' บาท', approver);
+          }
         }
         l.returnedQty = num_(l.returnedQty) + q;
         writeRow_('SaleLines', l);
         rlines.push({ returnNo: returnNo, billNo: h.billNo, lineNo: num_(l.lineNo), sku: String(l.sku), name: l.name, qty: q,
-                      multiplier: mult, refund: refund, cost: cost, restocked: restocked });
+                      multiplier: mult, refund: refund, cost: isRecipe ? 0 : goodCost, restocked: restocked, damaged: bad });
         total += refund;
         pieces += q;
       });
@@ -396,7 +426,7 @@ function api_returnSale(token, ret) {
       appendMany_('ReturnLines', rlines);
       append_('Returns', { returnNo: returnNo, returnUid: ret.returnUid, createdAt: now_(), billNo: h.billNo,
         shiftId: shift ? shift.shiftId : '', deviceId: s.deviceId, userId: s.userId, itemsCount: pieces, total: total,
-        refundMethod: ret.refundMethod, restock: !!ret.restock, reason: String(ret.reason).trim(), approvedBy: approver });
+        refundMethod: ret.refundMethod, restock: rlines.some(function (r) { return r.restocked; }), reason: String(ret.reason).trim(), approvedBy: approver });
       h.returnedTotal = round2_(num_(h.returnedTotal) + total);
       writeRow_('Sales', h);
       log_(s, 'RETURN', returnNo, 'บิล ' + h.billNo + ' · คืน ' + total + ' บาท (' + (ret.refundMethod === 'cash' ? 'เงินสด' : 'โอน') + ') · ' +

@@ -507,14 +507,24 @@ call('importProducts', T, [
   await page.keyboard.press('Escape');
   await page.click('nav button[data-v=bills]');
   await page.waitForSelector('#bills tr.click');
-  await page.click('#bills tr.click >> nth=0');
+  // search by bill number: the split bill is the newest
+  const splitNo = call('listBills', T)[0].billNo;
+  await page.fill('#bfind', splitNo.slice(-3));
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.crumb :text("ค้นหา")');
+  await page.waitForSelector('.modal h1:has-text("' + splitNo + '")');   // exactly one match opens it
   await page.click('.modal [data-x=return]');
   await page.click('.modal [data-l="1"][data-d="1"]');
+  await page.click('.modal [data-l="1"][data-d="1"]');
+  await page.click('.modal [data-b="1"][data-d="1"]');   // 1 of the 2 is damaged
+  assert.match(await page.textContent('.modal .rt-sub'), /เข้าสต็อก 1/);
+  await page.click('.modal [data-l="1"][data-d="-1"]');   // back to 1 returned (damaged follows)
+  assert.match(await page.textContent('.modal .rt-sub'), /เข้าสต็อก 0/);
   await page.click('.modal [data-why="ลูกค้าเปลี่ยนใจ"]');
   assert.strictEqual(await page.textContent('#rt-total'), '฿15.00');
   await shot('07r-return');
   await page.click('.modal [data-x=ok]');
-  await page.waitForSelector('.toast:has-text("คืนสินค้าแล้ว")');
+  await page.waitForSelector('.toast:has-text("ตัดเสีย 1")');
   await page.waitForSelector('#bills .tag:has-text("คืนบางส่วน")');
   await page.click('#bills tr.click >> nth=0');
   await page.waitForSelector('.modal .tag:has-text("คืนแล้ว 1")');

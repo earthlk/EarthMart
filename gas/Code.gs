@@ -38,7 +38,7 @@ var SCHEMA = {
                'lineDiscount', 'lineTotal', 'cost', 'markdownLotId', 'markdownQty', 'markdown', 'returnedQty'],
   Returns:    ['returnNo', 'returnUid', 'createdAt', 'billNo', 'shiftId', 'deviceId', 'userId', 'itemsCount', 'total',
                'refundMethod', 'restock', 'reason', 'approvedBy'],
-  ReturnLines: ['returnNo', 'billNo', 'lineNo', 'sku', 'name', 'qty', 'multiplier', 'refund', 'cost', 'restocked'],
+  ReturnLines: ['returnNo', 'billNo', 'lineNo', 'sku', 'name', 'qty', 'multiplier', 'refund', 'cost', 'restocked', 'damaged'],
   StockMoves: ['moveId', 'createdAt', 'sku', 'qtyPieces', 'type', 'refNo', 'userId', 'note'],
   Shifts:     ['shiftId', 'deviceId', 'userId', 'openedAt', 'openingCash', 'closedAt', 'closedBy', 'cashSales',
                'qrSales', 'transferSales', 'cashIn', 'cashOut', 'expectedCash', 'countedCash', 'diff', 'billCount',
@@ -253,7 +253,7 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '6';
+var SCHEMA_VERSION = '7';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {

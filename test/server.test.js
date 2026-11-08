@@ -552,6 +552,10 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   const bsM = m7('billSummary', T, '2026');
   eq([bsM.rows.map(r => r.key), bsM.total.net], [['2026-11'], 100], 'bill summary by month');
   f7(/ช่วงเวลา/, 'billSummary', T, '2026-1');
+  eq(m7('findBills', T, b2.billNo).map(b => b.billNo), [b2.billNo], 'find bill by full number');
+  ok(m7('findBills', T, b2.billNo.slice(-2)).some(b => b.billNo === b2.billNo), 'find bill by the last digits');
+  eq(m7('findBills', T, '99999').length, 0, 'no match');
+  f7(/อย่างน้อย 2/, 'findBills', T, '1');
 
   sum = m7('shiftSummary', C);
   eq([sum.cashRefunds, sum.otherRefunds, sum.expectedCash, sum.returnCount], [9, 27, 500 + 60 + 36 - 9, 2], 'cash refund leaves the drawer');
@@ -562,6 +566,15 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(closed.diff, 0, 'drawer balances after split + refund');
   f7(/เปิดกะ/, 'returnSale', T, { returnUid: 'R4', billNo: sp.billNo, refundMethod: 'cash', restock: true, reason: 'x', lines: [{ lineNo: 1, qty: 1 }] });
   ok(m7('returnSale', T, { returnUid: 'R5', billNo: sp.billNo, refundMethod: 'transfer', restock: true, reason: 'x', lines: [{ lineNo: 1, qty: 1 }] }).total === 10, 'return from a closed shift by transfer');
+  // mixed return: 3 back, 1 of them damaged -> 2 into stock, 1 written off (shows as loss)
+  const a0 = onH('A1'), loss0 = m7('stockOverview', T, 7).lossMonth;
+  f7(/ของเสียต้องอยู่ระหว่าง 0–2/, 'returnSale', T, { returnUid: 'R6', billNo: sp.billNo, refundMethod: 'transfer', reason: 'x', lines: [{ lineNo: 1, qty: 2, damaged: 3 }] });
+  const r6 = m7('returnSale', T, { returnUid: 'R7', billNo: sp.billNo, refundMethod: 'transfer', reason: 'ขวดบุบ 1', lines: [{ lineNo: 1, qty: 3, damaged: 1 }] });
+  eq(r6.lines[0].damaged, 1, 'damaged recorded');
+  eq(onH('A1'), a0 + 2, 'only the good ones back in stock');
+  const lot6 = m7('lots', T, 'A1').find(l => l.receiptNo === r6.returnNo);
+  eq([lot6.qtyIn, lot6.qtyLeft], [3, 2], 'return lot: 3 in, 1 written off');
+  eq(m7('stockOverview', T, 7).lossMonth, loss0 + 4, 'damaged return counts as loss (1 × cost 4)');
 }
 
 console.log('server tests passed:', pass);
