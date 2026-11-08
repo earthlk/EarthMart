@@ -545,6 +545,12 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   const det = m7('billDetail', T, b2.billNo);
   eq([det.returnedTotal, det.returns.length, det.lines.map(l => l.returnedQty)], [36, 2, [2, 1]], 'bill detail shows returns');
   ok(m7('listBills', T).find(b => b.billNo === b2.billNo).returnedTotal === 36, 'bill list shows returned total');
+  const bsD = m7('billSummary', T, '2026-11');
+  eq([bsD.rows.length, bsD.rows[0].key, bsD.total.bills, bsD.total.total, bsD.total.returned, bsD.total.net, bsD.total.cash, bsD.total.qr],
+    [1, '2026-11-05', 2, 136, 36, 100, 96, 40], 'bill summary by day');
+  const bsM = m7('billSummary', T, '2026');
+  eq([bsM.rows.map(r => r.key), bsM.total.net], [['2026-11'], 100], 'bill summary by month');
+  f7(/ช่วงเวลา/, 'billSummary', T, '2026-1');
 
   sum = m7('shiftSummary', C);
   eq([sum.cashRefunds, sum.otherRefunds, sum.expectedCash, sum.returnCount], [9, 27, 500 + 60 + 36 - 9, 2], 'cash refund leaves the drawer');

@@ -235,8 +235,38 @@ function api_listBills(token, day) {
     }).reverse().map(function (b) {
       return { billNo: b.billNo, createdAt: b.createdAt, itemsCount: num_(b.itemsCount), total: num_(b.total),
                payMethod: b.payMethod, status: b.status, cashier: users[b.userId] || '', shiftId: b.shiftId,
-               returnedTotal: num_(b.returnedTotal) };
+               returnedTotal: num_(b.returnedTotal), payments: payParts_(b) };
     });
+  });
+}
+
+/**
+ * Bill summary for the Bills page. period 'yyyy' → one row per month, 'yyyy-MM' → one row per day.
+ * Row: { key, bills, total, cash, qr, transfer, voids, voidTotal, returned, net } — paid bills only in the money columns;
+ * `returned` is refunds on bills of that period, `net` = total − returned.
+ */
+function api_billSummary(token, period) {
+  return respond_(function () {
+    session_(token);
+    var p = String(period || fmtDate_(now_(), 'yyyy-MM'));
+    if (!/^\d{4}(-\d{2})?$/.test(p)) throw new Error('ช่วงเวลาไม่ถูกต้อง');
+    var byMonth = p.length === 4;
+    var rows = {};
+    var total = { key: p, bills: 0, total: 0, cash: 0, qr: 0, transfer: 0, voids: 0, voidTotal: 0, returned: 0, net: 0 };
+    readAll_('Sales').forEach(function (b) {
+      if (!(b.createdAt instanceof Date)) return;
+      var d = fmtDate_(b.createdAt, 'yyyy-MM-dd');
+      if (d.indexOf(p) !== 0) return;
+      var k = byMonth ? d.slice(0, 7) : d;
+      var r = rows[k] || (rows[k] = { key: k, bills: 0, total: 0, cash: 0, qr: 0, transfer: 0, voids: 0, voidTotal: 0, returned: 0, net: 0 });
+      [r, total].forEach(function (x) {
+        if (b.status === 'VOID') { x.voids++; x.voidTotal += num_(b.total); return; }
+        var pp = payParts_(b);
+        x.bills++; x.total += num_(b.total); x.cash += pp.cash; x.qr += pp.qr; x.transfer += pp.transfer; x.returned += num_(b.returnedTotal);
+      });
+    });
+    var fix = function (x) { ['total', 'cash', 'qr', 'transfer', 'voidTotal', 'returned'].forEach(function (f) { x[f] = round2_(x[f]); }); x.net = round2_(x.total - x.returned); return x; };
+    return { period: p, rows: Object.keys(rows).sort().reverse().map(function (k) { return fix(rows[k]); }), total: fix(total) };
   });
 }
 

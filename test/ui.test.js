@@ -173,7 +173,16 @@ call('importProducts', T, [
 
   // 8. Bills list, report
   await page.click('nav button[data-v=bills]');
-  await page.waitForFunction(() => document.querySelectorAll('#bills tr.click').length === 2);
+  await page.waitForSelector('#bills tr.click[data-l=day]');   // month view: one row per day
+  assert.match(await page.textContent('#bills tr.click'), /วันนี้/);
+  assert.match(await page.textContent('#bkpi'), /฿171\.00/);
+  await shot('07a-bills-month');
+  await page.click('.crumb [data-l=year]');
+  await page.waitForSelector('#bills tr.click[data-l=month]');
+  await shot('07b-bills-year');
+  await page.click('#bills tr.click[data-l=month]');
+  await page.click('#bills tr.click[data-l=day]');
+  await page.waitForFunction(() => document.querySelectorAll('#bills tr.click[data-act=billDetail]').length === 2);
   await shot('07-bills');
   await page.click('nav button[data-v=reports]');
   await page.waitForSelector('.kpis');

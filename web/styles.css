@@ -285,6 +285,13 @@ a{color:var(--brand-text)}
 /* ===== Receipt (80mm thermal) ===== */
 #print{display:none}
 
+/* Bills drill-down */
+.crumb{display:flex;align-items:center;gap:4px;font-size:16px}
+.crumb button{border:0;background:none;font:inherit;padding:6px 10px;border-radius:8px;color:var(--brand-text);cursor:pointer}
+.crumb button.on{color:var(--ink);font-weight:700;cursor:default}
+.crumb span{color:var(--muted)}
+.table tr.sumrow td{border-top:2px solid var(--line-strong);background:var(--surface-muted)}
+
 /* Pay dialog with touch keypad */
 .modal.pay{width:860px}
 .modal .body.pay-grid,.pay-grid{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:18px;align-items:start}
@@ -373,3 +380,4 @@ a{color:var(--brand-text)}
   .topbar{height:auto;flex-wrap:wrap;padding:8px 12px}
 }
 .su-line .qty .n{display:inline-flex;align-items:center;justify-content:center;cursor:default}
+.table th.r{text-align:right}

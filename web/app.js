@@ -1284,29 +1284,101 @@ function drawQr(el, payload) {
 /* Bills                                                               */
 /* =================================================================== */
 
+/* Bills: year (months) › month (days) › day (bills). S.bills = { level: 'year'|'month'|'day', y, m, d } */
+var TH_MONTH = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+
+function billsState() {
+  if (!S.bills) { var t = today(); S.bills = { level: 'month', y: t.slice(0, 4), m: t.slice(0, 7), d: t }; }
+  return S.bills;
+}
+
+function dayLabel(ymd) {
+  var d = new Date(ymd + 'T00:00:00');
+  var W = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+  return W[d.getDay()] + ' ' + d.getDate() + ' ' + thDate(ymd).split(' ')[1] + (ymd === today() ? ' · วันนี้' : '');
+}
+
 function renderBills() {
-  return '<div class="page" style="flex-direction:column"><div class="row"><label for="bday">วันที่</label>' +
-    '<input id="bday" type="date" value="' + (S.billsDay || today()) + '" data-change="billsDay" style="width:180px"><span class="grow"></span>' +
-    '<span class="muted" id="bsum"></span></div><div class="card" style="flex:1;overflow:auto"><table class="table"><thead><tr><th>เลขบิล</th><th>เวลา</th>' +
-    '<th class="r">ชิ้น</th><th class="r">ยอด</th><th>ชำระ</th><th>แคชเชียร์</th><th>สถานะ</th></tr></thead><tbody id="bills"><tr><td colspan="7" class="muted">กำลังโหลด…</td></tr></tbody></table></div></div>';
+  var b = billsState();
+  var crumb = '<nav class="crumb"><button data-act="billsGo" data-l="year" data-k="' + b.y + '" class="' + (b.level === 'year' ? 'on' : '') + '">ปี ' + b.y + '</button>' +
+    (b.level !== 'year' ? '<span>›</span><button data-act="billsGo" data-l="month" data-k="' + b.m + '" class="' + (b.level === 'month' ? 'on' : '') + '">' + TH_MONTH[Number(b.m.slice(5)) - 1] + '</button>' : '') +
+    (b.level === 'day' ? '<span>›</span><button class="on">' + dayLabel(b.d) + '</button>' : '') + '</nav>';
+  var step = '<div class="row" style="gap:6px"><button class="btn sm" data-act="billsStep" data-d="-1" aria-label="ก่อนหน้า">‹</button><button class="btn sm" data-act="billsStep" data-d="1" aria-label="ถัดไป">›</button>' +
+    '<button class="btn sm" data-act="billsToday">วันนี้</button><label class="sr" for="bday">ไปวันที่</label><input id="bday" type="date" value="' + b.d + '" data-change="billsDay" style="width:160px;height:36px"></div>';
+  var head = b.level === 'day'
+    ? '<tr><th>เลขบิล</th><th>เวลา</th><th class="r">ชิ้น</th><th class="r">ยอด</th><th>ชำระ</th><th>แคชเชียร์</th><th>สถานะ</th></tr>'
+    : '<tr><th>' + (b.level === 'year' ? 'เดือน' : 'วันที่') + '</th><th class="r">บิล</th><th class="r">ยอดขาย</th><th class="r">เงินสด</th><th class="r">QR</th><th class="r">โอน</th><th class="r">คืนสินค้า</th><th class="r">ยกเลิก</th><th class="r">สุทธิ</th><th></th></tr>';
+  return '<div class="page" style="flex-direction:column"><div class="row" style="flex-wrap:wrap;gap:10px">' + crumb + '<span class="grow"></span>' + step + '</div>' +
+    '<div class="kpis" id="bkpi"></div>' +
+    '<div class="card" style="flex:1;overflow:auto"><table class="table"><thead>' + head + '</thead><tbody id="bills"><tr><td colspan="10" class="muted">กำลังโหลด…</td></tr></tbody></table></div></div>';
+}
+
+function billsKpis(t) {
+  var k = function (l, v, sub) { return '<div class="card kpi"><div class="muted">' + l + '</div><div class="v num">' + v + '</div>' + (sub ? '<div class="muted" style="font-size:12px">' + sub + '</div>' : '') + '</div>'; };
+  $('#bkpi').innerHTML = k('ยอดขายสุทธิ', '฿' + money(t.net), t.returned ? 'ขาย ฿' + money(t.total) + ' − คืน ฿' + money(t.returned) : '') +
+    k('จำนวนบิล', t.bills, t.bills ? 'เฉลี่ย ฿' + money(t.total / t.bills) + ' / บิล' : '') +
+    k('เงินสด · QR · โอน', '฿' + money(t.cash), 'QR ฿' + money(t.qr) + ' · โอน ฿' + money(t.transfer)) +
+    k('ยกเลิกบิล', t.voids, t.voids ? '฿' + money(t.voidTotal) : '');
 }
 
 function loadBills() {
-  var day = S.billsDay || today();
-  api('listBills', S.token, day).then(function (rows) {
-    var tb = $('#bills');
+  var b = billsState();
+  var tb = $('#bills');
+  if (b.level === 'day') {
+    return api('listBills', S.token, b.d).then(function (rows) {
+      tb = $('#bills');
+      if (!tb) return;
+      var t = { bills: 0, total: 0, cash: 0, qr: 0, transfer: 0, voids: 0, voidTotal: 0, returned: 0 };
+      rows.forEach(function (r) {
+        if (r.status === 'VOID') { t.voids++; t.voidTotal += r.total; return; }
+        t.bills++; t.total += r.total; t.returned += r.returnedTotal || 0;
+        var pp = r.payments || {}; t.cash += pp.cash || 0; t.qr += pp.qr || 0; t.transfer += pp.transfer || 0;
+      });
+      t.net = t.total - t.returned;
+      billsKpis(t);
+      tb.innerHTML = rows.length ? rows.map(function (r) {
+        return '<tr class="click" data-act="billDetail" data-no="' + esc(r.billNo) + '"><td class="num">' + esc(r.billNo) + '</td><td>' + timeOf(r.createdAt) +
+          '</td><td class="r num">' + r.itemsCount + '</td><td class="r num">' + money(r.total) + '</td><td>' + payName(r.payMethod) +
+          '</td><td>' + esc(r.cashier) + '</td><td>' + (r.status === 'VOID' ? '<span class="tag warn">ยกเลิก</span>'
+            : r.returnedTotal >= r.total && r.total > 0 ? '<span class="tag gray">คืนทั้งบิล</span>'
+            : r.returnedTotal > 0 ? '<span class="tag amber">คืนบางส่วน −' + money(r.returnedTotal) + '</span>' : '<span class="tag green">ปกติ</span>') + '</td></tr>';
+      }).join('') : '<tr><td colspan="7" class="muted">ไม่มีบิลในวันนี้</td></tr>';
+    }).catch(fail);
+  }
+  var period = b.level === 'year' ? b.y : b.m;
+  return api('billSummary', S.token, period).then(function (d) {
+    tb = $('#bills');
     if (!tb) return;
-    var paid = rows.filter(function (r) { return r.status !== 'VOID'; });
-    var ret = paid.reduce(function (a, r) { return a + (r.returnedTotal || 0); }, 0);
-    $('#bsum').textContent = paid.length + ' บิล · ฿' + money(paid.reduce(function (a, r) { return a + r.total; }, 0)) + (ret ? ' · คืน ฿' + money(ret) : '');
-    tb.innerHTML = rows.length ? rows.map(function (r) {
-      return '<tr class="click" data-act="billDetail" data-no="' + esc(r.billNo) + '"><td class="num">' + esc(r.billNo) + '</td><td>' + timeOf(r.createdAt) +
-        '</td><td class="r num">' + r.itemsCount + '</td><td class="r num">' + money(r.total) + '</td><td>' + payName(r.payMethod) +
-        '</td><td>' + esc(r.cashier) + '</td><td>' + (r.status === 'VOID' ? '<span class="tag warn">ยกเลิก</span>'
-          : r.returnedTotal >= r.total && r.total > 0 ? '<span class="tag gray">คืนทั้งบิล</span>'
-          : r.returnedTotal > 0 ? '<span class="tag amber">คืนบางส่วน −' + money(r.returnedTotal) + '</span>' : '<span class="tag green">ปกติ</span>') + '</td></tr>';
-    }).join('') : '<tr><td colspan="7" class="muted">ไม่มีบิล</td></tr>';
+    billsKpis(d.total);
+    var next = b.level === 'year' ? 'month' : 'day';
+    tb.innerHTML = d.rows.length ? d.rows.map(function (r) {
+      var label = b.level === 'year' ? TH_MONTH[Number(r.key.slice(5)) - 1] + ' ' + r.key.slice(0, 4) : dayLabel(r.key);
+      return '<tr class="click" data-act="billsGo" data-l="' + next + '" data-k="' + r.key + '"><td><b>' + label + '</b></td><td class="r num">' + r.bills +
+        '</td><td class="r num">' + money(r.total) + '</td><td class="r num">' + money(r.cash) + '</td><td class="r num">' + money(r.qr) + '</td><td class="r num">' + money(r.transfer) +
+        '</td><td class="r num">' + (r.returned ? '<span class="warn-text">−' + money(r.returned) + '</span>' : '<span class="muted">–</span>') +
+        '</td><td class="r num">' + (r.voids ? r.voids : '<span class="muted">–</span>') + '</td><td class="r num"><b>' + money(r.net) + '</b></td><td class="r muted">›</td></tr>';
+    }).join('') + '<tr class="sumrow"><td><b>รวม</b></td><td class="r num"><b>' + d.total.bills + '</b></td><td class="r num"><b>' + money(d.total.total) + '</b></td><td class="r num">' + money(d.total.cash) +
+      '</td><td class="r num">' + money(d.total.qr) + '</td><td class="r num">' + money(d.total.transfer) + '</td><td class="r num">' + (d.total.returned ? '−' + money(d.total.returned) : '–') +
+      '</td><td class="r num">' + (d.total.voids || '–') + '</td><td class="r num"><b>' + money(d.total.net) + '</b></td><td></td></tr>'
+      : '<tr><td colspan="10" class="muted">ไม่มีบิลใน' + (b.level === 'year' ? 'ปีนี้' : 'เดือนนี้') + '</td></tr>';
   }).catch(fail);
+}
+
+function billsGo(level, key) {
+  var b = billsState();
+  b.level = level;
+  if (level === 'year') b.y = key;
+  if (level === 'month') { b.m = key; b.y = key.slice(0, 4); }
+  if (level === 'day') { b.d = key; b.m = key.slice(0, 7); b.y = key.slice(0, 4); }
+  render(); loadBills();
+}
+
+function billsStep(dir) {
+  var b = billsState();
+  if (b.level === 'year') return billsGo('year', String(Number(b.y) + dir));
+  if (b.level === 'month') { var d = new Date(Number(b.m.slice(0, 4)), Number(b.m.slice(5)) - 1 + dir, 1); return billsGo('month', d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')); }
+  var x = new Date(b.d + 'T00:00:00'); x.setDate(x.getDate() + dir);
+  billsGo('day', fmtYmd(x));
 }
 
 function billDetail(no) {
@@ -2827,6 +2899,9 @@ var ACTIONS = {
   },
   drawerTest: function () { openDrawer().then(function (ok) { if (ok) toast('ส่งคำสั่งเปิดลิ้นชักแล้ว'); }); },
   billDetail: function (el) { billDetail(el.getAttribute('data-no')); },
+  billsGo: function (el) { if (el.getAttribute('data-l')) billsGo(el.getAttribute('data-l'), el.getAttribute('data-k')); },
+  billsStep: function (el) { billsStep(Number(el.getAttribute('data-d'))); },
+  billsToday: function () { billsGo('day', today()); },
   selProduct: function (el) { selectProduct(el.getAttribute('data-sku')); },
   csvTemplate: downloadCsvTemplate,
   importCsv: importCsv,
@@ -2917,7 +2992,7 @@ document.addEventListener('input', function (e) {
 
 document.addEventListener('change', function (e) {
   var t = e.target, k = t.getAttribute('data-change');
-  if (k === 'billsDay') { S.billsDay = t.value; loadBills(); }
+  if (k === 'billsDay' && t.value) billsGo('day', t.value);
   if (k === 'reportDay') { S.reportDay = t.value; loadReport(); }
   if (k === 'prodCat') { S.prodFilter.cat = t.value; renderProductRows(); }
   if (k === 'stockLow') { S.stockFilter.low = t.checked; renderStockRows(); }
