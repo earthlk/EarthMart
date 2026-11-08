@@ -351,6 +351,7 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   h.createOwner('O', '1111');
   const DEV = 'Dcounter4xxxxxxxxxx';
   const T5 = m4('login', m4('status').users[0].userId, '1111', DEV).token;
+  eq(m4('status').users[0].pinLen, 4, 'status tells the login screen the PIN length');
   m4('registerDevice', T5, DEV, 'เครื่อง');
   const A = m4('saveProduct', T5, { name: 'นม', type: 'nobarcode', price: 14 }, []).sku;
   const B = m4('saveProduct', T5, { name: 'ขนมปัง', type: 'nobarcode', price: 15 }, []).sku;

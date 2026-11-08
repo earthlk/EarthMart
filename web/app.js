@@ -343,37 +343,61 @@ function renderLogin() {
       '<span class="muted" style="font-size:13px">' + (u.role === 'owner' ? 'เจ้าของ' : 'แคชเชียร์') + '</span></span></button>';
   }).join('');
   var who = st.users.filter(function (u) { return u.userId === S.loginUser; })[0];
+  var len = pinLenOf(who);
   var dots = '';
-  for (var i = 0; i < 6; i++) dots += '<span class="' + (i < S.pin.length ? 'on' : '') + '"></span>';
-  var keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'].map(function (k) {
-    if (k === 'del') return '<button type="button" data-act="pinKey" data-k="del" style="font-size:15px">ลบ</button>';
-    if (k === 'ok') return '<button type="button" data-act="pinKey" data-k="ok" style="font-size:16px;background:var(--brand);color:var(--brand-ink);border-color:var(--brand)">เข้า</button>';
+  for (var i = 0; i < (len || 6); i++) dots += '<span class="' + (i < S.pin.length ? 'on' : '') + '"></span>';
+  var keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'clr', '0', 'del'].map(function (k) {
+    if (k === 'clr') return '<button type="button" data-act="pinKey" data-k="clr" style="font-size:15px">ล้าง</button>';
+    if (k === 'del') return '<button type="button" data-act="pinKey" data-k="del" style="font-size:20px" aria-label="ลบ">⌫</button>';
     return '<button type="button" data-act="pinKey" data-k="' + k + '">' + k + '</button>';
   }).join('');
   return '<header class="topbar"><span class="brand">' + esc(S.settings.shopName || 'EarthMart') + '</span><span class="grow"></span>' +
     '<span class="meta">' + (S.isCounter ? 'เครื่องหน้าร้าน' : 'เครื่องนี้ยังไม่ได้ลงทะเบียน') + '</span></header>' +
     '<div class="center"><div class="card login"><div class="users"><h2 style="margin:0 0 6px">เลือกผู้ใช้</h2>' + users + '</div>' +
     '<div class="pin"><div class="muted">' + (who ? 'ใส่ PIN ของ ' + esc(who.name) : 'เลือกผู้ใช้ก่อน') + '</div>' +
-    '<div class="dots">' + dots + '</div><div class="pinpad">' + keys + '</div>' +
-    '<div class="muted" style="font-size:13px">พิมพ์ตัวเลขจากคีย์บอร์ดได้ · Enter เพื่อเข้า</div></div></div></div>';
+    '<div class="dots' + (S.loginBusy ? ' busy' : '') + '">' + dots + '</div><div class="pinpad">' + keys + '</div>' +
+    '<div class="muted" style="font-size:13px">' + (S.loginBusy ? 'กำลังเข้าสู่ระบบ…' : 'ใส่ PIN ครบแล้วเข้าให้เอง · พิมพ์จากคีย์บอร์ดได้') + '</div></div></div></div>';
 }
 
+/** PIN length of a user (0 = not known yet: older users until their first sign-in on the new version). */
+function pinLenOf(u) { return u && u.pinLen >= 4 && u.pinLen <= 6 ? u.pinLen : 0; }
+
+var pinTimer = null;
 function pinKey(k) {
   if (!S.loginUser) return toast('เลือกผู้ใช้ก่อน', true);
+  if (S.loginBusy) return;
+  clearTimeout(pinTimer);
   if (k === 'del') S.pin = S.pin.slice(0, -1);
-  else if (k === 'ok') return doLogin();
+  else if (k === 'clr') S.pin = '';
+  else if (k === 'ok') { if (S.pin.length >= 4) return doLogin(); return; }
   else if (S.pin.length < 6) S.pin += k;
   render();
+  var who = (S.status.users || []).filter(function (u) { return u.userId === S.loginUser; })[0];
+  var len = pinLenOf(who);
+  // Sign in as soon as the PIN is complete. Length unknown: at 6 digits, or after a short pause from 4 digits.
+  if (len ? S.pin.length === len : S.pin.length === 6) doLogin();
+  else if (!len && S.pin.length >= 4) pinTimer = setTimeout(doLogin, 1200);
 }
 
 function doLogin() {
-  if (S.pin.length < 4) return toast('PIN อย่างน้อย 4 หลัก', true);
-  var pin = S.pin;
-  api('login', S.loginUser, pin, S.deviceId).then(function (r) {
+  clearTimeout(pinTimer);
+  if (S.pin.length < 4 || S.loginBusy) return;
+  var pin = S.pin, uid = S.loginUser;
+  S.loginBusy = true; render();
+  api('login', uid, pin, S.deviceId).then(function (r) {
+    S.loginBusy = false;
     S.token = r.token; S.user = r.user;
     sstore('em_token', r.token);
+    var u = (S.status.users || []).filter(function (x) { return x.userId === uid; })[0];
+    if (u) u.pinLen = pin.length;
     return boot();
-  }).catch(function (e) { S.pin = ''; render(); fail(e); });
+  }).catch(function (e) { S.loginBusy = false; S.pin = ''; render(); shakeDots(); fail(e); });
+}
+
+function shakeDots() {
+  var d = $('.login .dots');
+  if (!d) return;
+  d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake');
 }
 
 function boot() {
@@ -2794,7 +2818,7 @@ function saveSettingsForm(form) {
 /* =================================================================== */
 
 var ACTIONS = {
-  pickUser: function (el) { S.loginUser = el.getAttribute('data-id'); S.pin = ''; render(); },
+  pickUser: function (el) { clearTimeout(pinTimer); S.loginUser = el.getAttribute('data-id'); S.pin = ''; render(); },
   pinKey: function (el) { pinKey(el.getAttribute('data-k')); },
   go: function (el, e) { if (e) e.preventDefault(); go(el.getAttribute('data-v')); },
   logout: logout,

@@ -381,3 +381,9 @@ a{color:var(--brand-text)}
 }
 .su-line .qty .n{display:inline-flex;align-items:center;justify-content:center;cursor:default}
 .table th.r{text-align:right}
+
+.login .dots.busy span.on{animation:pinPulse .8s ease-in-out infinite alternate}
+@keyframes pinPulse{to{opacity:.35}}
+.login .dots.shake{animation:pinShake .35s}
+@keyframes pinShake{0%,100%{transform:none}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
+@media (prefers-reduced-motion:reduce){.login .dots.busy span.on,.login .dots.shake{animation:none}}

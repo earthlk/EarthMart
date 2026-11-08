@@ -19,7 +19,7 @@ var APP_NAME = 'EarthMart POS';
 /** Sheet name -> header row. Order of columns is the contract with the code below. */
 var SCHEMA = {
   Settings:   ['key', 'value'],
-  Users:      ['userId', 'name', 'role', 'pinHash', 'salt', 'active', 'createdAt'],
+  Users:      ['userId', 'name', 'role', 'pinHash', 'salt', 'active', 'createdAt', 'pinLen'],
   Devices:    ['deviceId', 'name', 'type', 'registeredBy', 'registeredAt', 'active'],
   Products:   ['sku', 'name', 'category', 'type', 'unit', 'cost', 'price', 'minStock', 'openPrice',
                'quickKey', 'quickKeyGroup', 'quickKeyOrder', 'icon', 'color', 'plu', 'active', 'onHand', 'updatedAt',
@@ -253,7 +253,7 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '5';
+var SCHEMA_VERSION = '6';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {
@@ -294,7 +294,7 @@ function api_status() {
     return {
       ready: users.some(function (u) { return u.role === 'owner'; }),
       apiVersion: Number(SCHEMA_VERSION),
-      users: users.map(function (u) { return { userId: u.userId, name: u.name, role: u.role }; }),
+      users: users.map(function (u) { return { userId: u.userId, name: u.name, role: u.role, pinLen: num_(u.pinLen) || 0 }; }),   // pinLen lets the login screen sign in as soon as the PIN is complete
       settings: publicSettings_()
     };
   });

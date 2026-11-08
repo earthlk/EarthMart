@@ -85,9 +85,11 @@ call('importProducts', T, [
 
   // 2. Login with keyboard PIN
   await page.waitForSelector('.login');
-  await page.keyboard.type('1234');
+  assert.ok(!(await page.$('.pinpad [data-k=ok]')), 'no enter button');
+  assert.strictEqual(await page.locator('.login .dots span').count(), 4, 'dots match the PIN length');
+  await page.keyboard.type('123');
   await shot('02-login');
-  await page.keyboard.press('Enter');
+  await page.click('.pinpad [data-k="4"]');   // 4th digit signs in by itself
 
   // 3. Counter + no shift -> open shift screen
   await page.waitForSelector('[data-form=openShift]');

@@ -57,7 +57,8 @@ function addUser_(name, role, pin) {
     pinHash: hashPin_(pin, salt),
     salt: salt,
     active: true,
-    createdAt: now_()
+    createdAt: now_(),
+    pinLen: String(pin).length
   };
   if (!user.name) throw new Error('ต้องใส่ชื่อ');
   append_('Users', user);
@@ -86,6 +87,7 @@ function api_login(userId, pin, deviceId) {
       throw new Error('PIN ไม่ถูกต้อง');
     }
     cache_().remove('tries_' + userId);
+    if (num_(u.pinLen) !== String(pin).length) { u.pinLen = String(pin).length; writeRow_('Users', u); }   // users created before pinLen existed
     var token = uid_('S') + uid_('');
     var sess = { userId: u.userId, name: u.name, role: u.role, deviceId: deviceId || '' };
     cache_().put('sess_' + token, JSON.stringify(sess), SESSION_SECONDS);
@@ -180,6 +182,7 @@ function api_resetPin(token, userId, pin) {
     var u = findUser_(userId);
     u.salt = uid_('');
     u.pinHash = hashPin_(String(pin), u.salt);
+    u.pinLen = String(pin).length;
     writeRow_('Users', u);
     log_(s, 'USER_PIN_RESET', userId, u.name, '');
     return true;
