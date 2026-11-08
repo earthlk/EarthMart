@@ -192,15 +192,18 @@ call('importProducts', T, [
   assert.match(await page.textContent('#report'), /เปิดลิ้นชัก/);
   await page.waitForSelector('#rf-category option:nth-child(2)', { state: 'attached' });
   assert.ok(await page.isHidden('.rep-f'), 'extra filters hidden by default');
-  await page.click('[data-act=repChart][data-key=chartSplit][data-v=true]');
+  assert.strictEqual(await page.locator('#report .rep-charts .card').count(), 2, 'two charts: total and by category');
   await page.waitForSelector('#report .legend');
   await shot('08-report');
-  await page.click('[data-act=repChart][data-key=chartMode][data-v=month]');
+  await page.click('[data-act=repGran][data-g=month]');                // month mode: whole page by month
+  await page.waitForSelector('#rm-from');
   await page.waitForSelector('#report h2:has-text("รายเดือน")');
-  assert.strictEqual(await page.locator('#report .cb').count(), 12, '12 months');
+  assert.match(await page.textContent('#report .kpis'), /171\.00/);
+  await page.click('[data-act=repMonthPreset][data-k="3m"]');
+  await page.waitForFunction(() => document.querySelectorAll('#report .rep-charts .card:first-child .cb').length === 3);
   await shot('08a-report-month');
-  await page.click('[data-act=repChart][data-key=chartMode][data-v=day]');
-  await page.click('[data-act=repChart][data-key=chartSplit][data-v=false]');
+  await page.click('[data-act=repGran][data-g=day]');
+  await page.waitForSelector('#rf-from');
   await page.click('[data-act=repToggleF]');
   await page.waitForSelector('.rep-f:not(.hidden)');
   await page.click('[data-act=repTab][data-t=products]');
@@ -217,9 +220,9 @@ call('importProducts', T, [
   await shot('08c-report-shifts');
   await page.click('[data-act=repTab][data-t=stock]');
   await page.waitForSelector('#report .sharebar');
-  await page.click('[data-act=repPreset][data-k=month]');
+  await page.click('[data-act=repPreset][data-k="7d"]');
   await page.click('[data-act=repTab][data-t=overview]');
-  await page.waitForSelector('#report h2:text("ยอดขายรายวัน")');
+  await page.waitForSelector('#report h2:has-text("ยอดขายรายวัน")');
   await page.click('[data-act=repPreset][data-k=today]');
 
   // 9. Stock page, then products: list + side editor

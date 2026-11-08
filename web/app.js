@@ -2698,8 +2698,31 @@ var ACTION_TH = { VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วน�
 
 function repState() {
   if (!S.rep) S.rep = { f: { from: today(), to: today(), slowDays: 30 }, tab: 'overview', preset: 'today', sort: 'revenue',
-    showF: store('em_repfilters') === '1', chartMode: 'day', chartSplit: false };
+    showF: store('em_repfilters') === '1', gran: 'day', mFrom: today().slice(0, 7), mTo: today().slice(0, 7), mPreset: 'month' };
   return S.rep;
+}
+
+function ymAdd(ym, n) { var d = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1 + n, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+
+/** Month mode: f.from/f.to cover whole months mFrom..mTo (not past today). */
+function repMonths() {
+  var r = repState();
+  if (r.mTo < r.mFrom) { var t = r.mFrom; r.mFrom = r.mTo; r.mTo = t; }
+  r.f.from = r.mFrom + '-01';
+  var end = new Date(Number(r.mTo.slice(0, 4)), Number(r.mTo.slice(5, 7)), 0);
+  r.f.to = fmtYmd(end) > today() ? today() : fmtYmd(end);
+  r.f.gran = 'month';
+}
+
+function repMonthPreset(k) {
+  var r = repState(), m = today().slice(0, 7);
+  if (k === 'month') { r.mFrom = r.mTo = m; }
+  if (k === 'lastmonth') { r.mFrom = r.mTo = ymAdd(m, -1); }
+  if (k === '3m') { r.mFrom = ymAdd(m, -2); r.mTo = m; }
+  if (k === '6m') { r.mFrom = ymAdd(m, -5); r.mTo = m; }
+  if (k === 'year') { r.mFrom = m.slice(0, 4) + '-01'; r.mTo = m; }
+  r.mPreset = k;
+  repMonths();
 }
 
 function repPreset(k) {
@@ -2707,18 +2730,26 @@ function repPreset(k) {
   if (k === 'today') { f.from = f.to = d(t); }
   if (k === 'yesterday') { t.setDate(t.getDate() - 1); f.from = f.to = d(t); }
   if (k === '7d') { f.to = d(t); var a = new Date(t); a.setDate(a.getDate() - 6); f.from = d(a); }
-  if (k === 'month') { f.to = d(t); f.from = d(new Date(t.getFullYear(), t.getMonth(), 1)); }
-  if (k === 'lastmonth') { f.from = d(new Date(t.getFullYear(), t.getMonth() - 1, 1)); f.to = d(new Date(t.getFullYear(), t.getMonth(), 0)); }
+  if (k === '30d') { f.to = d(t); var b = new Date(t); b.setDate(b.getDate() - 29); f.from = d(b); }
+  f.gran = 'day';
   repState().preset = k;
 }
 
 function renderReports() {
   var r = repState();
-  var presets = [['today', 'วันนี้'], ['yesterday', 'เมื่อวาน'], ['7d', '7 วัน'], ['month', 'เดือนนี้'], ['lastmonth', 'เดือนก่อน']];
+  var month = r.gran === 'month';
+  var presets = month ? [['month', 'เดือนนี้'], ['lastmonth', 'เดือนก่อน'], ['3m', '3 เดือน'], ['6m', '6 เดือน'], ['year', 'ปีนี้']]
+    : [['today', 'วันนี้'], ['yesterday', 'เมื่อวาน'], ['7d', '7 วัน'], ['30d', '30 วัน']];
+  var cur = month ? r.mPreset : r.preset;
+  var inputs = month
+    ? '<label class="sr" for="rm-from">ตั้งแต่เดือน</label><input id="rm-from" type="month" data-rm="mFrom" value="' + r.mFrom + '" style="width:170px;height:38px">' +
+      '<span class="muted">ถึง</span><label class="sr" for="rm-to">ถึงเดือน</label><input id="rm-to" type="month" data-rm="mTo" value="' + r.mTo + '" style="width:170px;height:38px">'
+    : '<label class="sr" for="rf-from">ตั้งแต่</label><input id="rf-from" type="date" data-rf="from" value="' + r.f.from + '" style="width:160px;height:38px">' +
+      '<span class="muted">ถึง</span><label class="sr" for="rf-to">ถึง</label><input id="rf-to" type="date" data-rf="to" value="' + r.f.to + '" style="width:160px;height:38px">';
   return '<div class="page" style="flex-direction:column;gap:12px"><div class="row" style="flex-wrap:wrap;gap:8px">' +
-    presets.map(function (p) { return '<button class="chip' + (r.preset === p[0] ? ' on' : '') + '" data-act="repPreset" data-k="' + p[0] + '">' + p[1] + '</button>'; }).join('') +
-    '<span class="row" style="gap:6px;margin-left:6px"><label class="sr" for="rf-from">ตั้งแต่</label><input id="rf-from" type="date" data-rf="from" value="' + r.f.from + '" style="width:160px;height:38px">' +
-    '<span class="muted">ถึง</span><label class="sr" for="rf-to">ถึง</label><input id="rf-to" type="date" data-rf="to" value="' + r.f.to + '" style="width:160px;height:38px"></span>' +
+    '<div class="seg-sm rep-gran"><button class="' + (month ? '' : 'on') + '" data-act="repGran" data-g="day">รายวัน</button><button class="' + (month ? 'on' : '') + '" data-act="repGran" data-g="month">รายเดือน</button></div>' +
+    presets.map(function (p) { return '<button class="chip' + (cur === p[0] ? ' on' : '') + '" data-act="' + (month ? 'repMonthPreset' : 'repPreset') + '" data-k="' + p[0] + '">' + p[1] + '</button>'; }).join('') +
+    '<span class="row" style="gap:6px;margin-left:6px">' + inputs + '</span>' +
     '<span class="grow"></span><button class="btn sm' + (r.showF ? ' on' : '') + '" data-act="repToggleF" aria-expanded="' + r.showF + '" id="rf-btn">ตัวกรองเพิ่มเติม' + repFilterBadge() + ' ' + (r.showF ? '▴' : '▾') + '</button></div>' +
     '<div class="card rep-f' + (r.showF ? '' : ' hidden') + '"><div id="rf-sel" class="rep-sel"></div><button class="btn sm ghost" data-act="repClear" style="align-self:flex-end;white-space:nowrap">ล้างตัวกรอง</button></div>' +
     '<div class="tabs card rep-tabs">' + REP_TABS.map(function (t) {
@@ -2806,7 +2837,9 @@ function drawReport() {
   if (!d || !box) return;
   var sm = d.summary;
   var kpi = function (k, v, sub, cls) { return '<div class="card kpi"><div class="muted">' + k + '</div><div class="v num ' + (cls || '') + '">' + v + '</div>' + (sub ? '<div class="muted" style="font-size:12px">' + sub + '</div>' : '') + '</div>'; };
-  var range = d.oneDay ? dayLabel(d.from) : dayLabel(d.from).replace(' · วันนี้', '') + ' – ' + dayLabel(d.to);
+  var ml = function (ym) { return TH_MONTH[Number(ym.slice(5, 7)) - 1] + ' ' + (Number(ym.slice(0, 4)) + 543); };
+  var range = r.gran === 'month' ? (r.mFrom === r.mTo ? ml(r.mFrom) : ml(r.mFrom) + ' – ' + ml(r.mTo))
+    : d.oneDay ? dayLabel(d.from) : dayLabel(d.from).replace(' · วันนี้', '') + ' – ' + dayLabel(d.to);
   var head = '<div class="muted" style="font-size:13px">' + range + '</div>';
   var table = function (cols, rows, foot) {
     return '<div class="card" style="overflow:auto"><table class="table"><thead><tr>' + cols.map(function (c) { return '<th' + (c[1] ? ' class="r"' : '') + '>' + c[0] + '</th>'; }).join('') +
@@ -2814,17 +2847,12 @@ function drawReport() {
   };
   var html = '';
   if (r.tab === 'overview') {
-    var mode = r.chartMode, ser = d.chart ? d.chart[mode] : null;
-    var kind = mode === 'month' ? 'month' : d.oneDay ? 'hour' : 'day';
-    var title = mode === 'month' ? 'ยอดขายรายเดือน · 12 เดือนถึง ' + TH_MONTH[Number(d.to.slice(5, 7)) - 1] : d.oneDay ? 'ยอดขายรายชั่วโมง' : 'ยอดขายรายวัน';
-    var seg = function (key, opts) {
-      return '<div class="seg-sm">' + opts.map(function (o) { return '<button class="' + (String(r[key]) === String(o[0]) ? 'on' : '') + '" data-act="repChart" data-key="' + key + '" data-v="' + o[0] + '">' + o[1] + '</button>'; }).join('') + '</div>';
-    };
-    var chartCard = '<div class="card pad"><div class="row chart-head" style="flex-wrap:wrap;gap:10px;margin-bottom:8px"><h2 style="margin:0">' + title + '</h2><span class="grow"></span>' +
-      seg('chartMode', [['day', d.oneDay ? 'รายชั่วโมง' : 'รายวัน'], ['month', 'รายเดือน']]) + seg('chartSplit', [['false', 'รวม'], ['true', 'แยกตามหมวด']]) + '</div>' +
-      (ser ? chartHtml(ser, r.chartSplit, kind) : '<span class="muted">กำลังโหลด…</span>') + '</div>';
+    var ser = d.chart, kind = ser.kind;
+    var unit = kind === 'month' ? 'รายเดือน' : kind === 'hour' ? 'รายชั่วโมง' : 'รายวัน';
+    var chartCard = '<div class="rep-charts"><div class="card pad"><h2>ยอดขาย' + unit + ' · รวม</h2>' + chartHtml(ser, false, kind) + '</div>' +
+      '<div class="card pad"><h2>ยอดขาย' + unit + ' · แยกตามหมวด</h2>' + chartHtml(ser, true, kind) + '</div></div>';
     var payT = Math.max(1, d.byPay.cash + d.byPay.qr + d.byPay.transfer);
-    html = '<div class="kpis">' + kpi('ยอดขายสุทธิ', '฿' + money(sm.net), sm.refunds ? 'ขาย ฿' + money(sm.gross) + ' − คืน ฿' + money(sm.refunds) : '', 'brand-text') +
+    html = head + '<div class="kpis">' + kpi('ยอดขายสุทธิ', '฿' + money(sm.net), sm.refunds ? 'ขาย ฿' + money(sm.gross) + ' − คืน ฿' + money(sm.refunds) : '', 'brand-text') +
       kpi('จำนวนบิล', sm.bills, sm.bills ? 'เฉลี่ย ฿' + money(sm.avgBill) + ' / บิล' : '') +
       kpi('กำไรขั้นต้น', '฿' + money(sm.profit) + ' ' + pct(sm.margin), 'ต้นทุน ฿' + money(sm.cost)) +
       kpi('ยกเลิก / คืน', sm.voids + ' / ' + sm.returns, 'ยกเลิก ฿' + money(sm.voidTotal) + (sm.discount ? ' · ส่วนลด ฿' + money(sm.discount) : '')) + '</div>' +
@@ -3116,7 +3144,14 @@ var ACTIONS = {
     $('.rep-f').classList.toggle('hidden', !rs.showF);
     var b = $('#rf-btn'); b.classList.toggle('on', rs.showF); b.setAttribute('aria-expanded', rs.showF); b.innerHTML = 'ตัวกรองเพิ่มเติม' + repFilterBadge() + ' ' + (rs.showF ? '▴' : '▾');
   },
-  repChart: function (el) { var rs = repState(), k = el.getAttribute('data-key'), v = el.getAttribute('data-v'); rs[k] = k === 'chartSplit' ? v === 'true' : v; drawReport(); },
+  repGran: function (el) {
+    var rs = repState(), g = el.getAttribute('data-g');
+    if (rs.gran === g) return;
+    rs.gran = g;
+    if (g === 'month') repMonthPreset(rs.mPreset || 'month'); else repPreset(rs.preset || 'today');
+    render(); loadReport();
+  },
+  repMonthPreset: function (el) { repMonthPreset(el.getAttribute('data-k')); render(); loadReport(); },
   repClear: function () { var rs = repState(); rs.f = { from: rs.f.from, to: rs.f.to, slowDays: rs.f.slowDays }; loadReport(); },
   selProduct: function (el) { selectProduct(el.getAttribute('data-sku')); },
   csvTemplate: downloadCsvTemplate,
@@ -3216,10 +3251,13 @@ document.addEventListener('input', function (e) {
 document.addEventListener('change', function (e) {
   var t = e.target, k = t.getAttribute('data-change');
   if (k === 'billsDay' && t.value) billsGo('day', t.value);
+  if (t.hasAttribute && t.hasAttribute('data-rm') && t.value) {
+    var rm = repState(); rm[t.getAttribute('data-rm')] = t.value; rm.mPreset = ''; repMonths(); render(); loadReport();
+  }
   if (t.hasAttribute && t.hasAttribute('data-rf')) {
     var rs = repState(), fk = t.getAttribute('data-rf');
     rs.f[fk] = t.value;
-    if (fk === 'from' || fk === 'to') { rs.preset = ''; if (!rs.f.to || rs.f.to < rs.f.from) rs.f.to = rs.f.from; render(); }
+    if (fk === 'from' || fk === 'to') { rs.preset = ''; rs.f.gran = 'day'; if (!rs.f.to || rs.f.to < rs.f.from) rs.f.to = rs.f.from; render(); }
     if (fk === 'category') rs.f.sku = '';
     loadReport();
   }

@@ -283,16 +283,22 @@ function api_report(token, f) {
         var k2 = fmtYmdUtc_(d); days.push({ day: k2, net: round2_(daily[k2] || 0) });
       }
     }
-    // ---- chart series: per hour (one day) or per day of the range, and per month for the 12 months up to `to`
-    var mStartD = new Date(Date.UTC(Number(to.slice(0, 4)), Number(to.slice(5, 7)) - 1 - 11, 1));   // first of the 12 months
-    var dayKeys = oneDay ? hourly.map(function (_, i) { return String(i); }) : days.map(function (x) { return x.day; });
-    var monthKeys = [];
-    for (var mi = 0; mi < 12; mi++) monthKeys.push(fmtYmdUtc_(new Date(Date.UTC(mStartD.getUTCFullYear(), mStartD.getUTCMonth() + mi, 1))).slice(0, 7));
-    var chart = {
-      day: chartSeries_(from, to, function (dt) { return oneDay ? fmtDate_(dt, 'H') : fmtDate_(dt, 'yyyy-MM-dd'); }, dayKeys, billOk, lineOk, products),
-      month: chartSeries_(fmtYmdUtc_(mStartD), to,
-        function (dt) { return fmtDate_(dt, 'yyyy-MM'); }, monthKeys, billOk, lineOk, products)
-    };
+    // ---- chart series for the range: per month (gran 'month'), per hour (one day) or per day
+    var chart;
+    if (f.gran === 'month') {
+      var monthKeys = [];
+      for (var mk = from.slice(0, 7); mk <= to.slice(0, 7) && monthKeys.length < 60;) {
+        monthKeys.push(mk);
+        var nx = new Date(Date.UTC(Number(mk.slice(0, 4)), Number(mk.slice(5, 7)), 1));
+        mk = fmtYmdUtc_(nx).slice(0, 7);
+      }
+      chart = chartSeries_(from, to, function (dt) { return fmtDate_(dt, 'yyyy-MM'); }, monthKeys, billOk, lineOk, products);
+      chart.kind = 'month';
+    } else {
+      var dayKeys = oneDay ? hourly.map(function (_, i) { return String(i); }) : days.map(function (x) { return x.day; });
+      chart = chartSeries_(from, to, function (dt) { return oneDay ? fmtDate_(dt, 'H') : fmtDate_(dt, 'yyyy-MM-dd'); }, dayKeys, billOk, lineOk, products);
+      chart.kind = oneDay ? 'hour' : 'day';
+    }
     var cost = round2_(S.cost);
     return {
       from: from, to: to, oneDay: oneDay, chart: chart,
