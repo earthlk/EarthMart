@@ -3056,11 +3056,13 @@ function drawReport() {
     d.history.forEach(function (h) { histBy[h.key] = h; });
     var unit = month ? 'รายเดือน' : 'รายวัน';
     var catView = r.catView || 'compare';
-    html = head + '<div class="kpis kpis5">' + kpi('ยอดขายสุทธิ', '฿' + money(sm.net), sm.refunds ? 'ขาย ฿' + money(sm.gross) + ' − คืน ฿' + money(sm.refunds) : '', 'brand-text') +
-      kpi('จำนวนบิล', sm.bills, (sm.bills ? 'เฉลี่ย ฿' + money(sm.avgBill) + ' / บิล' : '') + (sm.voids ? ' · ยกเลิก ' + sm.voids : '')) +
+    var leak = round2(sm.voidTotal + sm.refunds + sm.discount);
+    html = head + '<div class="kpis kpis6">' + kpi('ยอดขายสุทธิ', '฿' + money(sm.net), sm.refunds ? 'ขาย ฿' + money(sm.gross) + ' − คืน ฿' + money(sm.refunds) : '', 'brand-text') +
+      kpi('จำนวนบิล', sm.bills, sm.bills ? 'เฉลี่ย ฿' + money(sm.avgBill) + ' / บิล' : '') +
       kpi('กำไรขั้นต้น', '฿' + money(sm.profit) + ' ' + pct(sm.margin), 'ต้นทุน ฿' + money(sm.cost)) +
+      kpi('กำไรหลังหัก', '฿' + money(sm.after), sm.net ? (Math.round(sm.after / sm.net * 1000) / 10) + '% ของยอดขาย' : '') +
       kpi('ของเสีย · หมดอายุ · เบิกใช้', '฿' + money(lossAll), 'เสีย ฿' + money(sm.loss) + ' · หมดอายุ ฿' + money(sm.expiry) + ' · เบิก ฿' + money(sm.use), lossAll ? 'warn-text' : '') +
-      kpi('กำไรหลังหัก', '฿' + money(sm.after), sm.net ? (Math.round(sm.after / sm.net * 1000) / 10) + '% ของยอดขาย' : '') + '</div>' +
+      kpi('ยกเลิก · คืน · ส่วนลด', '฿' + money(leak), 'ยกเลิก ' + sm.voids + ' บิล ฿' + money(sm.voidTotal) + ' · คืน ฿' + money(sm.refunds) + ' · ส่วนลด ฿' + money(sm.discount), leak ? 'warn-text' : '') + '</div>' +
       '<div class="card pad chart-card"><div class="ch-h"><h2>ยอดขาย' + unit + '</h2><span class="muted" id="c-trend-s"></span></div><div class="ch-box"><canvas id="c-trend"></canvas></div></div>' +
       '<div class="card pad chart-card"><div class="ch-h"><h2>ยอดขาย' + unit + ' แยกตามหมวด</h2><span class="grow"></span><div class="seg-sm">' +
         [['compare', 'เทียบกัน'], ['cards', 'แยกการ์ด']].map(function (o) { return '<button class="' + (catView === o[0] ? 'on' : '') + '" data-act="repCatView" data-v="' + o[0] + '">' + o[1] + '</button>'; }).join('') + '</div></div>' +
