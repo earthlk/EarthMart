@@ -52,7 +52,19 @@ jobs:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
           GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
         run: |
-          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          # Accept any clasp credentials layout (2.x "token", 3.x "tokens.default", …) and write the 2.4.2 one.
+          node -e '
+            const src = JSON.parse(process.env.CLASPRC_JSON);
+            const find = (o, keys) => { if (!o || typeof o !== "object") return ""; for (const k of keys) if (typeof o[k] === "string" && o[k]) return o[k];
+              for (const v of Object.values(o)) { const r = find(v, keys); if (r) return r; } return ""; };
+            const rt = find(src, ["refresh_token", "refreshToken"]);
+            const id = find(src, ["client_id", "clientId"]);
+            const sec = find(src, ["client_secret", "clientSecret"]);
+            if (!rt || !id || !sec) { console.error("CLASPRC_JSON is missing:", [!rt && "refresh_token", !id && "client_id", !sec && "client_secret"].filter(Boolean).join(", ")); process.exit(1); }
+            const out = { token: { access_token: "", refresh_token: rt, scope: find(src, ["scope"]), token_type: "Bearer", expiry_date: 0 },
+              oauth2ClientSettings: { clientId: id, clientSecret: sec, redirectUri: "http://localhost" }, isLocalCreds: false };
+            require("fs").writeFileSync(require("os").homedir() + "/.clasprc.json", JSON.stringify(out));
+          '
           printf '{"scriptId":"%s","rootDir":"gas"}' "$GAS_SCRIPT_ID" > .clasp.json
       - name: Push code
         if: steps.check.outputs.ready == 'true'
