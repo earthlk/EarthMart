@@ -520,7 +520,8 @@ call('importProducts', T, [
   assert.strictEqual(await page.textContent('#rt-total'), '฿15.00');
   await shot('07r-return');
   await page.click('.modal [data-x=ok]');
-  await page.waitForSelector('.toast:has-text("ของเข้าสต็อกแล้ว")');
+  await page.waitForSelector('.toast:has-text("เข้าสต็อก 1")');
+  assert.match(await page.textContent('.toast'), /^(?!.*ไม่รับเข้าสต็อก)/);
   await page.waitForSelector('#bills .tag:has-text("คืนบางส่วน")');
   await page.click('#bills tr.click >> nth=0');
   await page.waitForSelector('.modal .tag:has-text("คืนแล้ว 1")');

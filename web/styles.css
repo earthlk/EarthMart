@@ -285,6 +285,11 @@ a{color:var(--brand-text)}
 /* ===== Receipt (80mm thermal) ===== */
 #print{display:none}
 
+/* Return dialog: lines that do not go back to stock */
+.su-line.nostock{background:var(--tag-amber-bg);border-left:4px solid var(--tag-amber)}
+.rt-stock{display:flex;gap:8px;flex-wrap:wrap}
+.rt-stock:empty{display:none}
+
 /* Bills drill-down */
 .crumb{display:flex;align-items:center;gap:4px;font-size:16px}
 .crumb button{border:0;background:none;font:inherit;padding:6px 10px;border-radius:8px;color:var(--brand-text);cursor:pointer}
