@@ -3044,6 +3044,10 @@ function drawReport() {
   };
   var html = '';
   var after = null;   // charts are drawn once the HTML is in place
+  if (r.tab === 'overview' && !d.trend) {
+    box.innerHTML = '<div class="banner">หน้าเว็บกับระบบหลังร้านเป็นคนละเวอร์ชัน — กด Ctrl+F5 เพื่อโหลดหน้าเว็บใหม่</div>';
+    return;
+  }
   if (r.tab === 'overview') {
     var month = d.gran === 'month', kind = month ? 'month' : 'day';
     var payT = Math.max(1, d.byPay.cash + d.byPay.qr + d.byPay.transfer);
