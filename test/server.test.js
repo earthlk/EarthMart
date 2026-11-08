@@ -540,9 +540,9 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   f7(/คืนได้อีก 1/, 'returnSale', T, { returnUid: 'R2', billNo: b2.billNo, refundMethod: 'cash', restock: true, reason: 'x', lines: [{ lineNo: 1, qty: 2 }] });
   f7(/คืนรายการที่เหลือ/, 'voidSale', T, b2.billNo, 'x', '');
   // rest of the bill by transfer, not restocked (damaged): total refunds = bill total exactly
-  const r2 = m7('returnSale', T, { returnUid: 'R3', billNo: b2.billNo, refundMethod: 'transfer', restock: false, reason: 'ของเสีย', lines: [{ lineNo: 1, qty: 1 }, { lineNo: 2, qty: 1 }] });
+  const r2 = m7('returnSale', T, { returnUid: 'R3', billNo: b2.billNo, refundMethod: 'transfer', reason: 'ของเสีย', lines: [{ lineNo: 1, qty: 1 }, { lineNo: 2, qty: 1 }] });
   eq([r2.total, r2.fullyReturned], [27, true], 'last return closes the bill: 36 - 9');
-  eq(onH('B1'), 50 - 3 - 1, 'not restocked');
+  eq(onH('B1'), 50 - 3, 'restocked (3 sold, 1 sold then returned)');
   const det = m7('billDetail', T, b2.billNo);
   eq([det.returnedTotal, det.returns.length, det.lines.map(l => l.returnedQty)], [36, 2, [2, 1]], 'bill detail shows returns');
   ok(m7('listBills', T).find(b => b.billNo === b2.billNo).returnedTotal === 36, 'bill list shows returned total');
@@ -566,15 +566,10 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(closed.diff, 0, 'drawer balances after split + refund');
   f7(/เปิดกะ/, 'returnSale', T, { returnUid: 'R4', billNo: sp.billNo, refundMethod: 'cash', restock: true, reason: 'x', lines: [{ lineNo: 1, qty: 1 }] });
   ok(m7('returnSale', T, { returnUid: 'R5', billNo: sp.billNo, refundMethod: 'transfer', restock: true, reason: 'x', lines: [{ lineNo: 1, qty: 1 }] }).total === 10, 'return from a closed shift by transfer');
-  // mixed return: 3 back, 1 of them damaged -> 2 into stock, 1 written off (shows as loss)
-  const a0 = onH('A1'), loss0 = m7('stockOverview', T, 7).lossMonth;
-  f7(/ของเสียต้องอยู่ระหว่าง 0–2/, 'returnSale', T, { returnUid: 'R6', billNo: sp.billNo, refundMethod: 'transfer', reason: 'x', lines: [{ lineNo: 1, qty: 2, damaged: 3 }] });
-  const r6 = m7('returnSale', T, { returnUid: 'R7', billNo: sp.billNo, refundMethod: 'transfer', reason: 'ขวดบุบ 1', lines: [{ lineNo: 1, qty: 3, damaged: 1 }] });
-  eq(r6.lines[0].damaged, 1, 'damaged recorded');
-  eq(onH('A1'), a0 + 2, 'only the good ones back in stock');
-  const lot6 = m7('lots', T, 'A1').find(l => l.receiptNo === r6.returnNo);
-  eq([lot6.qtyIn, lot6.qtyLeft], [3, 2], 'return lot: 3 in, 1 written off');
-  eq(m7('stockOverview', T, 7).lossMonth, loss0 + 4, 'damaged return counts as loss (1 × cost 4)');
+  // returns always go back to stock; spoiled goods are written off later on the Stock page
+  const a0 = onH('A1');
+  m7('returnSale', T, { returnUid: 'R7', billNo: sp.billNo, refundMethod: 'transfer', reason: 'x', lines: [{ lineNo: 1, qty: 3, damaged: 1 }] });
+  eq(onH('A1'), a0 + 3, 'all returned pieces back in stock (damaged is ignored)');
 }
 
 console.log('server tests passed:', pass);

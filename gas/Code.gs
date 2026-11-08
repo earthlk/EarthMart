@@ -38,7 +38,7 @@ var SCHEMA = {
                'lineDiscount', 'lineTotal', 'cost', 'markdownLotId', 'markdownQty', 'markdown', 'returnedQty'],
   Returns:    ['returnNo', 'returnUid', 'createdAt', 'billNo', 'shiftId', 'deviceId', 'userId', 'itemsCount', 'total',
                'refundMethod', 'restock', 'reason', 'approvedBy'],
-  ReturnLines: ['returnNo', 'billNo', 'lineNo', 'sku', 'name', 'qty', 'multiplier', 'refund', 'cost', 'restocked', 'damaged'],
+  ReturnLines: ['returnNo', 'billNo', 'lineNo', 'sku', 'name', 'qty', 'multiplier', 'refund', 'cost', 'restocked'],
   StockMoves: ['moveId', 'createdAt', 'sku', 'qtyPieces', 'type', 'refNo', 'userId', 'note'],
   Shifts:     ['shiftId', 'deviceId', 'userId', 'openedAt', 'openingCash', 'closedAt', 'closedBy', 'cashSales',
                'qrSales', 'transferSales', 'cashIn', 'cashOut', 'expectedCash', 'countedCash', 'diff', 'billCount',

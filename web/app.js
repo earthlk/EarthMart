@@ -1458,8 +1458,7 @@ var RETURN_REASONS = ['ลูกค้าเปลี่ยนใจ', 'สิ�
 
 /** Partial return: pick quantities per line, refund by cash (from this shift's drawer) or transfer. */
 function returnModal(rc) {
-  var st = { uid: 'R' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), q: {}, bad: {}, method: S.shift ? 'cash' : 'transfer', busy: false };
-  var isRecipe = function (l) { var p = S.idx.bySku[l.sku]; return p && p.type === 'recipe'; };
+  var st = { uid: 'R' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), q: {}, method: S.shift ? 'cash' : 'transfer', busy: false };
   var sumLT = rc.lines.reduce(function (a, l) { return a + l.lineTotal; }, 0);
   var billDisc = round2(rc.discount - rc.lines.reduce(function (a, l) { return a + l.lineDiscount; }, 0));
   var refundOf = function (l, q) { var net = sumLT ? l.lineTotal - billDisc * l.lineTotal / sumLT : 0; return round2(net * q / l.qty); };
@@ -1467,7 +1466,7 @@ function returnModal(rc) {
     '<div class="body" style="gap:12px"><div class="su-lines" id="rt-lines"></div>' +
     (billDisc > 0 ? '<div class="muted" style="font-size:13px">บิลนี้มีส่วนลดท้ายบิล ฿' + money(billDisc) + ' — เงินคืนหักส่วนลดตามสัดส่วนแล้ว</div>' : '') +
     '<div class="field"><label>คืนเงินเป็น</label><div class="seg-sm" id="rt-m"><button data-m="cash"' + (S.shift ? '' : ' disabled title="ต้องเปิดกะก่อน"') + '>เงินสด (จากลิ้นชัก)</button><button data-m="transfer">โอนคืน</button></div></div>' +
-    '<div class="muted" style="font-size:13px">ของที่คืนเข้าสต็อกทั้งหมด ถ้าชิ้นไหนเสีย กด + ที่ "เสีย" ระบบตัดเป็นของเสียให้ (ขึ้นในยอดของเสียหน้าสต็อก) · เครื่องดื่มชงไม่คืนสต็อก</div>' +
+    '<div class="muted" style="font-size:13px">ของที่คืนกลับเข้าสต็อกทั้งหมด (เครื่องดื่มชงไม่คืนสต็อก) · ถ้ามีชิ้นที่เสีย ไปตัดที่หน้าสต็อก › ตัดของเสีย ทีหลังได้ ลูกค้าไม่ต้องรอ</div>' +
     '<div class="field"><label for="rt-why">เหตุผล</label><input id="rt-why" maxlength="100" autocomplete="off" placeholder="เช่น ลูกค้าซื้อเกิน">' +
     '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">' + RETURN_REASONS.map(function (r) {
       return '<button type="button" class="chip" data-why="' + r + '" style="height:32px;font-size:13px;padding:0 12px">' + r + '</button>';
@@ -1476,15 +1475,11 @@ function returnModal(rc) {
     '<button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">บันทึกคืนสินค้า</button></footer>');
   var draw = function () {
     $('#rt-lines', m).innerHTML = rc.lines.map(function (l) {
-      var left = l.qty - l.returnedQty, q = st.q[l.lineNo] || 0, bad = Math.min(st.bad[l.lineNo] || 0, q);
-      var sub = !q ? '' : isRecipe(l) ? '<div class="rt-sub muted">เครื่องดื่มชง/สูตรผสม — ไม่คืนสต็อก</div>'
-        : '<div class="rt-sub"><span>เข้าสต็อก <b class="num">' + (q - bad) + '</b></span><span class="grow"></span><span class="' + (bad ? 'warn-text' : 'muted') + '">เสีย</span>' +
-          '<div class="qty sm"><button type="button" data-b="' + l.lineNo + '" data-d="-1" aria-label="ลดของเสีย">−</button><span class="n num">' + bad + '</span>' +
-          '<button type="button" data-b="' + l.lineNo + '" data-d="1" aria-label="เพิ่มของเสีย">+</button></div></div>';
-      return '<div class="su-line" style="flex-wrap:wrap"><div><b>' + esc(l.name) + '</b> <span class="muted">' + esc(l.unitName) + '</span><div class="muted" style="font-size:12px">ซื้อ ' + l.qty +
+      var left = l.qty - l.returnedQty, q = st.q[l.lineNo] || 0;
+      return '<div class="su-line"><div><b>' + esc(l.name) + '</b> <span class="muted">' + esc(l.unitName) + '</span><div class="muted" style="font-size:12px">ซื้อ ' + l.qty +
         (l.returnedQty ? ' · คืนแล้ว ' + l.returnedQty : '') + ' · ' + money(l.lineTotal) + ' บาท</div></div>' +
         (left > 0 ? '<div class="row" style="gap:10px"><span class="num muted" style="font-size:13px">' + (q ? '−' + money(refundOf(l, q)) : '') + '</span><div class="qty"><button type="button" data-l="' + l.lineNo + '" data-d="-1" aria-label="ลด">−</button>' +
-          '<span class="n num">' + q + '</span><button type="button" data-l="' + l.lineNo + '" data-d="1" aria-label="เพิ่ม">+</button></div></div>' : '<span class="tag gray">คืนครบแล้ว</span>') + sub + '</div>';
+          '<span class="n num">' + q + '</span><button type="button" data-l="' + l.lineNo + '" data-d="1" aria-label="เพิ่ม">+</button></div></div>' : '<span class="tag gray">คืนครบแล้ว</span>') + '</div>';
     }).join('');
     var total = rc.lines.reduce(function (a, l) { return a + (st.q[l.lineNo] ? refundOf(l, st.q[l.lineNo]) : 0); }, 0);
     var all = rc.lines.every(function (l) { return (st.q[l.lineNo] || 0) + l.returnedQty >= l.qty; });
@@ -1498,25 +1493,17 @@ function returnModal(rc) {
     if (t.hasAttribute('data-l')) {
       var n = Number(t.getAttribute('data-l')), l = rc.lines.filter(function (x) { return x.lineNo === n; })[0];
       st.q[n] = Math.max(0, Math.min(l.qty - l.returnedQty, (st.q[n] || 0) + Number(t.getAttribute('data-d'))));
-      st.bad[n] = Math.min(st.bad[n] || 0, st.q[n]);
-      draw();
-    } else if (t.hasAttribute('data-b')) {
-      var nb = Number(t.getAttribute('data-b'));
-      st.bad[nb] = Math.max(0, Math.min(st.q[nb] || 0, (st.bad[nb] || 0) + Number(t.getAttribute('data-d'))));
       draw();
     } else if (t.hasAttribute('data-m')) { st.method = t.getAttribute('data-m'); draw(); }
     else if (t.hasAttribute('data-why')) {
       $('#rt-why', m).value = t.getAttribute('data-why');
       $all('[data-why]', m).forEach(function (c) { c.classList.toggle('on', c === t); });
-      if (t.getAttribute('data-why') === 'สินค้าชำรุด' || t.getAttribute('data-why') === 'หมดอายุ') { Object.keys(st.q).forEach(function (k) { st.bad[k] = st.q[k]; }); draw(); }
     } else if (t.getAttribute('data-x') === 'no') closeModal();
     else if (t.getAttribute('data-x') === 'ok') save();
   });
   var save = function () {
     if (st.busy) return;
-    var lines = rc.lines.filter(function (l) { return st.q[l.lineNo] > 0; }).map(function (l) {
-      return { lineNo: l.lineNo, qty: st.q[l.lineNo], damaged: isRecipe(l) ? 0 : Math.min(st.bad[l.lineNo] || 0, st.q[l.lineNo]) };
-    });
+    var lines = rc.lines.filter(function (l) { return st.q[l.lineNo] > 0; }).map(function (l) { return { lineNo: l.lineNo, qty: st.q[l.lineNo] }; });
     if (!lines.length) return toast('กด + ที่รายการที่จะคืน', true);
     var why = $('#rt-why', m).value.trim();
     if (!why) { toast('ใส่เหตุผล', true); $('#rt-why', m).focus(); return; }
@@ -1527,8 +1514,7 @@ function returnModal(rc) {
         reason: why, approvalId: id }).then(function (r) {
         closeModal();
         if (r.refundMethod === 'cash') openDrawer(true);
-        var badN = (r.lines || []).reduce(function (a, x) { return a + (x.damaged || 0); }, 0);
-        toast('คืนสินค้าแล้ว ' + r.returnNo + ' · คืนเงิน ฿' + money(r.total) + (r.refundMethod === 'cash' ? ' (เงินสด)' : ' (โอน)') + (badN ? ' · ตัดเสีย ' + badN : ''));
+        toast('คืนสินค้าแล้ว ' + r.returnNo + ' · คืนเงิน ฿' + money(r.total) + (r.refundMethod === 'cash' ? ' (เงินสด)' : ' (โอน)') + ' · ของเข้าสต็อกแล้ว');
         loadBills(); reloadCatalog();
       });
     }).catch(function (e) { st.busy = false; fail(e); });
