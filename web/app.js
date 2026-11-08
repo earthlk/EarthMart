@@ -1454,7 +1454,7 @@ function billDetail(no) {
   }).catch(fail);
 }
 
-var RETURN_REASONS = ['ลูกค้าเปลี่ยนใจ', 'สินค้าชำรุด', 'คิดเงินผิด', 'หมดอายุ'];
+var RETURN_REASONS = ['ลูกค้าเปลี่ยนใจ', 'ลูกค้าไม่พอใจ', 'ซื้อเกินจำนวน', 'หยิบผิดชิ้น', 'สินค้าชำรุด', 'หมดอายุ', 'คิดเงินผิด', 'เครื่องดื่มชงผิด'];
 
 /** Partial return: pick quantities per line, refund by cash (from this shift's drawer) or transfer. */
 function isRecipeSku(sku) { var p = S.idx.bySku[sku]; return !!(p && p.type === 'recipe'); }
