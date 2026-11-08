@@ -190,7 +190,26 @@ call('importProducts', T, [
   await page.waitForSelector('.kpis');
   assert.match(await page.textContent('.kpis'), /171\.00/);
   assert.match(await page.textContent('#report'), /เปิดลิ้นชัก/);
+  await page.waitForSelector('#rf-category option:nth-child(2)', { state: 'attached' });
   await shot('08-report');
+  await page.click('[data-act=repTab][data-t=products]');
+  await page.waitForSelector('#report tr.sumrow');
+  assert.match(await page.textContent('#report tr.sumrow'), /171\.00/);
+  await shot('08b-report-products');
+  await page.click('[data-act=repTab][data-t=categories]');
+  await page.click('#report tr[data-act=repCat] >> nth=0');          // drill into a category
+  await page.waitForFunction(() => (document.querySelector('#rf-category') || {}).value && document.querySelector('.rep-tabs .tab.on').dataset.t === 'products');
+  await page.click('[data-act=repClear]');
+  await page.waitForFunction(() => (document.querySelector('#rf-category') || {}).value === '');
+  await page.click('[data-act=repTab][data-t=shifts]');
+  await page.waitForSelector('#report :text("เปิดอยู่")');
+  await shot('08c-report-shifts');
+  await page.click('[data-act=repTab][data-t=stock]');
+  await page.waitForSelector('#report .sharebar');
+  await page.click('[data-act=repPreset][data-k=month]');
+  await page.click('[data-act=repTab][data-t=overview]');
+  await page.waitForSelector('#report h2:text("ยอดขายรายวัน")');
+  await page.click('[data-act=repPreset][data-k=today]');
 
   // 9. Stock page, then products: list + side editor
   await page.click('nav button[data-v=stock]');

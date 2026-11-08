@@ -2690,41 +2690,156 @@ function printShift(s) {
 /* Reports                                                             */
 /* =================================================================== */
 
-function renderReports() {
-  return '<div class="page" style="flex-direction:column"><div class="row"><label for="rday">วันที่</label><input id="rday" type="date" value="' +
-    (S.reportDay || today()) + '" data-change="reportDay" style="width:180px"></div><div id="report" class="col" style="gap:14px"><span class="muted">กำลังโหลด…</span></div></div>';
+/* Reports: filters on the left, tabs on the right. S.rep = { f: {...}, tab, data } */
+var REP_TABS = [['overview', 'ภาพรวม'], ['products', 'สินค้า'], ['categories', 'หมวด'], ['staff', 'พนักงาน'], ['shifts', 'กะ'], ['slow', 'ไม่เคลื่อนไหว'], ['stock', 'มูลค่าสต็อก']];
+var ACTION_TH = { VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
+  STOCK_ADJUST: 'ปรับสต็อก', PRICE_CHANGE: 'แก้ราคา', APPROVE_FAIL: 'PIN อนุมัติผิด', NO_SALE: 'เปิดลิ้นชัก', WRITEOFF: 'ตัดของเสีย',
+  STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า' };
+
+function repState() {
+  if (!S.rep) S.rep = { f: { from: today(), to: today(), slowDays: 30 }, tab: 'overview', preset: 'today', sort: 'revenue' };
+  return S.rep;
 }
 
-var ACTION_TH = { VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
-  STOCK_ADJUST: 'ปรับสต็อก', PRICE_CHANGE: 'แก้ราคา', APPROVE_FAIL: 'PIN อนุมัติผิด', NO_SALE: 'เปิดลิ้นชัก' };
+function repPreset(k) {
+  var t = new Date(today() + 'T00:00:00'), f = repState().f, d = function (x) { return fmtYmd(x); };
+  if (k === 'today') { f.from = f.to = d(t); }
+  if (k === 'yesterday') { t.setDate(t.getDate() - 1); f.from = f.to = d(t); }
+  if (k === '7d') { f.to = d(t); var a = new Date(t); a.setDate(a.getDate() - 6); f.from = d(a); }
+  if (k === 'month') { f.to = d(t); f.from = d(new Date(t.getFullYear(), t.getMonth(), 1)); }
+  if (k === 'lastmonth') { f.from = d(new Date(t.getFullYear(), t.getMonth() - 1, 1)); f.to = d(new Date(t.getFullYear(), t.getMonth(), 0)); }
+  repState().preset = k;
+}
+
+function renderReports() {
+  var r = repState();
+  var presets = [['today', 'วันนี้'], ['yesterday', 'เมื่อวาน'], ['7d', '7 วัน'], ['month', 'เดือนนี้'], ['lastmonth', 'เดือนก่อน']];
+  return '<div class="page" style="flex-direction:column;gap:12px"><div class="row" style="flex-wrap:wrap;gap:8px">' +
+    presets.map(function (p) { return '<button class="chip' + (r.preset === p[0] ? ' on' : '') + '" data-act="repPreset" data-k="' + p[0] + '">' + p[1] + '</button>'; }).join('') +
+    '<span class="row" style="gap:6px;margin-left:6px"><label class="sr" for="rf-from">ตั้งแต่</label><input id="rf-from" type="date" data-rf="from" value="' + r.f.from + '" style="width:160px;height:38px">' +
+    '<span class="muted">ถึง</span><label class="sr" for="rf-to">ถึง</label><input id="rf-to" type="date" data-rf="to" value="' + r.f.to + '" style="width:160px;height:38px"></span></div>' +
+    '<div class="card rep-f"><div id="rf-sel" class="rep-sel"></div><button class="btn sm ghost" data-act="repClear" style="align-self:flex-end;white-space:nowrap">ล้างตัวกรอง</button></div>' +
+    '<div class="tabs card rep-tabs">' + REP_TABS.map(function (t) {
+      return '<button class="tab' + (r.tab === t[0] ? ' on' : '') + '" data-act="repTab" data-t="' + t[0] + '">' + t[1] + '</button>';
+    }).join('') + '</div><div id="report" class="col" style="gap:14px"><span class="muted">กำลังโหลด…</span></div></div>';
+}
+
+function repSelects(o) {
+  var f = repState().f;
+  var sel = function (key, label, items) {
+    return '<div class="field"><label for="rf-' + key + '">' + label + '</label><select id="rf-' + key + '" data-rf="' + key + '"><option value="">ทั้งหมด</option>' +
+      items.map(function (it) { return '<option value="' + esc(it[0]) + '"' + (String(f[key] || '') === String(it[0]) ? ' selected' : '') + '>' + esc(it[1]) + '</option>'; }).join('') + '</select></div>';
+  };
+  var prods = S.products.filter(function (p) { return p.active && (!f.category || p.category === f.category); })
+    .sort(function (a, b) { return a.name.localeCompare(b.name, 'th'); }).map(function (p) { return [p.sku, p.name]; });
+  $('#rf-sel').innerHTML = sel('category', 'หมวดสินค้า', o.categories.map(function (c) { return [c, c]; })) +
+    sel('sku', 'สินค้า', prods) +
+    sel('userId', 'พนักงาน', o.users.map(function (u) { return [u.userId, u.name]; })) +
+    sel('shiftId', 'กะ', o.shifts.map(function (x) { return [x.shiftId, x.label]; })) +
+    sel('pay', 'ช่องทางชำระ', [['cash', 'เงินสด'], ['qr', 'QR พร้อมเพย์'], ['transfer', 'โอน']]) +
+    sel('deviceId', 'เครื่อง', o.devices.map(function (d) { return [d.deviceId, d.name]; })) +
+    sel('billType', 'ประเภทบิล', [['discount', 'มีส่วนลด'], ['return', 'มีคืนสินค้า']]);
+}
 
 function loadReport() {
-  api('dailyReport', S.token, S.reportDay || today()).then(function (r) {
-    var box = $('#report');
-    if (!box) return;
-    var max = Math.max.apply(null, r.hourly.concat([1]));
-    var kpi = function (k, v, cls) { return '<div class="card kpi"><div class="muted">' + k + '</div><div class="v num ' + (cls || '') + '">' + v + '</div></div>'; };
-    box.innerHTML = '<div class="kpis">' + kpi('ยอดขาย', '฿' + money(r.total), 'brand-text') + kpi('จำนวนบิล', r.billCount) + kpi('เฉลี่ยต่อบิล', '฿' + money(r.avgBill)) +
-      kpi('กำไรขั้นต้น', '฿' + money(r.grossProfit) + ' <span class="muted" style="font-size:14px">' + r.grossMargin + '%</span>') + '</div>' +
-      '<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px">' +
-      '<div class="card pad"><h2>ยอดขายรายชั่วโมง</h2><div class="bars">' + r.hourly.map(function (v, h) {
-        return '<div title="' + h + ':00 ฿' + money(v) + '" style="height:' + (v / max * 100) + '%"></div>';
-      }).join('') + '</div><div class="row muted" style="justify-content:space-between;font-size:12px"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div></div>' +
-      '<div class="card pad"><h2>ช่องทางชำระ</h2>' + ['cash', 'qr', 'transfer'].map(function (k) {
-        return '<div class="row" style="justify-content:space-between"><span>' + payName(k) + '</span><b class="num">฿' + money(r.byPay[k]) + '</b></div>';
-      }).join('') + '<div class="muted" style="margin-top:8px">ส่วนลดรวม ฿' + money(r.discount) + ' · ยกเลิก ' + r.voidCount + ' บิล (฿' + money(r.voidTotal) + ')' +
-        (r.returnCount ? ' · คืนสินค้า ' + r.returnCount + ' ครั้ง (฿' + money(r.refundTotal) + ') — ยอดขายหักคืนแล้ว' : '') + '</div></div>' +
-      '<div class="card pad"><h2>สินค้าขายดี</h2><table class="table"><tbody>' + (r.top.map(function (t, i) {
-        return '<tr><td class="muted">' + (i + 1) + '</td><td>' + esc(t.name) + '</td><td class="r num">' + t.pieces + ' ชิ้น</td><td class="r num">฿' + money(t.revenue) + '</td></tr>';
-      }).join('') || '<tr><td class="muted">ยังไม่มีการขาย</td></tr>') + '</tbody></table></div>' +
-      '<div class="card pad"><h2>รายการผิดปกติ</h2><table class="table"><tbody>' + (r.exceptions.map(function (x) {
-        return '<tr><td class="num">' + timeOf(x.createdAt) + '</td><td><b>' + (ACTION_TH[x.action] || x.action) + '</b> ' + esc(x.detail) + '</td><td>' + esc(x.user) +
-          (x.approvedBy ? ' · อนุมัติ ' + esc(x.approvedBy) : '') + '</td></tr>';
-      }).join('') || '<tr><td class="muted">ไม่มี</td></tr>') + '</tbody></table></div></div>' +
-      (r.lowStock.length ? '<div class="card pad"><h2>ของใกล้หมด (' + r.lowStock.length + ')</h2>' + r.lowStock.map(function (l) {
-        return '<span class="tag warn" style="margin:0 6px 6px 0">' + esc(l.name) + ' ' + l.onHand + '/' + l.minStock + '</span>';
-      }).join('') + '</div>' : '');
+  var r = repState();
+  var box = $('#report');
+  if (box && !r.data) box.innerHTML = '<span class="muted">กำลังโหลด…</span>';
+  api('report', S.token, r.f).then(function (d) {
+    r.data = d;
+    if (!$('#report')) return;
+    repSelects(d.options);
+    drawReport();
   }).catch(fail);
+}
+
+function pct(v) { return '<span class="muted" style="font-size:12px">' + v + '%</span>'; }
+
+function drawReport() {
+  var r = repState(), d = r.data, box = $('#report');
+  if (!d || !box) return;
+  var sm = d.summary;
+  var kpi = function (k, v, sub, cls) { return '<div class="card kpi"><div class="muted">' + k + '</div><div class="v num ' + (cls || '') + '">' + v + '</div>' + (sub ? '<div class="muted" style="font-size:12px">' + sub + '</div>' : '') + '</div>'; };
+  var range = d.oneDay ? dayLabel(d.from) : dayLabel(d.from).replace(' · วันนี้', '') + ' – ' + dayLabel(d.to);
+  var head = '<div class="muted" style="font-size:13px">' + range + '</div>';
+  var table = function (cols, rows, foot) {
+    return '<div class="card" style="overflow:auto"><table class="table"><thead><tr>' + cols.map(function (c) { return '<th' + (c[1] ? ' class="r"' : '') + '>' + c[0] + '</th>'; }).join('') +
+      '</tr></thead><tbody>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols.length + '" class="muted">ไม่มีข้อมูลในช่วงนี้</td></tr>') + (foot || '') + '</tbody></table></div>';
+  };
+  var html = '';
+  if (r.tab === 'overview') {
+    var series = d.oneDay ? d.hourly.map(function (v, h) { return { v: v, t: h + ':00' }; }) : d.daily.map(function (x) { return { v: x.net, t: x.day }; });
+    var max = Math.max.apply(null, series.map(function (x) { return x.v; }).concat([1]));
+    var payT = Math.max(1, d.byPay.cash + d.byPay.qr + d.byPay.transfer);
+    html = '<div class="kpis">' + kpi('ยอดขายสุทธิ', '฿' + money(sm.net), sm.refunds ? 'ขาย ฿' + money(sm.gross) + ' − คืน ฿' + money(sm.refunds) : '', 'brand-text') +
+      kpi('จำนวนบิล', sm.bills, sm.bills ? 'เฉลี่ย ฿' + money(sm.avgBill) + ' / บิล' : '') +
+      kpi('กำไรขั้นต้น', '฿' + money(sm.profit) + ' ' + pct(sm.margin), 'ต้นทุน ฿' + money(sm.cost)) +
+      kpi('ยกเลิก / คืน', sm.voids + ' / ' + sm.returns, 'ยกเลิก ฿' + money(sm.voidTotal) + (sm.discount ? ' · ส่วนลด ฿' + money(sm.discount) : '')) + '</div>' +
+      '<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px">' +
+      '<div class="card pad"><h2>' + (d.oneDay ? 'ยอดขายรายชั่วโมง' : 'ยอดขายรายวัน') + '</h2><div class="bars">' + series.map(function (x) {
+        return '<div title="' + x.t + ' ฿' + money(x.v) + '" style="height:' + Math.max(0, x.v / max * 100) + '%"></div>';
+      }).join('') + '</div><div class="row muted" style="justify-content:space-between;font-size:12px">' +
+      (d.oneDay ? '<span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>' : '<span>' + thDate(d.from) + '</span><span>' + thDate(d.to) + '</span>') + '</div></div>' +
+      '<div class="card pad"><h2>ช่องทางชำระ</h2><div class="paybar">' + ['cash', 'qr', 'transfer'].map(function (k) {
+        return '<span class="pb-' + k + '" style="width:' + Math.max(0, d.byPay[k] / payT * 100) + '%"></span>';
+      }).join('') + '</div>' + ['cash', 'qr', 'transfer'].map(function (k) {
+        return '<div class="row" style="justify-content:space-between"><span>' + payName(k) + '</span><b class="num">฿' + money(d.byPay[k]) + ' ' + pct(Math.round(d.byPay[k] / payT * 100)) + '</b></div>';
+      }).join('') + '</div>' +
+      '<div class="card pad"><h2>สินค้าขายดี</h2><table class="table"><tbody>' + (d.products.slice(0, 10).map(function (t, i) {
+        return '<tr><td class="muted">' + (i + 1) + '</td><td>' + esc(t.name) + '</td><td class="r num">' + t.qty + ' ' + esc(t.unit) + '</td><td class="r num">฿' + money(t.revenue) + '</td></tr>';
+      }).join('') || '<tr><td class="muted">ยังไม่มีการขาย</td></tr>') + '</tbody></table></div>' +
+      '<div class="card pad"><h2>รายการผิดปกติ</h2><table class="table"><tbody>' + (d.exceptions.slice(0, 30).map(function (x) {
+        return '<tr><td class="num">' + (d.oneDay ? timeOf(x.createdAt) : dateTime(x.createdAt)) + '</td><td><b>' + (ACTION_TH[x.action] || x.action) + '</b> ' + esc(x.detail) + '</td><td>' + esc(x.user) +
+          (x.approvedBy ? ' · อนุมัติ ' + esc(x.approvedBy) : '') + '</td></tr>';
+      }).join('') || '<tr><td class="muted">ไม่มี</td></tr>') + '</tbody></table></div></div>';
+  } else if (r.tab === 'products') {
+    var key = r.sort, list = d.products.slice().sort(function (a, b) { return b[key] - a[key]; });
+    var tot = list.reduce(function (a, x) { a.qty += x.qty; a.revenue += x.revenue; a.cost += x.cost; a.profit += x.profit; return a; }, { qty: 0, revenue: 0, cost: 0, profit: 0 });
+    html = '<div class="row" style="gap:6px"><span class="muted">เรียงตาม</span>' + [['revenue', 'ยอดขาย'], ['profit', 'กำไร'], ['qty', 'จำนวน'], ['margin', '% กำไร']].map(function (x) {
+      return '<button class="chip' + (key === x[0] ? ' on' : '') + '" data-act="repSort" data-k="' + x[0] + '">' + x[1] + '</button>';
+    }).join('') + '<span class="grow"></span>' + head + '</div>' +
+      table([['สินค้า'], ['หมวด'], ['ขาย', 1], ['ยอดขาย', 1], ['ต้นทุน', 1], ['กำไร', 1], ['%', 1]], list.map(function (x) {
+        return '<tr><td>' + esc(x.name) + (x.recipe ? ' <span class="tag gray">สูตรผสม</span>' : '') + (x.refunds ? ' <span class="tag amber">คืน ฿' + money(x.refunds) + '</span>' : '') + '</td><td class="muted">' + esc(x.category) +
+          '</td><td class="r num">' + x.qty + ' ' + esc(x.unit) + '</td><td class="r num">' + money(x.revenue) + '</td><td class="r num">' + money(x.cost) +
+          '</td><td class="r num ' + (x.profit < 0 ? 'warn-text' : '') + '"><b>' + money(x.profit) + '</b></td><td class="r num">' + x.margin + '%</td></tr>';
+      }), '<tr class="sumrow"><td><b>รวม</b></td><td></td><td></td><td class="r num"><b>' + money(tot.revenue) + '</b></td><td class="r num">' + money(tot.cost) + '</td><td class="r num"><b>' + money(tot.profit) +
+        '</b></td><td class="r num">' + (tot.revenue ? Math.round(tot.profit / tot.revenue * 1000) / 10 : 0) + '%</td></tr>');
+  } else if (r.tab === 'categories') {
+    html = head + table([['หมวด'], ['สินค้า', 1], ['ยอดขาย', 1], ['สัดส่วน'], ['ต้นทุน', 1], ['กำไร', 1], ['%', 1]], d.categories.map(function (c) {
+      return '<tr class="click" data-act="repCat" data-c="' + esc(c.category) + '"><td><b>' + esc(c.category) + '</b></td><td class="r num">' + c.items + '</td><td class="r num">' + money(c.revenue) +
+        '</td><td style="min-width:140px"><div class="sharebar"><span style="width:' + Math.max(0, c.share) + '%"></span></div><span class="muted" style="font-size:12px">' + c.share + '%</span></td><td class="r num">' + money(c.cost) +
+        '</td><td class="r num"><b>' + money(c.profit) + '</b></td><td class="r num">' + c.margin + '%</td></tr>';
+    })) + '<div class="muted" style="font-size:13px">แตะหมวดเพื่อดูสินค้าในหมวดนั้น</div>';
+  } else if (r.tab === 'staff') {
+    html = head + table([['พนักงาน'], ['บิล', 1], ['ยอดสุทธิ', 1], ['เฉลี่ย/บิล', 1], ['ส่วนลด', 1], ['ยกเลิก', 1], ['คืนสินค้า', 1]], d.staff.map(function (x) {
+      return '<tr><td><b>' + esc(x.name) + '</b></td><td class="r num">' + x.bills + '</td><td class="r num"><b>' + money(x.net) + '</b></td><td class="r num">' + (x.bills ? money(x.net / x.bills) : '–') +
+        '</td><td class="r num">' + (x.discount ? money(x.discount) : '–') + '</td><td class="r num">' + (x.voids ? x.voids + ' (฿' + money(x.voidTotal) + ')' : '–') +
+        '</td><td class="r num">' + (x.returns ? x.returns + ' (฿' + money(x.refunds) + ')' : '–') + '</td></tr>';
+    }));
+  } else if (r.tab === 'shifts') {
+    html = head + table([['เปิดกะ'], ['ปิดกะ'], ['เครื่อง'], ['พนักงาน'], ['บิล', 1], ['ยอดขาย', 1], ['ควรมีในลิ้นชัก', 1], ['นับได้', 1], ['ขาด/เกิน', 1]], d.shifts.map(function (x) {
+      var diff = x.diff === null ? '<span class="tag green">เปิดอยู่</span>' : x.diff === 0 ? '<span class="tag green">ตรง</span>' :
+        '<b class="num ' + (x.diff < 0 ? 'warn-text' : 'brand-text') + '">' + (x.diff > 0 ? '+' : '') + money(x.diff) + '</b>';
+      return '<tr><td class="num">' + dateTime(x.openedAt) + '</td><td class="num">' + (x.closedAt ? dateTime(x.closedAt) : '–') + '</td><td>' + esc(x.device) + '</td><td>' + esc(x.user) +
+        (x.closedBy && x.closedBy !== x.user ? ' › ' + esc(x.closedBy) : '') + '</td><td class="r num">' + x.bills + '</td><td class="r num">' + money(x.sales) +
+        '</td><td class="r num">' + (x.expectedCash === null ? '–' : money(x.expectedCash)) + '</td><td class="r num">' + (x.countedCash === null ? '–' : money(x.countedCash)) + '</td><td class="r">' + diff + '</td></tr>';
+    }));
+  } else if (r.tab === 'slow') {
+    html = '<div class="row" style="gap:6px"><span class="muted">ไม่มีการขายมาแล้ว</span>' + [30, 60, 90].map(function (n) {
+      return '<button class="chip' + (Number(r.f.slowDays) === n ? ' on' : '') + '" data-act="repSlow" data-n="' + n + '">' + n + ' วัน</button>';
+    }).join('') + '<span class="grow"></span><span class="muted" style="font-size:13px">' + d.slow.length + ' รายการ · ทุนจม ฿' + money(d.slow.reduce(function (a, x) { return a + x.value; }, 0)) + '</span></div>' +
+      table([['สินค้า'], ['หมวด'], ['คงเหลือ', 1], ['มูลค่าทุน', 1], ['ขายล่าสุด', 1]], d.slow.map(function (x) {
+        return '<tr><td>' + esc(x.name) + (x.forSale ? '' : ' <span class="tag gray">วัตถุดิบ</span>') + '</td><td class="muted">' + esc(x.category) + '</td><td class="r num">' + x.onHand + ' ' + esc(x.unit) +
+          '</td><td class="r num"><b>' + money(x.value) + '</b></td><td class="r">' + (x.days === null ? '<span class="tag warn">ไม่เคยขาย</span>' : x.days + ' วันก่อน') + '</td></tr>';
+      })) + '<div class="muted" style="font-size:13px">สินค้าที่ยังมีของแต่ไม่ได้ขายเลยตามจำนวนวันที่เลือก (นับถึงวันนี้ ไม่ขึ้นกับช่วงเวลาด้านซ้าย) — วัตถุดิบนับวันที่ถูกใช้ในสูตรล่าสุด</div>';
+  } else if (r.tab === 'stock') {
+    html = '<div class="kpis">' + kpi('มูลค่าสต็อกรวม (ทุน FIFO)', '฿' + money(d.stock.total), 'ณ ตอนนี้ · ไม่ขึ้นกับช่วงเวลา', 'brand-text') + '</div>' +
+      table([['หมวด'], ['รายการ', 1], ['ชิ้น', 1], ['มูลค่าทุน', 1], ['สัดส่วน']], d.stock.categories.map(function (c) {
+        return '<tr><td><b>' + esc(c.category) + '</b></td><td class="r num">' + c.items + '</td><td class="r num">' + c.pieces + '</td><td class="r num"><b>' + money(c.value) +
+          '</b></td><td style="min-width:160px"><div class="sharebar"><span style="width:' + c.share + '%"></span></div><span class="muted" style="font-size:12px">' + c.share + '%</span></td></tr>';
+      }), '<tr class="sumrow"><td><b>รวม</b></td><td></td><td></td><td class="r num"><b>' + money(d.stock.total) + '</b></td><td></td></tr>');
+  }
+  box.innerHTML = html;
 }
 
 /* =================================================================== */
@@ -2942,6 +3057,12 @@ var ACTIONS = {
   billsGo: function (el) { if (el.getAttribute('data-l')) billsGo(el.getAttribute('data-l'), el.getAttribute('data-k')); },
   billsStep: function (el) { billsStep(Number(el.getAttribute('data-d'))); },
   billsToday: function () { billsGo('day', today()); },
+  repPreset: function (el) { repPreset(el.getAttribute('data-k')); render(); loadReport(); },
+  repTab: function (el) { repState().tab = el.getAttribute('data-t'); $all('.rep-tabs .tab').forEach(function (b) { b.classList.toggle('on', b === el); }); drawReport(); },
+  repSort: function (el) { repState().sort = el.getAttribute('data-k'); drawReport(); },
+  repCat: function (el) { var rs = repState(); rs.f.category = el.getAttribute('data-c'); rs.f.sku = ''; rs.tab = 'products'; render(); loadReport(); },
+  repSlow: function (el) { repState().f.slowDays = Number(el.getAttribute('data-n')); loadReport(); },
+  repClear: function () { var rs = repState(); rs.f = { from: rs.f.from, to: rs.f.to, slowDays: rs.f.slowDays }; loadReport(); },
   selProduct: function (el) { selectProduct(el.getAttribute('data-sku')); },
   csvTemplate: downloadCsvTemplate,
   importCsv: importCsv,
@@ -3040,7 +3161,13 @@ document.addEventListener('input', function (e) {
 document.addEventListener('change', function (e) {
   var t = e.target, k = t.getAttribute('data-change');
   if (k === 'billsDay' && t.value) billsGo('day', t.value);
-  if (k === 'reportDay') { S.reportDay = t.value; loadReport(); }
+  if (t.hasAttribute && t.hasAttribute('data-rf')) {
+    var rs = repState(), fk = t.getAttribute('data-rf');
+    rs.f[fk] = t.value;
+    if (fk === 'from' || fk === 'to') { rs.preset = ''; if (!rs.f.to || rs.f.to < rs.f.from) rs.f.to = rs.f.from; render(); }
+    if (fk === 'category') rs.f.sku = '';
+    loadReport();
+  }
   if (k === 'prodCat') { S.prodFilter.cat = t.value; renderProductRows(); }
   if (k === 'stockLow') { S.stockFilter.low = t.checked; renderStockRows(); }
   if (k === 'drawerPin') { CashDrawer.save({ pin: Number(t.value) }); }

@@ -87,3 +87,224 @@ function api_dailyReport(token, day) {
     };
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Report with filters (owner): range + category / product / staff /   */
+/* shift / payment / device / bill type                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * f = { from, to ('yyyy-MM-dd', inclusive), category, sku, userId, shiftId, pay ('cash'|'qr'|'transfer'),
+ *       deviceId, billType ('discount'|'return'), slowDays }
+ * Money per line is net of its share of the bill discount; refunds are counted on the day of the return
+ * (restocked goods give their cost back). Profit = net sales − cost of goods.
+ */
+function api_report(token, f) {
+  return respond_(function () {
+    owner_(token);
+    f = f || {};
+    var today = fmtDate_(now_(), 'yyyy-MM-dd');
+    var from = /^\d{4}-\d{2}-\d{2}$/.test(f.from || '') ? f.from : today;
+    var to = /^\d{4}-\d{2}-\d{2}$/.test(f.to || '') ? f.to : from;
+    if (to < from) { var t = from; from = to; to = t; }
+    var inRange = function (v) { if (!(v instanceof Date)) return false; var d = fmtDate_(v, 'yyyy-MM-dd'); return d >= from && d <= to; };
+    var oneDay = from === to;
+
+    var products = {};
+    readAll_('Products').forEach(function (p) { products[String(p.sku)] = p; });
+    var users = {}, devices = {};
+    readAll_('Users').forEach(function (u) { users[u.userId] = u.name; });
+    readAll_('Devices').forEach(function (d) { devices[d.deviceId] = d.name; });
+    var rec = recipesMap_();
+
+    // ---- bills in range that pass the bill-level filters
+    var allBills = readAll_('Sales').filter(function (b) { return inRange(b.createdAt); });
+    var billOk = function (b) {
+      if (f.userId && b.userId !== f.userId) return false;
+      if (f.shiftId && b.shiftId !== f.shiftId) return false;
+      if (f.deviceId && b.deviceId !== f.deviceId) return false;
+      if (f.pay && !(payParts_(b)[f.pay] > 0)) return false;
+      if (f.billType === 'discount' && !(num_(b.discount) > 0)) return false;
+      if (f.billType === 'return' && !(num_(b.returnedTotal) > 0)) return false;
+      return true;
+    };
+    var bills = allBills.filter(billOk);
+    var paid = bills.filter(function (b) { return b.status !== 'VOID'; });
+    var voids = bills.filter(function (b) { return b.status === 'VOID'; });
+    var billBy = {};
+    paid.forEach(function (b) { billBy[b.billNo] = b; });
+
+    // ---- lines of those bills, with the bill-discount share spread over them
+    var linesBy = {};
+    readAll_('SaleLines').forEach(function (l) { if (billBy[l.billNo]) (linesBy[l.billNo] = linesBy[l.billNo] || []).push(l); });
+    var lineOk = function (l) {
+      var p = products[String(l.sku)] || {};
+      if (f.sku && String(l.sku) !== String(f.sku)) return false;
+      if (f.category && (p.category || '') !== f.category) return false;
+      return true;
+    };
+    var byProduct = {}, hourly = [], daily = {}, byPay = { cash: 0, qr: 0, transfer: 0 };
+    for (var h = 0; h < 24; h++) hourly.push(0);
+    var S = { gross: 0, cost: 0, discount: 0, bills: 0, pieces: 0 };
+    var prod = function (sku, name) {
+      var p = products[sku] || {};
+      return byProduct[sku] || (byProduct[sku] = { sku: sku, name: p.name || name, category: p.category || '', unit: p.unit || '',
+        recipe: !!(rec[sku] && rec[sku].length), qty: 0, revenue: 0, cost: 0, refunds: 0, returnedQty: 0, bills: 0 });
+    };
+    var staff = {};
+    var st = function (uid) { return staff[uid] || (staff[uid] = { userId: uid, name: users[uid] || uid, bills: 0, net: 0, discount: 0, voids: 0, voidTotal: 0, returns: 0, refunds: 0 }); };
+    paid.forEach(function (b) {
+      var ls = linesBy[b.billNo] || [];
+      var sumLT = ls.reduce(function (a, l) { return a + num_(l.lineTotal); }, 0);
+      var billDisc = num_(b.discount) - ls.reduce(function (a, l) { return a + num_(l.lineDiscount); }, 0);
+      var got = 0, any = false;
+      ls.forEach(function (l) {
+        if (!lineOk(l)) return;
+        any = true;
+        var lt = num_(l.lineTotal);
+        var net = sumLT ? lt - billDisc * lt / sumLT : 0;
+        var x = prod(String(l.sku), l.name);
+        var pcs = num_(l.qty) * (num_(l.multiplier) || 1);
+        x.qty += pcs; x.revenue += net; x.cost += num_(l.cost); x.bills++;
+        S.cost += num_(l.cost); S.pieces += pcs;
+        got += net;
+      });
+      if (!any) return;
+      S.gross += got; S.bills++;
+      S.discount += f.sku || f.category ? 0 : num_(b.discount);
+      var share = num_(b.total) ? got / num_(b.total) : 0;
+      var pp = payParts_(b);
+      byPay.cash += pp.cash * share; byPay.qr += pp.qr * share; byPay.transfer += pp.transfer * share;
+      hourly[Number(fmtDate_(b.createdAt, 'H'))] += got;
+      var dk = fmtDate_(b.createdAt, 'yyyy-MM-dd');
+      daily[dk] = (daily[dk] || 0) + got;
+      var s1 = st(b.userId); s1.bills++; s1.net += got; s1.discount += num_(b.discount);
+    });
+    voids.forEach(function (b) { var s1 = st(b.userId); s1.voids++; s1.voidTotal += num_(b.total); });
+
+    // ---- returns made in the range (on bills that pass the filters)
+    var retBills = {};
+    readAll_('Sales').forEach(function (b) { if (num_(b.returnedTotal) > 0) retBills[b.billNo] = b; });
+    var rets = readAll_('Returns').filter(function (r) { return inRange(r.createdAt) && retBills[r.billNo] && billOk(retBills[r.billNo]); });
+    var retNo = {};
+    rets.forEach(function (r) { retNo[r.returnNo] = r; });
+    var refunds = 0, retCount = 0;
+    readAll_('ReturnLines').forEach(function (l) {
+      var r = retNo[l.returnNo];
+      if (!r || !lineOk(l)) return;
+      var x = prod(String(l.sku), l.name);
+      var back = bool_(l.restocked) ? num_(l.cost) : 0;
+      x.refunds += num_(l.refund); x.returnedQty += num_(l.qty) * (num_(l.multiplier) || 1); x.cost -= back;
+      refunds += num_(l.refund); S.cost -= back;
+      byPay[r.refundMethod === 'cash' ? 'cash' : 'transfer'] -= num_(l.refund);
+      var dk = fmtDate_(r.createdAt, 'yyyy-MM-dd');
+      daily[dk] = (daily[dk] || 0) - num_(l.refund);
+      var s1 = st(r.userId); s1.refunds += num_(l.refund);
+    });
+    rets.forEach(function (r) { retCount++; st(r.userId).returns++; });
+
+    var net = S.gross - refunds;
+    var plist = Object.keys(byProduct).map(function (k) {
+      var x = byProduct[k];
+      x.revenue = round2_(x.revenue - x.refunds); x.cost = round2_(x.cost); x.refunds = round2_(x.refunds);
+      x.profit = round2_(x.revenue - x.cost); x.margin = x.revenue ? Math.round(x.profit / x.revenue * 1000) / 10 : 0;
+      x.qty = round2_(x.qty - x.returnedQty);
+      return x;
+    }).sort(function (a, b) { return b.revenue - a.revenue; });
+    var cats = {};
+    plist.forEach(function (x) {
+      var c = cats[x.category] || (cats[x.category] = { category: x.category || 'ไม่มีหมวด', items: 0, qty: 0, revenue: 0, cost: 0 });
+      c.items++; c.qty += x.qty; c.revenue += x.revenue; c.cost += x.cost;
+    });
+    var clist = Object.keys(cats).map(function (k) {
+      var c = cats[k]; c.revenue = round2_(c.revenue); c.cost = round2_(c.cost); c.profit = round2_(c.revenue - c.cost);
+      c.margin = c.revenue ? Math.round(c.profit / c.revenue * 1000) / 10 : 0; c.share = net ? Math.round(c.revenue / net * 1000) / 10 : 0;
+      return c;
+    }).sort(function (a, b) { return b.revenue - a.revenue; });
+
+    // ---- shifts that were open during the range
+    var shifts = readAll_('Shifts').filter(function (s) {
+      var o = s.openedAt instanceof Date ? fmtDate_(s.openedAt, 'yyyy-MM-dd') : '';
+      var c = s.closedAt instanceof Date ? fmtDate_(s.closedAt, 'yyyy-MM-dd') : today;
+      return o && o <= to && c >= from && (!f.userId || s.userId === f.userId) && (!f.deviceId || s.deviceId === f.deviceId);
+    }).reverse().map(function (s) {
+      var sb = allBills.filter(function (b) { return b.shiftId === s.shiftId && b.status !== 'VOID'; });
+      return { shiftId: s.shiftId, device: devices[s.deviceId] || s.deviceId, user: users[s.userId] || '', closedBy: users[s.closedBy] || '',
+        openedAt: s.openedAt, closedAt: s.closedAt || '', status: s.status, bills: sb.length,
+        sales: round2_(sb.reduce(function (a, b) { return a + num_(b.total); }, 0)),
+        openingCash: num_(s.openingCash), expectedCash: s.expectedCash === '' ? null : num_(s.expectedCash),
+        countedCash: s.countedCash === '' ? null : num_(s.countedCash), diff: s.diff === '' ? null : num_(s.diff),
+        voidCount: num_(s.voidCount), note: s.note || '' };
+    });
+
+    // ---- stock: value by category, slow movers
+    var vals = lotValues_();
+    var lastSold = {};
+    var saleDate = {};
+    readAll_('Sales').forEach(function (b) { if (b.status !== 'VOID' && b.createdAt instanceof Date) saleDate[b.billNo] = b.createdAt; });
+    readAll_('SaleLines').forEach(function (l) {
+      var d = saleDate[l.billNo];
+      if (!d) return;
+      var comps = rec[String(l.sku)];
+      (comps && comps.length ? comps.map(function (c) { return c.sku; }) : [String(l.sku)]).forEach(function (k) {
+        if (!lastSold[k] || d > lastSold[k]) lastSold[k] = d;
+      });
+    });
+    var slowDays = num_(f.slowDays) || 30;
+    var cutoff = new Date(now_().getTime() - slowDays * 86400000);
+    var stockCats = {}, slow = [];
+    Object.keys(products).forEach(function (k) {
+      var p = products[k];
+      if (!bool_(p.active) || p.type === 'recipe') return;
+      if (f.category && (p.category || '') !== f.category) return;
+      var on = num_(p.onHand), v = round2_(vals[k] || 0);
+      var c = stockCats[p.category || ''] || (stockCats[p.category || ''] = { category: p.category || 'ไม่มีหมวด', items: 0, pieces: 0, value: 0 });
+      if (on > 0) { c.items++; c.pieces += on; c.value += v; }
+      if (on > 0 && (!lastSold[k] || lastSold[k] < cutoff)) {
+        slow.push({ sku: k, name: p.name, category: p.category || '', unit: p.unit || '', onHand: on, value: v,
+          lastSold: lastSold[k] || '', days: lastSold[k] ? Math.floor((now_() - lastSold[k]) / 86400000) : null, forSale: forSale_(p) });
+      }
+    });
+    var scList = Object.keys(stockCats).map(function (k) { var c = stockCats[k]; c.value = round2_(c.value); return c; })
+      .filter(function (c) { return c.items; }).sort(function (a, b) { return b.value - a.value; });
+    var stockTotal = round2_(scList.reduce(function (a, c) { return a + c.value; }, 0));
+    scList.forEach(function (c) { c.share = stockTotal ? Math.round(c.value / stockTotal * 1000) / 10 : 0; });
+    slow.sort(function (a, b) { return b.value - a.value; });
+
+    var exceptions = readAll_('AuditLog').filter(function (a) {
+      return inRange(a.createdAt) && EXCEPTION_ACTIONS.indexOf(a.action) >= 0 && (!f.userId || a.userId === f.userId) && (!f.deviceId || a.deviceId === f.deviceId);
+    }).reverse().slice(0, 200).map(function (a) {
+      return { createdAt: a.createdAt, action: a.action, ref: a.ref, detail: a.detail, user: users[a.userId] || '', approvedBy: a.approvedBy };
+    });
+
+    var days = [];
+    if (!oneDay) {
+      for (var d = new Date(from + 'T00:00:00Z'); fmtYmdUtc_(d) <= to && days.length < 400; d = new Date(d.getTime() + 86400000)) {
+        var k2 = fmtYmdUtc_(d); days.push({ day: k2, net: round2_(daily[k2] || 0) });
+      }
+    }
+    var cost = round2_(S.cost);
+    return {
+      from: from, to: to, oneDay: oneDay,
+      summary: { gross: round2_(S.gross), refunds: round2_(refunds), net: round2_(net), bills: S.bills, avgBill: S.bills ? round2_(S.gross / S.bills) : 0,
+                 pieces: round2_(S.pieces), discount: round2_(S.discount), cost: cost, profit: round2_(net - cost),
+                 margin: net ? Math.round((net - cost) / net * 1000) / 10 : 0,
+                 voids: voids.length, voidTotal: round2_(voids.reduce(function (a, b) { return a + num_(b.total); }, 0)), returns: retCount },
+      byPay: { cash: round2_(byPay.cash), qr: round2_(byPay.qr), transfer: round2_(byPay.transfer) },
+      hourly: hourly.map(round2_), daily: days,
+      products: plist, categories: clist,
+      staff: Object.keys(staff).map(function (k) { var x = staff[k]; ['net', 'discount', 'voidTotal', 'refunds'].forEach(function (q) { x[q] = round2_(x[q]); }); x.net = round2_(x.net - x.refunds); return x; })
+        .sort(function (a, b) { return b.net - a.net; }),
+      shifts: shifts, stock: { total: stockTotal, categories: scList }, slow: slow.slice(0, 200), slowDays: slowDays,
+      exceptions: exceptions,
+      options: {
+        categories: Object.keys(Object.keys(products).reduce(function (a, k) { if (products[k].category) a[products[k].category] = 1; return a; }, {})).sort(),
+        users: Object.keys(users).map(function (k) { return { userId: k, name: users[k] }; }),
+        devices: Object.keys(devices).map(function (k) { return { deviceId: k, name: devices[k] }; }),
+        shifts: shifts.map(function (s) { return { shiftId: s.shiftId, label: fmtDate_(s.openedAt, 'd/M HH:mm') + ' · ' + s.user + ' · ' + s.device }; })
+      }
+    };
+  });
+}
+
+function fmtYmdUtc_(d) { return d.toISOString().slice(0, 10); }
