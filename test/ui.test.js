@@ -36,7 +36,7 @@ call('importProducts', T, [
   const page = await ctx.newPage();
   const errors = []; errorsRef = errors;
   page.on('pageerror', e => errors.push(e.message));
-  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', m => { if (m.type() === 'error' && !/ERR_INTERNET_DISCONNECTED/.test(m.text())) errors.push(m.text()); });   // the offline test cuts the network on purpose
 
   await page.addInitScript(([dev]) => {
     localStorage.setItem('em_device', dev);
@@ -51,8 +51,10 @@ call('importProducts', T, [
     Object.defineProperty(navigator, 'serial', { value: { getPorts: async () => [port], requestPort: async () => port } });
   }, [DEV]);
 
+  let netDown = false;   // simulate the shop's internet dropping
   const handler = async route => {
     const url = route.request().url();
+    if (url.startsWith(API) && netDown) return route.abort('internetdisconnected');
     if (url.startsWith(API)) {
       const out = g.doPost({ postData: { contents: route.request().postData() } });
       return route.fulfill({ status: 200, contentType: 'application/json', body: out.getContent(), headers: { 'access-control-allow-origin': '*' } });
@@ -572,10 +574,45 @@ call('importProducts', T, [
   await shot('07s-bill-returned');
   await page.keyboard.press('Escape');
 
+  // 9z. Internet drops: the sale is kept on this device, the shift cannot close until it is sent
+  await page.click('nav button[data-v=sale]');
+  netDown = true;
+  await page.fill('#scan', '8851234567890'); await page.keyboard.press('Enter');
+  await page.keyboard.press('F12');
+  await page.click('#kp [data-k="1"]'); await page.click('#kp [data-k="0"]');
+  await page.click('[data-x=ok]');
+  await page.waitForSelector('.modal h1:has-text("บันทึกไว้ในเครื่อง")');
+  await shot('06o-offline-receipt');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#netpill:not(.hidden):has-text("1 บิล")');
+  await shot('06p-offline-pill');
+  netDown = false;
+  await page.click('#netpill');
+  await page.click('.modal [data-x=sync]');
+  await page.waitForSelector('.toast:has-text("ส่งบิลที่ค้างตอนออฟไลน์แล้ว 1 บิล")');
+  await page.waitForSelector('#netpill.hidden', { state: 'attached' });
+  assert.ok(call('listBills', T).some(b => b.total === 7), 'queued sale reached the server');
+
+  // 9zz. Bulk price edit: +10 % rounded to whole baht for one product, check, save
+  await page.click('nav button[data-v=products]');
+  await page.click('[data-act=bulkOpen]');
+  await page.fill('#bq2', 'น้ำดื่ม');
+  await page.waitForFunction(() => document.querySelectorAll('#bulk-rows tr').length >= 1 && /น้ำดื่ม/.test(document.querySelector('#bulk-rows').textContent));
+  await page.fill('#bk-val', '10');
+  await page.click('[data-act=bulkApply]');
+  assert.strictEqual(await page.inputValue('#bulk-rows tr:first-child input'), '8', '7 × 1.1 = 7.7 → 8');
+  assert.match(await page.textContent('#bulk-sum'), /แก้ราคาไป/);
+  await shot('04d-bulk-price');
+  await page.click('[data-act=bulkSave]');
+  await page.click('[data-x=yes]');
+  await page.waitForSelector('.toast:has-text("เปลี่ยนราคาแล้ว")');
+  assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'W0001').price, 8, 'new price saved');
+  await page.fill('#pq', '');
+
   // 10. Close shift
   await page.click('nav button[data-v=shift]');
   await page.waitForSelector('#shiftsum h2');
-  await page.fill('#c1000', '0'); await page.fill('#c500', '1'); await page.fill('#c100', '1'); await page.fill('#ccoin', '105.80');
+  await page.fill('#c1000', '0'); await page.fill('#c500', '1'); await page.fill('#c100', '1'); await page.fill('#ccoin', '112.80');
   await page.click('[data-act=closeShift]');
   await page.click('[data-x=yes]');
   await page.waitForSelector('.modal h1:has-text("ปิดกะแล้ว")');

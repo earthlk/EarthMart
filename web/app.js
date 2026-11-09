@@ -98,6 +98,91 @@ function conn() {
   return saved && saved.url ? saved : { url: preset.apiUrl || '', key: preset.apiKey || '' };
 }
 
+/* ---------------- Offline outbox: sales rung up while the internet is down ---------------- */
+function setOffline(v) {
+  if (S.offline === v) return;
+  S.offline = v;
+  drawNetPill();
+  if (!v && outbox().length) setTimeout(function () { syncOutbox(); }, 500);
+}
+function outbox() { try { return JSON.parse(store('em_outbox') || '[]') || []; } catch (e) { return []; } }
+function saveOutbox(list) { store('em_outbox', list.length ? JSON.stringify(list) : null); drawNetPill(); }
+
+/** Keep the sale on this device; it is sent (idempotent by saleUid) as soon as the server can be reached. */
+function queueSale(sale, rc) {
+  var list = outbox();
+  list.push({ saleUid: sale.saleUid, sale: sale, rc: rc, at: sale.offlineAt, error: '' });
+  saveOutbox(list);
+}
+
+var syncing = false;
+function syncOutbox(manual) {
+  var list = outbox();
+  if (syncing || !S.token || !list.length) return Promise.resolve();
+  var c = conn();
+  if (!c.url) return Promise.resolve();
+  syncing = true; drawNetPill();
+  var sent = 0, failed = 0;
+  var todo = list.filter(function (x) { return manual || !x.error; }).map(function (x) { return x.saleUid; });
+  var step = function (i) {
+    if (i >= todo.length) return Promise.resolve();
+    var item = outbox().filter(function (x) { return x.saleUid === todo[i]; })[0];
+    if (!item) return step(i + 1);
+    return rawCall(c, 'commitSale', [S.token, item.sale]).then(function () {
+      saveOutbox(outbox().filter(function (x) { return x.saleUid !== item.saleUid; }));
+      sent++;
+      return step(i + 1);
+    }, function (e) {
+      if (e.offline || /เข้าสู่ระบบ/.test(e.message)) throw e;
+      var l2 = outbox();
+      l2.forEach(function (x) { if (x.saleUid === item.saleUid) x.error = e.message; });
+      saveOutbox(l2);
+      failed++;
+      return step(i + 1);
+    });
+  };
+  return step(0).catch(function () {}).then(function () {
+    syncing = false; drawNetPill();
+    if (sent) { toast('ส่งบิลที่ค้างตอนออฟไลน์แล้ว ' + sent + ' บิล'); if (S.view === 'bills' || S.view === 'shift') render(); }
+    if (failed) toast('มีบิลค้างส่งไม่ผ่าน ' + failed + ' บิล — แตะป้ายด้านบนเพื่อดู', true);
+  });
+}
+setInterval(function () { if (outbox().length && navigator.onLine !== false) syncOutbox(); }, 20000);
+window.addEventListener('online', function () { syncOutbox(); });
+
+function drawNetPill() {
+  var el = $('#netpill');
+  if (!el) return;
+  var list = outbox(), n = list.length, bad = list.filter(function (x) { return x.error; }).length;
+  el.classList.toggle('hidden', !n && !S.offline);
+  el.classList.toggle('bad', !!(S.offline || bad));
+  el.innerHTML = '<span class="dot"></span>' + (S.offline ? 'ออฟไลน์' : syncing ? 'กำลังส่ง…' : bad ? 'ส่งไม่ผ่าน' : 'รอส่ง') + (n ? ' · ' + n + ' บิล' : '');
+}
+
+function outboxModal() {
+  var list = outbox();
+  var m = openModal('<header><h1>บิลที่ขายตอนออฟไลน์</h1><span class="muted">' + list.length + ' บิล · เก็บไว้ในเครื่องนี้</span></header><div class="body" style="gap:10px">' +
+    (S.offline ? '<div class="banner">ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ขายต่อได้ตามปกติ บิลจะส่งเองเมื่อเน็ตกลับมา</div>' : '') +
+    (list.length ? '<table class="table"><thead><tr><th>เวลา</th><th class="r">ยอด</th><th>ชำระ</th><th>สถานะ</th><th></th></tr></thead><tbody>' + list.map(function (x) {
+      return '<tr><td class="num">' + dateTime(x.at) + '</td><td class="r num">' + money(x.rc.total) + '</td><td>' + payText(x.rc) + '</td><td>' +
+        (x.error ? '<span class="warn-text">' + esc(x.error) + '</span>' : '<span class="tag amber">รอส่ง</span>') + '</td><td class="r">' +
+        (x.error && S.user.role === 'owner' ? '<button class="btn sm" data-del="' + esc(x.saleUid) + '">ลบออก</button>' : '') + '</td></tr>';
+    }).join('') + '</tbody></table>' : '<div class="empty">ไม่มีบิลค้างส่ง</div>') +
+    '<div class="muted" style="font-size:13px">ส่งอัตโนมัติทุก 20 วินาทีเมื่อเชื่อมต่อได้ · บิลที่ส่งไม่ผ่าน (เช่น โควตาราคาลดหมด) ให้เจ้าของตรวจแล้วลบออก แล้วขายใหม่ถ้าจำเป็น</div></div>' +
+    '<footer><button class="btn" data-x="close">ปิด</button><button class="btn primary" data-x="sync"' + (list.length ? '' : ' disabled') + '>ส่งตอนนี้</button></footer>');
+  $('[data-x=close]', m).onclick = function () { closeModal(); };
+  $('[data-x=sync]', m).onclick = function () { closeModal(); syncOutbox(true).then(function () { if (outbox().length) outboxModal(); }); };
+  m.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-del]');
+    if (!b) return;
+    closeModal();
+    confirm2('ลบบิลค้างส่ง', 'บิลนี้จะไม่ถูกบันทึกเข้าระบบ (เงินที่รับไว้ต้องปรับเองตอนปิดกะ)', 'ลบออก', true).then(function (ok) {
+      if (ok) saveOutbox(outbox().filter(function (x) { return x.saleUid !== b.getAttribute('data-del'); }));
+      outboxModal();
+    });
+  });
+}
+
 function rawCall(c, name, args) {
   var ctrl = window.AbortController ? new AbortController() : null;
   var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 45000);
@@ -112,9 +197,13 @@ function rawCall(c, name, args) {
     if (!r.ok) throw new Error('เซิร์ฟเวอร์ตอบกลับผิดพลาด (' + r.status + ')');
     return r.json().catch(function () { throw new Error('ตอบกลับไม่ใช่ข้อมูล — ตรวจว่า Deploy เป็น Web app สิทธิ์ "Anyone"'); });
   }, function (e) {
-    throw new Error(e && e.name === 'AbortError' ? 'เซิร์ฟเวอร์ตอบช้าเกินไป ลองใหม่' : 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจอินเทอร์เน็ต');
+    var ne = new Error(e && e.name === 'AbortError' ? 'เซิร์ฟเวอร์ตอบช้าเกินไป ลองใหม่' : 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจอินเทอร์เน็ต');
+    ne.offline = true;
+    setOffline(true);
+    throw ne;
   }).then(function (res) {
     clearTimeout(timer);
+    setOffline(false);
     if (res && res.ok) return res.data;
     var err = new Error(res && res.error ? res.error : 'เกิดข้อผิดพลาด');
     err.code = res && res.code;
@@ -404,6 +493,7 @@ function boot() {
   return api('bootstrap', S.token).then(function (d) {
     S.user = d.user; S.isCounter = d.isCounter; S.settings = d.settings; S.shift = d.shift;
     S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0;
+    if (outbox().length) setTimeout(function () { syncOutbox(); }, 1500);
     setCatalog(d.products, d.barcodes, d.recipes);
     applyTheme();
     newCart();
@@ -484,6 +574,7 @@ function frame(inner) {
   return '<header class="topbar"><span class="brand">' + esc(S.settings.shopName || 'EarthMart') + '</span><nav>' + nav + '</nav>' +
     '<span class="grow"></span><span class="meta">' + shiftTxt + ' · ' + role + ': ' + esc(S.user ? S.user.name : '') + '</span>' +
     (S.shift && S.isCounter ? '<button class="btn" data-act="cashMoveModal">เงินเข้า/ออก</button>' : '') +
+    '<button class="netpill hidden" id="netpill" data-act="outbox" title="บิลที่ขายตอนออฟไลน์"></button>' +
     (S.isCounter ? '<button class="btn" data-act="openCustomer" id="cdbtn" title="เปิดจอลูกค้าบนจอที่ 2"><span class="dot' +
       (window.CustomerDisplay && CustomerDisplay.pos.connected() ? ' on' : '') + '"></span>จอลูกค้า</button>' : '') +
     '<button class="btn" data-act="logout">ออก</button></header>' + banner + inner;
@@ -505,6 +596,7 @@ function render() {
     default: html = '';
   }
   $('#app').innerHTML = html;
+  drawNetPill();
   if (S.view === 'sale') focusScan();
 }
 
@@ -1121,7 +1213,29 @@ function openPay(initial) {
       renderCartOnly();
       if (rc.payMethod === 'cash' || rc.payMethod === 'split' && rc.payments.cash > 0) openDrawer(true);
       showReceipt(rc, print);
-    }).catch(function (e) { submitting = false; fail(e); });
+    }).catch(function (e) {
+      if (!e.offline) { submitting = false; return fail(e); }
+      // Internet down: keep the bill on this device and carry on; it is sent when the connection is back.
+      sale.offlineAt = new Date().toISOString();
+      sale.shiftId = S.shift.shiftId;
+      var t2 = cartTotals();
+      var pp = { cash: 0, qr: 0, transfer: 0 };
+      if (sale.payMethod === 'split') (sale.payments || []).forEach(function (x) { pp[x.method] += x.amount; }); else pp[sale.payMethod] = t2.total;
+      var cashPart = pp.cash;
+      var rc = { billNo: 'รอส่ง', offline: true, createdAt: sale.offlineAt, payMethod: sale.payMethod, subtotal: t2.subtotal, discount: round2(t2.subtotal - t2.total),
+        total: t2.total, payments: pp, received: sale.payMethod === 'split' ? round2(sale.received + pp.qr + pp.transfer) : sale.received,
+        change: cashPart ? round2(sale.received - cashPart) : 0, status: 'PAID',
+        lines: S.cart.lines.map(function (l) { return { name: l.name, unitName: l.unitName, qty: l.qty, unitPrice: l.unitPrice, lineDiscount: ldTotal(l), lineTotal: round2(l.qty * l.unitPrice - ldTotal(l)) }; }) };
+      queueSale(sale, rc);
+      paid = true;
+      cdPublish('done', { method: sale.payMethod === 'split' ? (cashPart > 0 ? 'cash' : 'qr') : sale.payMethod, total: rc.total, received: cashPart ? sale.received : rc.total, change: rc.change });
+      closeModal();
+      var print2 = $('#autoprint', m).checked;
+      newCart();
+      renderCartOnly();
+      if (cashPart > 0) openDrawer(true);
+      showReceipt(rc, print2);
+    });
   };
   $('[data-x=ok]', m).onclick = submit;
   $('[data-x=cancel]', m).onclick = function () { closeModal(); };
@@ -1132,7 +1246,8 @@ function openPay(initial) {
 function maskPP(id) { id = String(id || ''); return id.length > 4 ? id.slice(0, 3) + 'x'.repeat(id.length - 6) + id.slice(-3) : id; }
 
 function showReceipt(rc, autoPrint) {
-  var m = openModal('<header><h1>บันทึกแล้ว · ' + esc(rc.billNo) + '</h1></header><div class="body">' +
+  var m = openModal('<header><h1>' + (rc.offline ? 'บันทึกไว้ในเครื่อง · รอส่ง' : 'บันทึกแล้ว · ' + esc(rc.billNo)) + '</h1></header><div class="body">' +
+    (rc.offline ? '<div class="banner">อินเทอร์เน็ตหลุด — บิลนี้เก็บไว้ในเครื่องแล้ว จะส่งเข้าระบบเองเมื่อเน็ตกลับมา (เลขบิลจะออกตอนส่งสำเร็จ)</div>' : '') +
     (rc.payMethod === 'cash' || rc.payMethod === 'split' && rc.payments.cash > 0 ? '<div class="row" style="justify-content:space-between;align-items:baseline"><span>เงินทอน</span><span class="num brand-text" style="font-size:44px;font-weight:700">฿' + money(rc.change) + '</span></div>' +
       '<div class="muted">' + (rc.payMethod === 'split' ? payText(rc) + ' · รับเงินสดมา ฿' + money(round2(rc.received - rc.payments.qr - rc.payments.transfer)) : 'รับมา ฿' + money(rc.received)) + ' · ยอด ฿' + money(rc.total) + '</div>'
       : '<div>ชำระด้วย ' + payText(rc) + ' ฿' + money(rc.total) + '</div>') +
@@ -1538,14 +1653,126 @@ function returnModal(rc) {
 /* Products                                                            */
 /* =================================================================== */
 
+/* ---------------- Bulk price edit (owner) ---------------- */
+function renderBulkPrice() {
+  var cats = categories().map(function (c) { return '<option ' + (S.prodFilter.cat === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('');
+  return '<div class="page" style="flex-direction:column;gap:12px"><div class="card pad bulk-tools">' +
+    '<div class="row" style="gap:8px;flex-wrap:wrap"><h2 style="margin:0">แก้ราคาหลายรายการ</h2><span class="grow"></span>' +
+    '<label class="sr" for="bq2">ค้นหา</label><input id="bq2" placeholder="ค้นหา ชื่อ, SKU" value="' + esc(S.prodFilter.q) + '" data-input="bulkQ" style="width:220px">' +
+    '<label class="sr" for="bcat">หมวด</label><select id="bcat" data-change="bulkCat" style="width:190px"><option value="">ทุกหมวด</option>' + cats + '</select></div>' +
+    '<div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px"><span class="muted">ปรับทุกรายการที่แสดง</span>' +
+    '<select id="bk-dir" aria-label="เพิ่มหรือลด" style="width:90px"><option value="1">เพิ่ม</option><option value="-1">ลด</option></select>' +
+    '<input id="bk-val" type="number" min="0" step="0.5" value="5" aria-label="จำนวน" style="width:90px;text-align:right">' +
+    '<select id="bk-unit" aria-label="หน่วย" style="width:90px"><option value="pct">%</option><option value="baht">บาท</option></select>' +
+    '<select id="bk-round" aria-label="ปัดเศษ" style="width:150px"><option value="1">ปัดเป็นบาทเต็ม</option><option value="0.5">ปัดลง .00 / .50</option><option value="0">ไม่ปัด</option></select>' +
+    '<label class="checkrow" style="margin:0"><input type="checkbox" id="bk-packs" checked> รวมราคาแพ็ค</label>' +
+    '<button class="btn sm" data-act="bulkApply">ใช้กับที่แสดง</button><button class="btn sm ghost" data-act="bulkReset">ล้างที่แก้</button></div></div>' +
+    '<div class="card" style="overflow:auto;flex:1"><table class="table bulk"><thead><tr><th>สินค้า</th><th>หมวด</th><th class="r">ทุน</th><th class="r">ราคาเดิม</th><th class="r">ราคาใหม่</th><th class="r">กำไร</th></tr></thead>' +
+    '<tbody id="bulk-rows"></tbody></table></div>' +
+    '<div class="card pad row" style="gap:10px"><span id="bulk-sum" class="grow muted"></span><button class="btn" data-act="bulkClose">ยกเลิก</button><button class="btn primary" data-act="bulkSave">บันทึกราคาใหม่</button></div></div>';
+}
+
+function bulkList() {
+  var q = S.prodFilter.q.toLowerCase().trim();
+  return S.products.filter(function (p) {
+    if (!p.active || p.forSale === false) return false;
+    if (S.prodFilter.cat && p.category !== S.prodFilter.cat) return false;
+    return !q || p.name.toLowerCase().indexOf(q) >= 0 || p.sku.toLowerCase().indexOf(q) >= 0;
+  }).sort(function (a, b) { return (a.category || '').localeCompare(b.category || '', 'th') || a.name.localeCompare(b.name, 'th'); });
+}
+
+function bulkRowHtml(key, name, sub, cost, oldP, isPack) {
+  var v = S.bulk.edits[key];
+  var np = v === undefined || v === '' ? oldP : Number(v);
+  var changed = v !== undefined && v !== '' && round2(Number(v)) !== round2(oldP);
+  var m = np > 0 ? Math.round((np - cost) / np * 1000) / 10 : 0;
+  var below = cost > 0 && np < cost;
+  return '<tr class="' + (isPack ? 'pack ' : '') + (changed ? 'chg ' : '') + (below ? 'below' : '') + '"><td>' + (isPack ? '↳ ' : '<b>') + esc(name) + (isPack ? '' : '</b>') +
+    (sub ? ' <span class="muted" style="font-size:12px">' + esc(sub) + '</span>' : '') + '</td><td class="muted">' + (isPack ? '' : esc(S.idx.bySku[key] ? S.idx.bySku[key].category : '')) + '</td>' +
+    '<td class="r num">' + money(cost) + '</td><td class="r num' + (changed ? ' was' : '') + '">' + money(oldP) + '</td>' +
+    '<td class="r"><input class="num" type="number" min="0" step="0.25" data-bulk="' + esc(key) + '" value="' + (changed ? round2(np) : '') + '" placeholder="' + money(oldP) + '" aria-label="ราคาใหม่ ' + esc(name) + '"></td>' +
+    '<td class="r num ' + (below ? 'warn-text' : '') + '">' + (np > 0 ? m + '%' : '–') + (below ? ' ต่ำกว่าทุน' : '') + '</td></tr>';
+}
+
+function drawBulk() {
+  var box = $('#bulk-rows');
+  if (!box) return;
+  var list = bulkList();
+  box.innerHTML = list.length ? list.map(function (p) {
+    var cost = Number(p.cost) || 0;
+    return bulkRowHtml(p.sku, p.name, p.unit, cost, Number(p.price) || 0, false) + codesOf(p.sku).filter(function (b) { return b.multiplier > 1; }).map(function (b) {
+      return bulkRowHtml('#' + b.barcode, b.unitName + ' (' + b.multiplier + ' ' + (p.unit || 'ชิ้น') + ')', b.barcode, round2(cost * b.multiplier), Number(b.price) || 0, true);
+    }).join('');
+  }).join('') : '<tr><td colspan="6" class="muted">ไม่พบสินค้า</td></tr>';
+  bulkSum();
+}
+
+function bulkChanges() {
+  var out = [];
+  Object.keys(S.bulk.edits).forEach(function (k) {
+    var v = S.bulk.edits[k];
+    if (v === '' || v === undefined || isNaN(Number(v))) return;
+    if (k.charAt(0) === '#') {
+      var b = S.barcodes.filter(function (x) { return x.barcode === k.slice(1); })[0];
+      if (b && round2(Number(v)) !== round2(Number(b.price) || 0)) out.push({ barcode: b.barcode, price: round2(Number(v)) });
+    } else {
+      var p = S.idx.bySku[k];
+      if (p && round2(Number(v)) !== round2(Number(p.price) || 0)) out.push({ sku: k, price: round2(Number(v)) });
+    }
+  });
+  return out;
+}
+
+function bulkSum() {
+  var ch = bulkChanges(), el = $('#bulk-sum');
+  if (!el) return;
+  var below = ch.filter(function (c) {
+    if (c.barcode) { var b = S.barcodes.filter(function (x) { return x.barcode === c.barcode; })[0]; var p = b && S.idx.bySku[b.sku]; return p && Number(p.cost) > 0 && c.price < Number(p.cost) * b.multiplier; }
+    var q = S.idx.bySku[c.sku]; return q && Number(q.cost) > 0 && c.price < Number(q.cost);
+  }).length;
+  el.innerHTML = ch.length ? 'แก้ราคาไป <b>' + ch.length + '</b> รายการ' + (below ? ' · <span class="warn-text">ต่ำกว่าทุน ' + below + ' รายการ</span>' : '') : 'พิมพ์ราคาใหม่ในช่อง หรือใช้ "ปรับทุกรายการที่แสดง"';
+}
+
+function bulkApply() {
+  var dir = Number($('#bk-dir').value), val = Number($('#bk-val').value) || 0, unit = $('#bk-unit').value, rnd = Number($('#bk-round').value), packs = $('#bk-packs').checked;
+  if (!val) return toast('ใส่จำนวนที่จะปรับ', true);
+  var adj = function (p) {
+    var n = unit === 'pct' ? p * (1 + dir * val / 100) : p + dir * val;
+    if (rnd === 1) n = Math.round(n);
+    else if (rnd === 0.5) n = Math.floor(n * 2) / 2;
+    return Math.max(0, round2(n));
+  };
+  var cnt = 0;
+  bulkList().forEach(function (p) {
+    if (Number(p.price) > 0) { S.bulk.edits[p.sku] = adj(Number(p.price)); cnt++; }
+    if (packs) codesOf(p.sku).filter(function (b) { return b.multiplier > 1 && Number(b.price) > 0; }).forEach(function (b) { S.bulk.edits['#' + b.barcode] = adj(Number(b.price)); cnt++; });
+  });
+  drawBulk();
+  toast('ปรับแล้ว ' + cnt + ' ราคา — ตรวจแล้วกด "บันทึกราคาใหม่"');
+}
+
+function bulkSave() {
+  var ch = bulkChanges();
+  if (!ch.length) return toast('ยังไม่มีราคาที่แก้', true);
+  confirm2('บันทึกราคาใหม่', 'เปลี่ยนราคา ' + ch.length + ' รายการ — มีผลกับบิลใหม่ทันที', 'บันทึก').then(function (ok) {
+    if (!ok) return;
+    return api('bulkPrice', S.token, ch).then(function (r) {
+      toast('เปลี่ยนราคาแล้ว ' + r.changed + ' รายการ');
+      S.bulk = null;
+      return reloadCatalog().then(function () { render(); });
+    });
+  }).catch(fail);
+}
+
 function renderProducts() {
+  if (S.bulk) return renderBulkPrice();
   var owner = S.user.role === 'owner';
   var cats = categories().map(function (c) { return '<option ' + (S.prodFilter.cat === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('');
   return '<div class="page"><div class="prod">' +
     '<section class="card prod-list"><div class="prod-tools">' +
     '<label class="sr" for="pq">ค้นหาสินค้า</label><input id="pq" class="grow" placeholder="ค้นหา ชื่อ, EAN, SKU, PLU" value="' + esc(S.prodFilter.q) + '" data-input="prodQ" style="min-width:180px">' +
     '<label class="sr" for="pcat">หมวด</label><select id="pcat" data-change="prodCat" style="width:170px"><option value="">ทุกหมวด</option>' + cats + '</select>' +
-    (owner ? '<button class="btn sm" data-act="importCsv" style="height:40px">นำเข้า CSV</button>' +
+    (owner ? '<button class="btn sm" data-act="bulkOpen" style="height:40px">แก้ราคาหลายรายการ</button><button class="btn sm" data-act="importCsv" style="height:40px">นำเข้า CSV</button>' +
       '<button class="btn sm primary" data-act="selProduct" data-sku="" style="height:40px">+ เพิ่มสินค้า</button>' : '') +
     '</div><div class="prod-grid head"><div>สินค้า / SKU</div><div>EAN (ชิ้น) / PLU</div><div>หน่วยที่มีบาร์โค้ด</div>' +
     '<div class="r">ทุน</div><div class="r">ขาย</div><div class="r">คงเหลือ</div></div><div class="prod-rows" id="prows"></div></section>' +
@@ -2659,6 +2886,9 @@ function openShift() {
 }
 
 function closeShift() {
+  if (outbox().length) {
+    return toast('ยังมีบิลขายตอนออฟไลน์ค้างส่ง ' + outbox().length + ' บิล — ส่งให้ครบก่อนปิดกะ (แตะป้าย "รอส่ง" ด้านบน)', true);
+  }
   var counted = denomSum('c');
   var nHeld = heldBills().length;
   confirm2('ปิดกะ', 'ยอดนับได้ ฿' + money(counted) + ' — ปิดกะแล้วจะยกเลิกบิลในกะนี้ไม่ได้' +
@@ -3290,6 +3520,15 @@ var ACTIONS = {
   billDiscount: function () { askDiscount('bill'); },
   lineDisc: function (el) { S.cart.sel = Number(el.getAttribute('data-i')); askDiscount('line'); },
   holdBill: holdBill,
+  bulkOpen: function () { S.bulk = { edits: {} }; render(); drawBulk(); },
+  bulkClose: function () {
+    var go2 = function () { S.bulk = null; render(); renderProductRows(); };
+    if (bulkChanges().length) confirm2('ทิ้งราคาที่แก้', 'ยังไม่ได้บันทึก ' + bulkChanges().length + ' รายการ', 'ทิ้ง', true).then(function (ok) { if (ok) go2(); }); else go2();
+  },
+  bulkApply: bulkApply,
+  bulkReset: function () { S.bulk.edits = {}; drawBulk(); },
+  bulkSave: bulkSave,
+  outbox: function () { outboxModal(); },
   toggleMd: function (el) { toggleMd(Number(el.getAttribute('data-i'))); },
   expTab: function (el) { S.expTab = el.getAttribute('data-t'); S.expSel = null; render(); drawExpiry(); },
   expPick: function (el) {
@@ -3486,9 +3725,22 @@ document.addEventListener('input', function (e) {
   }
   if (t.hasAttribute('data-ef') || t.hasAttribute('data-ec') || t.hasAttribute('data-ecc') || t.id === 'e-comp') edInput(t);
   if (t.hasAttribute('data-rc') || t.hasAttribute('data-rch')) rcInput(t);
+  if (t.hasAttribute('data-bulk') && S.bulk) {
+    var bk = t.getAttribute('data-bulk');
+    S.bulk.edits[bk] = t.value;
+    var tr = t.closest('tr'), cells = tr.children;
+    var cost = Number(cells[2].textContent.replace(/,/g, '')) || 0, oldP = Number(cells[3].textContent.replace(/,/g, '')) || 0;
+    var np = t.value === '' ? oldP : Number(t.value);
+    var chg = t.value !== '' && round2(np) !== round2(oldP), below = cost > 0 && np < cost;
+    tr.classList.toggle('chg', chg); tr.classList.toggle('below', below); cells[3].classList.toggle('was', chg);
+    cells[5].className = 'r num ' + (below ? 'warn-text' : '');
+    cells[5].textContent = (np > 0 ? Math.round((np - cost) / np * 1000) / 10 + '%' : '–') + (below ? ' ต่ำกว่าทุน' : '');
+    bulkSum();
+  }
   if (t.id === 'rscan') drawRcSuggest(/^\d{6,}$/.test(t.value.trim()) ? '' : t.value);
   var k = t.getAttribute('data-input');
   if (k === 'prodQ') { S.prodFilter.q = t.value; renderProductRows(); }
+  if (k === 'bulkQ') { S.prodFilter.q = t.value; drawBulk(); }
   if (k === 'stockQ') { S.stockFilter.q = t.value; renderStockRows(); }
   if (t.hasAttribute('data-cnt')) cntSet(t.getAttribute('data-cnt'), t.value);
   if (t.hasAttribute('data-cnt-note')) { cntDraft().note = t.value; cntSave(); }
@@ -3511,6 +3763,7 @@ document.addEventListener('change', function (e) {
     loadReport();
   }
   if (k === 'prodCat') { S.prodFilter.cat = t.value; renderProductRows(); }
+  if (k === 'bulkCat') { S.prodFilter.cat = t.value; drawBulk(); }
   if (k === 'stockLow') { S.stockFilter.low = t.checked; renderStockRows(); }
   if (k === 'drawerPin') { CashDrawer.save({ pin: Number(t.value) }); }
   if (k === 'drawerBaud') { CashDrawer.save({ baud: Number(t.value) }); }

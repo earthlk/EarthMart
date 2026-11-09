@@ -338,3 +338,46 @@ function parseCsv_(text) {
   if (field !== '' || row.length) { row.push(field); rows.push(row); }
   return rows;
 }
+
+/**
+ * Owner: change many prices at once. changes = [{ sku, price }] (piece price) and/or [{ barcode, price }] (pack price).
+ * Each change is logged as PRICE_CHANGE. Unchanged prices are skipped. → { changed }
+ */
+function api_bulkPrice(token, changes) {
+  return respond_(function () {
+    var s = owner_(token);
+    if (!changes || !changes.length) throw new Error('ยังไม่มีราคาที่แก้');
+    if (changes.length > 500) throw new Error('แก้ได้ครั้งละไม่เกิน 500 รายการ');
+    return withLock_(function () {
+      var products = {}, codes = {};
+      readAll_('Products').forEach(function (p) { products[String(p.sku)] = p; });
+      readAll_('Barcodes').forEach(function (b) { codes[String(b.barcode)] = b; });
+      var changed = 0, touched = {};
+      changes.forEach(function (c) {
+        var price = round2_(num_(c.price));
+        if (!(price >= 0) || String(c.price) === '' || c.price === null) throw new Error('ราคาไม่ถูกต้อง');
+        if (c.barcode) {
+          var b = codes[String(c.barcode)];
+          if (!b) throw new Error('ไม่พบบาร์โค้ด ' + c.barcode);
+          if (round2_(num_(b.price)) === price) return;
+          var pp = products[String(b.sku)] || {};
+          log_(s, 'PRICE_CHANGE', b.sku, (pp.name || b.sku) + ' (' + b.unitName + '): ' + num_(b.price) + ' → ' + price, '');
+          b.price = price;
+          writeRow_('Barcodes', b);
+          touched[String(b.sku)] = true;
+          changed++;
+        } else {
+          var p = products[String(c.sku)];
+          if (!p) throw new Error('ไม่พบสินค้า ' + c.sku);
+          if (round2_(num_(p.price)) === price) return;
+          log_(s, 'PRICE_CHANGE', p.sku, p.name + ': ' + num_(p.price) + ' → ' + price, '');
+          p.price = price;
+          touched[String(p.sku)] = true;
+          changed++;
+        }
+      });
+      Object.keys(touched).forEach(function (k) { var p = products[k]; p.updatedAt = now_(); writeRow_('Products', p); });
+      return { changed: changed };
+    });
+  });
+}

@@ -41,7 +41,9 @@ function api_commitSale(token, sale) {
       var dup = readAll_('Sales').filter(function (x) { return x.saleUid === sale.saleUid; })[0];
       if (dup) return receipt_(dup, linesOf_(dup.billNo));
 
-      var shift = openShiftForDevice_(s.deviceId);
+      // Sales queued while offline carry the time they were made and their shift (sent later from the outbox).
+      var off = offlineSale_(sale, s);
+      var shift = off.shift || openShiftForDevice_(s.deviceId);
       if (!shift) throw new Error('ยังไม่ได้เปิดกะ');
 
       var priced = priceLines_(sale.lines);
@@ -83,13 +85,13 @@ function api_commitSale(token, sale) {
       }
 
       var billNo = nextBillNo_();
-      var stamp = now_();
+      var stamp = off.at || now_();
       var header = {
         billNo: billNo, saleUid: sale.saleUid, createdAt: stamp, shiftId: shift.shiftId, deviceId: s.deviceId,
         userId: s.userId, itemsCount: priced.reduce(function (a, l) { return a + l.qty; }, 0),
         subtotal: subtotal, discount: discount, total: total, payMethod: sale.payMethod,
         received: received, change: change, status: 'PAID',
-        cashPaid: parts.cash, qrPaid: parts.qr, transferPaid: parts.transfer, returnedTotal: 0
+        cashPaid: parts.cash, qrPaid: parts.qr, transferPaid: parts.transfer, returnedTotal: 0, offline: off.at ? true : ''
       };
       // FIFO: each line costs what its pieces (or its recipe components) cost in the oldest lots.
       var ctx = fifoOpen_(), rec = recipesMap_(), prodBySku = {};
@@ -421,4 +423,22 @@ function api_returnSale(token, ret) {
       return { returnNo: returnNo, billNo: h.billNo, total: total, refundMethod: ret.refundMethod, lines: rlines, fullyReturned: fully };
     });
   });
+}
+
+/**
+ * A sale sent from the offline outbox: { offlineAt: ISO time it was made, shiftId: shift it was rung up in }.
+ * Keeps that time (if within the last 7 days and not in the future) and that shift when it belongs to this device —
+ * even if the shift has been closed since, so the money lands where the cash physically went.
+ */
+function offlineSale_(sale, s) {
+  var out = { at: null, shift: null };
+  if (!sale.offlineAt) return out;
+  var t = new Date(sale.offlineAt);
+  var nowT = now_().getTime();
+  if (!isNaN(t.getTime()) && t.getTime() <= nowT + 5 * 60000 && t.getTime() >= nowT - 7 * 86400000) out.at = t;
+  if (sale.shiftId) {
+    var sh = readAll_('Shifts').filter(function (x) { return x.shiftId === sale.shiftId && x.deviceId === s.deviceId; })[0];
+    if (sh) out.shift = { shiftId: sh.shiftId, openedAt: sh.openedAt, openingCash: num_(sh.openingCash), userId: sh.userId, status: sh.status };
+  }
+  return out;
 }

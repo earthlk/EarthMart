@@ -440,3 +440,16 @@ a{color:var(--brand-text)}
 .rep-gran button,.ch-h .seg-sm button{white-space:nowrap;padding:0 14px;flex:0 0 auto}
 .rep-gran button{height:38px}
 .ch-h .seg-sm{flex:0 0 auto}
+
+/* offline outbox pill */
+.netpill{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:17px;border:1px solid var(--tag-amber);background:var(--tag-amber-bg);color:var(--tag-amber);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.netpill .dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+.netpill.bad{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
+
+/* bulk price edit */
+.table.bulk input{width:110px;height:36px;text-align:right}
+.table.bulk tr.pack td{background:var(--bg);font-size:14px}
+.table.bulk tr.chg td{background:var(--tag-amber-bg)}
+.table.bulk tr.below td{background:var(--warn-soft)}
+.table.bulk td.was{text-decoration:line-through;color:var(--muted)}
+.bulk-tools select,.bulk-tools input{height:38px}

@@ -587,6 +587,14 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   const RL = m7('report', T, { from: '2026-11-05' });
   eq([RL.summary.loss, RL.history[0].loss, RL.summary.after], [12, 12, 48 - 12], 'damaged goods lower profit after losses');
   ok(RL.exceptions.some(x => x.action === 'BELOW_COST' && x.ref === 'C1'), 'price below cost flagged in exceptions');
+  // bulk price edit (owner only)
+  f7(/เจ้าของ/, 'bulkPrice', C, [{ sku: 'A1', price: 12 }]);
+  eq(m7('bulkPrice', T, [{ sku: 'A1', price: 12 }, { sku: 'B1', price: 20 }, { sku: 'C1', price: 15 }]).changed, 2, 'only real changes count (B1 unchanged)');
+  const bp = m7('bootstrap', T).products;
+  eq([bp.find(p => p.sku === 'A1').price, bp.find(p => p.sku === 'C1').price], [12, 15], 'prices saved');
+  ok(m7('report', T, { from: '2026-11-05' }).exceptions.filter(x => x.action === 'PRICE_CHANGE').length >= 2, 'each change logged');
+  f7(/ราคาไม่ถูกต้อง/, 'bulkPrice', T, [{ sku: 'A1', price: -1 }]);
+  m7('bulkPrice', T, [{ sku: 'A1', price: 10 }]);   // back to the price later tests use
   f7(/เจ้าของ/, 'report', C, {});
   const closed = m7('closeShift', C, 587, '');
   eq(closed.diff, 0, 'drawer balances after split + refund');
@@ -604,6 +612,14 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   const r9 = m7('returnSale', T, { returnUid: 'R9', billNo: bd.billNo, refundMethod: 'cash', reason: 'ชงผิด', lines: [{ lineNo: 1, qty: 1 }] });
   eq([r9.total, r9.lines[0].restocked, onH('A1')], [30, false, aBefore], 'drink refunded, ingredients not put back');
   eq(m7('returnSale', T, { returnUid: 'R10', billNo: bd.billNo, refundMethod: 'cash', reason: 'x', lines: [{ lineNo: 2, qty: 1 }] }).total, 20, 'other lines of that bill still return');
+  // offline outbox: the sale keeps the time it was made and the shift it was rung up in
+  const shiftNow = m7('shiftSummary', C).shiftId;
+  const madeAt = '2026-11-05T01:00:00.000Z';   // 2 h before the mock clock
+  const off = m7('commitSale', C, { saleUid: 'OFF1', payMethod: 'cash', received: 10, offlineAt: madeAt, shiftId: shiftNow, lines: [{ sku: 'A1', qty: 1 }] });
+  eq(new Date(off.createdAt).toISOString(), madeAt, 'offline sale keeps its own time');
+  eq(m7('commitSale', C, { saleUid: 'OFF1', payMethod: 'cash', received: 10, offlineAt: madeAt, shiftId: shiftNow, lines: [{ sku: 'A1', qty: 1 }] }).billNo, off.billNo, 'resending from the outbox is idempotent');
+  const fut = m7('commitSale', C, { saleUid: 'OFF2', payMethod: 'cash', received: 10, offlineAt: '2026-11-06T03:00:00.000Z', lines: [{ sku: 'A1', qty: 1 }] });
+  ok(new Date(fut.createdAt).toISOString() !== '2026-11-06T03:00:00.000Z', 'a time in the future is ignored');
 }
 
 console.log('server tests passed:', pass);
