@@ -23,7 +23,7 @@ var SCHEMA = {
   Devices:    ['deviceId', 'name', 'type', 'registeredBy', 'registeredAt', 'active'],
   Products:   ['sku', 'name', 'category', 'type', 'unit', 'cost', 'price', 'minStock', 'openPrice',
                'quickKey', 'quickKeyGroup', 'quickKeyOrder', 'icon', 'color', 'plu', 'active', 'onHand', 'updatedAt',
-               'forSale', 'trackExpiry'],
+               'forSale', 'trackExpiry', 'image'],
   Recipes:    ['sku', 'componentSku', 'qty'],
   Lots:       ['lotId', 'sku', 'receivedAt', 'receiptNo', 'qtyIn', 'qtyLeft', 'unitCost', 'expiryDate', 'note',
                'expStatus', 'expFound', 'markdownPct', 'markdownLeft', 'expBy', 'expAt'],
@@ -258,7 +258,7 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '11';
+var SCHEMA_VERSION = '12';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {

@@ -635,6 +635,20 @@ call('importProducts', T, [
   await shot('04h-labels-sticker');
   await page.click('[data-act=labClose]');
   await page.fill('#pq', '');
+  // product photo: upload in the editor, the quick key on the sale screen shows it
+  await page.fill('#pq', 'ขนมปัง');
+  await page.click('#prows .prod-grid >> nth=0');
+  await page.waitForSelector('label[for=e-img]');
+  const jpg = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64');
+  await page.setInputFiles('#e-img', { name: 'bread.png', mimeType: 'image/png', buffer: jpg });
+  await page.waitForSelector('.toast:has-text("ใส่รูปแล้ว")');
+  await page.waitForSelector('#ped .ic.has-img img.kimg');
+  assert.ok(call('bootstrap', T).products.find(p => p.name === 'ขนมปังไส้สังขยา').image, 'photo saved on the product');
+  await page.click('nav button[data-v=sale]');
+  await page.waitForSelector('.key:has-text("ขนมปัง") .ic.has-img img.kimg');
+  await shot('09h-key-photo');
+  await page.click('nav button[data-v=products]');
+  await page.fill('#pq', '');
 
   // 9zzz. Promotion: owner sets "water 2 bottles 14", the till applies it by itself (QR so the drawer count is unchanged)
   await page.click('[data-act=promoOpen]');

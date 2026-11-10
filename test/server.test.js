@@ -779,4 +779,28 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   ok(!Object.keys(h.__files).includes('FILE1'), 'deleted slide image is trashed in Drive');
 }
 
+{
+  // Product photos: owner uploads, saving the product keeps it, replace trashes the old file, remove clears it
+  const h = makeContext({ now: '2026-11-05T03:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m = (fn, ...a) => { const r = c(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  h.createOwner('O', '1111');
+  const T = m('login', m('status').users[0].userId, '1111', 'Dx').token;
+  m('importProducts', T, ['sku,name,category,type,unit,cost,price,minStock,openingStock', 'C1,กาแฟ,เครื่องดื่มชง,nobarcode,แก้ว,10,30,0,0'].join('\n'));
+  const img = 'data:image/jpeg;base64,' + Buffer.from('photo-1').toString('base64');
+  const up = m('uploadProductImage', T, 'C1', img);
+  ok(up.image && m('bootstrap', T).products.find(p => p.sku === 'C1').image === up.image, 'product carries its photo id');
+  eq(m('productImage', T, up.image).dataUrl, img, 'photo comes back');
+  const p0 = m('bootstrap', T).products.find(p => p.sku === 'C1');
+  m('saveProduct', T, Object.assign({}, p0, { price: 35 }), [], []);
+  eq(m('bootstrap', T).products.find(p => p.sku === 'C1').image, up.image, 'editing the product keeps the photo');
+  const up2 = m('uploadProductImage', T, 'C1', 'data:image/jpeg;base64,' + Buffer.from('photo-2').toString('base64'));
+  ok(up2.image !== up.image && !h.__files[up.image], 'new photo replaces and trashes the old one');
+  ok(!c('productImage', T, up.image).ok, 'old photo id no longer served');
+  m('removeProductImage', T, 'C1');
+  eq(m('bootstrap', T).products.find(p => p.sku === 'C1').image, '', 'photo removed');
+}
+
 console.log('server tests passed:', pass);

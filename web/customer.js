@@ -101,8 +101,9 @@
       var lines = (st.lines || []).slice(-8);
       return '<section style="flex:1;padding:1.4em 1.4em 1.4em 1.6em;display:flex;flex-direction:column;gap:.8em;min-width:0">' +
         '<div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:1.2em">รายการของคุณ</b><span class="cd-muted">' + shop + '</span></div>' +
-        (st.last ? '<div style="background:#EEF6F1;border:2px solid #1F6B45;border-radius:.9em;padding:.8em 1.1em;display:flex;justify-content:space-between;align-items:center">' +
-          '<div><div style="font-size:.7em;font-weight:600;color:#1F6B45">เพิ่งเพิ่ม</div><div style="font-size:1.5em;font-weight:700">' + esc(st.last.name) + '</div></div>' +
+        (st.last ? '<div style="background:#EEF6F1;border:2px solid #1F6B45;border-radius:.9em;padding:.8em 1.1em;display:flex;justify-content:space-between;align-items:center;gap:.8em">' +
+          (st.last.img ? '<img id="cdlastimg" alt="" style="width:3.2em;height:3.2em;object-fit:cover;border-radius:.5em;display:none">' : '') +
+          '<div style="flex:1;min-width:0"><div style="font-size:.7em;font-weight:600;color:#1F6B45">เพิ่งเพิ่ม</div><div style="font-size:1.5em;font-weight:700">' + esc(st.last.name) + '</div></div>' +
           '<div class="cd-num" style="font-size:1.7em;font-weight:700;color:#1F6B45">฿' + money(st.last.price) + '</div></div>' : '') +
         '<div class="cd-card" style="flex:1;overflow:hidden;display:flex;flex-direction:column">' +
         ((st.lines || []).length > lines.length ? '<div class="cd-row cd-muted" style="font-size:.8em">… อีก ' + ((st.lines.length) - lines.length) + ' รายการ</div>' : '') +
@@ -212,6 +213,14 @@
     var root = document.getElementById('cd');
     root.innerHTML = view(st);
     if (st.mode === 'idle') startSlides(st); else clearInterval(S.slideTimer);
+    var li = document.getElementById('cdlastimg');
+    if (li && st.last && st.last.img && window.caches) {
+      caches.open('em-images').then(function (c) { return c.match(st.last.img); }).then(function (hit) { return hit && hit.blob(); }).then(function (b) {
+        if (!b) return;
+        var u = urls[st.last.img] || (urls[st.last.img] = URL.createObjectURL(b));
+        li.src = u; li.style.display = 'block';
+      }).catch(function () {});
+    }
     var box = document.getElementById('cdqr');
     if (box && st.qr) {
       if (typeof qrcode !== 'function') { box.textContent = 'โหลดตัวสร้าง QR ไม่ได้'; return; }

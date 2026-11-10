@@ -52,6 +52,9 @@ function iconSvg(key) {
 function iconHtml(p) {
   return iconSvg(p.icon) || esc((p.icon || p.name || '?').slice(0, 2));
 }
+/** Product photo when there is one (loaded from this device), else the icon. Wrap in an element with data-pimg. */
+function picHtml(p) { return p.image && S.imgUrl && S.imgUrl[p.image] ? '<img class="kimg" src="' + S.imgUrl[p.image] + '" alt="">' : iconHtml(p); }
+function pimgAttr(p) { return p.image ? ' data-pimg="' + esc(p.image) + '"' : ''; }
 
 function $(sel, root) { return (root || document).querySelector(sel); }
 function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
@@ -769,6 +772,7 @@ function boot() {
     sstore('em_user', JSON.stringify(d.user));
     S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0; S.promos = d.promos || []; S.slides = d.slides || [];
     setTimeout(syncSlides, 2500);
+    setTimeout(syncImages, 4000);
     if (outbox().length) setTimeout(function () { syncOutbox(); }, 1500);
     setCatalog(d.products, d.barcodes, d.recipes);
     saveCache(true);
@@ -885,6 +889,7 @@ function render() {
   }
   $('#app').innerHTML = html;
   $('#app').classList.toggle('m', isMobile() && S.view !== 'login');
+  fillImages();
   drawNetPill();
   markOfflineNav();
   if (S.view === 'sale') focusScan();
@@ -1075,7 +1080,7 @@ function cdPublish(mode, extra) {
     mode: mode, shopName: S.settings.shopName, welcome: S.settings.customerWelcome, hours: S.settings.shopHours,
     promoTitle: S.settings.customerPromoTitle, promoText: S.settings.customerPromoText, thanks: S.settings.receiptFooter,
     lines: S.cart.lines.map(function (l) { return { name: l.name + (l.multiplier > 1 ? ' (' + l.unitName + ')' : ''), qty: l.qty, total: round2(l.qty * l.unitPrice), discount: ldTotal(l) }; }),
-    last: last ? { name: last.name, price: last.unitPrice } : null,
+    last: last ? { name: last.name, price: last.unitPrice, img: (S.idx.bySku[last.sku] || {}).image ? imgKey(S.idx.bySku[last.sku].image) : '' } : null,
     items: t.items, subtotal: t.subtotal, discount: t.discount, total: t.total,
     slides: cdSlides(), slideSeconds: Math.max(3, Number(S.settings.slideSeconds) || 8), hint: S.settings.cdHints === '0' ? '' : promoHint()
   }, extra || {});
@@ -1193,8 +1198,8 @@ function renderSale() {
     .sort(function (a, b) { return (a.quickKeyOrder || 999) - (b.quickKeyOrder || 999) || a.name.localeCompare(b.name, 'th'); })
     .map(function (p) {
       var c = KEY_COLORS[p.color] || KEY_COLORS.gray;
-      return '<button class="key" data-act="quickKey" data-sku="' + esc(p.sku) + '"><span class="ic" style="background:' + c[0] + ';color:' + c[1] + '">' +
-        iconHtml(p) + '</span>' + (promosFor(p.sku).length ? '<span class="kpromo">โปร</span>' : '') + '<span class="nm">' + esc(p.name) + '</span><span class="pr">' +
+      return '<button class="key" data-act="quickKey" data-sku="' + esc(p.sku) + '"><span class="ic' + (p.image && S.imgUrl && S.imgUrl[p.image] ? ' has-img' : '') + '"' + pimgAttr(p) + ' style="background:' + c[0] + ';color:' + c[1] + '">' +
+        picHtml(p) + '</span>' + (promosFor(p.sku).length ? '<span class="kpromo">โปร</span>' : '') + '<span class="nm">' + esc(p.name) + '</span><span class="pr">' +
         (p.openPrice ? 'ราคาเปิด' : '฿' + money(p.price)) + '</span></button>';
     }).join('');
   if (!gnames.length) keys = '<div class="muted">ยังไม่มีปุ่มขายด่วน — ตั้งได้ในหน้าสินค้า (ติ๊ก "ปุ่มขายด่วน")</div>';
@@ -2415,6 +2420,59 @@ function labOpen(kind, promoId) {
   drawLabItems();
 }
 
+
+/* ---------------- Product photos (quick keys) ---------------- */
+var IMG_CACHE = 'em-images', imgPending = {};
+function imgKey(id) { return location.origin + location.pathname.replace(/[^/]*$/, '') + '__img/' + encodeURIComponent(id); }
+/** Object URL of a product photo: memory, then this device, then the server (kept for next time). */
+function loadImg(id) {
+  S.imgUrl = S.imgUrl || {};
+  if (S.imgUrl[id]) return Promise.resolve(S.imgUrl[id]);
+  if (imgPending[id]) return imgPending[id];
+  var key = imgKey(id);
+  var keep = function (blob) { S.imgUrl[id] = URL.createObjectURL(blob); return S.imgUrl[id]; };
+  var fromApi = function () {
+    if (!S.token || S.offline) return Promise.reject(new Error('offline'));
+    return api('productImage', S.token, id).then(function (r) { return fetch(r.dataUrl).then(function (x) { return x.blob(); }); }).then(function (blob) {
+      if (window.caches) caches.open(IMG_CACHE).then(function (c) { c.put(key, new Response(blob, { headers: { 'Content-Type': blob.type || 'image/jpeg' } })); }).catch(function () {});
+      return keep(blob);
+    });
+  };
+  imgPending[id] = (window.caches ? caches.open(IMG_CACHE).then(function (c) { return c.match(key); }).then(function (hit) { return hit ? hit.blob().then(keep) : fromApi(); }) : fromApi())
+    .then(function (u) { delete imgPending[id]; return u; }, function (e) { delete imgPending[id]; throw e; });
+  return imgPending[id];
+}
+/** Swap icons for photos wherever a [data-pimg] is on screen. */
+function fillImages() {
+  $all('[data-pimg]').forEach(function (el) {
+    var id = el.getAttribute('data-pimg');
+    if (!id) return;
+    if (S.imgUrl && S.imgUrl[id]) {
+      if (!el.querySelector('img.kimg')) { el.innerHTML = '<img class="kimg" src="' + S.imgUrl[id] + '" alt="">'; el.classList.add('has-img'); }
+    } else loadImg(id).then(fillImages).catch(function () {});
+  });
+}
+/** Counter keeps every product photo on the device (offline sale screen, customer display). */
+function syncImages() {
+  if (!S.isCounter || !window.caches || !S.token || S.offline) return;
+  var ids = (S.products || []).filter(function (p) { return p.image && p.active; }).map(function (p) { return p.image; });
+  caches.open(IMG_CACHE).then(function (c) {
+    return c.keys().then(function (keys) {
+      var want = ids.map(imgKey);
+      keys.forEach(function (k) { if (want.indexOf(k.url) < 0) c.delete(k); });
+      return ids.reduce(function (pr, id) { return pr.then(function () { return loadImg(id).catch(function () {}); }); }, Promise.resolve());
+    });
+  }).then(fillImages).catch(function () {});
+}
+function prodImgSet(sku, image) {
+  var p = S.idx.bySku[sku];
+  if (p) p.image = image;
+  if (S.ed && S.ed.p && S.ed.p.sku === sku) S.ed.p.image = image;
+  saveCache();
+  var go2 = function () { drawEditor(); renderProductRows(); };
+  if (image) loadImg(image).then(go2, go2); else go2();
+}
+
 /* ---------------- Customer-display slides ---------------- */
 var SLIDE_CACHE = 'em-slides';
 function slideKey(id) { return location.origin + location.pathname.replace(/[^/]*$/, '') + '__slide/' + encodeURIComponent(id); }
@@ -2538,11 +2596,11 @@ function drawSlideList() {
 }
 function slidesChanged(list) { S.slides = list; saveCache(); drawSlideList(); syncSlides(); }
 /** Shrink a photo to at most 1280 px on the long side, JPEG ~80 %. */
-function shrinkImage(file) {
+function shrinkImage(file, max) {
   return new Promise(function (resolve, reject) {
     var img = new Image(), url = URL.createObjectURL(file);
     img.onload = function () {
-      var k = Math.min(1, 1280 / Math.max(img.width, img.height));
+      var k = Math.min(1, (max || 1280) / Math.max(img.width, img.height));
       var c = document.createElement('canvas');
       c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
@@ -3021,11 +3079,15 @@ function drawEditor() {
     (isRecipe ? '' : '<label class="checkrow"><input type="checkbox" data-ef="trackExpiry" ' + (p.trackExpiry ? 'checked' : '') + '> ติดตามวันหมดอายุ — ต้องใส่วันหมดอายุตอนรับสินค้า แล้วเตือนในหน้า "หมดอายุ"</label>') +
     (p.forSale === false && !isRecipe ? '' : '<div class="sec-title"><b>ปุ่มขายด่วน</b><label class="checkrow"><input type="checkbox" data-ef="quickKey" ' + (p.quickKey ? 'checked' : '') + '> แสดงบนหน้าขาย</label></div>' +
     (p.quickKey ?
-      '<div class="row" style="align-items:flex-end"><span class="key" style="width:120px;height:104px;flex:0 0 120px;cursor:default"><span class="ic" style="background:' + c[0] + ';color:' + c[1] + '">' + iconHtml(p) + '</span>' +
+      '<div class="row" style="align-items:flex-end"><span class="key" style="width:120px;height:104px;flex:0 0 120px;cursor:default"><span class="ic' + (p.image && S.imgUrl && S.imgUrl[p.image] ? ' has-img' : '') + '"' + pimgAttr(p) + ' style="background:' + c[0] + ';color:' + c[1] + '">' + picHtml(p) + '</span>' +
       '<span class="nm" style="font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + esc(p.name || 'ชื่อสินค้า') + '</span><span class="pr" style="font-size:13px">' + (p.openPrice ? 'ราคาเปิด' : '฿' + money(p.price)) + '</span></span>' +
       '<div class="col grow" style="gap:8px"><div class="field"><label for="e-quickKeyGroup">หมวดปุ่ม</label><input id="e-quickKeyGroup" data-ef="quickKeyGroup" list="e-grplist" value="' + esc(p.quickKeyGroup) + '" placeholder="เช่น เครื่องดื่มชง" style="height:36px"></div>' +
       '<datalist id="e-grplist">' + Object.keys(groups).map(function (g) { return '<option value="' + esc(g) + '">'; }).join('') + '</datalist>' +
       '<div class="field"><label for="e-quickKeyOrder">ลำดับบนจอ</label><input id="e-quickKeyOrder" data-ef="quickKeyOrder" type="number" value="' + esc(p.quickKeyOrder || '') + '" style="height:36px;width:90px"></div></div></div>' +
+      '<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:14px">รูปสินค้า</b>' +
+        (owner ? '<label class="btn sm" for="e-img" style="cursor:pointer">' + (p.image ? 'เปลี่ยนรูป' : '+ อัปโหลดรูป') + '</label><input id="e-img" type="file" accept="image/*" data-change="prodImg" style="position:absolute;left:-9999px">' +
+          (p.image ? '<button type="button" class="btn sm ghost" data-act="prodImgDel">ลบรูป</button>' : '') : '') +
+        '<span class="muted" style="font-size:12px">' + (p.image ? 'ปุ่มขายด่วนใช้รูปนี้แทนไอคอน' : 'ไม่มีรูป = ใช้ไอคอนด้านล่าง') + '</span></div>' +
       '<div class="icons">' + icons + '</div><div class="swatches">' + colors + '</div>' : '') +
     '<label class="checkrow"><input type="checkbox" data-ef="openPrice" ' + (p.openPrice ? 'checked' : '') + '> ราคาเปิด (ใส่ราคาตอนขาย เช่น ของทอด ของฝากขาย)</label>') +
     (isNew ? '' : '<label class="checkrow"><input type="checkbox" data-ef="active" ' + (p.active ? 'checked' : '') + '> ใช้งาน (เอาออก = ซ่อนจากหน้าขาย ประวัติยังอยู่)</label>') +
@@ -4793,6 +4855,13 @@ var ACTIONS = {
       if (ok) api('deleteSlide', S.token, el.getAttribute('data-id')).then(slidesChanged).catch(fail);
     });
   },
+  prodImgDel: function () {
+    var sku = S.ed && S.ed.p.sku;
+    if (!sku) return;
+    confirm2('ลบรูปสินค้า', 'กลับไปใช้ไอคอนแทน?', 'ลบรูป', true).then(function (ok) {
+      if (ok) api('removeProductImage', S.token, sku).then(function (r) { toast('ลบรูปแล้ว'); prodImgSet(sku, ''); }).catch(fail);
+    });
+  },
   labOpen: function () { labOpen(); },
   labClose: function () { S.labelMode = false; render(); renderProductRows(); },
   labPromo: function (el) { labOpen('promo', el.getAttribute('data-id')); },
@@ -4948,6 +5017,12 @@ document.addEventListener('change', function (e) {
     if (fk === 'from' || fk === 'to') { rs.preset = ''; rs.f.gran = 'day'; if (!rs.f.to || rs.f.to < rs.f.from) rs.f.to = rs.f.from; render(); }
     if (fk === 'category') rs.f.sku = '';
     loadReport();
+  }
+  if (k === 'prodImg' && t.files && t.files[0]) {
+    var pf = t.files[0], psku = S.ed && S.ed.p.sku; t.value = '';
+    if (!psku) return toast('บันทึกสินค้าก่อน แล้วค่อยใส่รูป', true);
+    shrinkImage(pf, 480).then(function (u) { return api('uploadProductImage', S.token, psku, u); })
+      .then(function (r) { toast('ใส่รูปแล้ว'); prodImgSet(psku, r.image); }).catch(fail);
   }
   if (k === 'labA4') { labState().a4[labState().kind] = t.value; labSave(); drawLabPreview(); }
   if (k === 'labRoll') { labState().roll[labState().kind] = [Number($('#lab-rw').value) || 0, Number($('#lab-rh').value) || 0]; labSave(); drawLabPreview(); }

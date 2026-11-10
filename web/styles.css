@@ -606,3 +606,6 @@ a{color:var(--brand-text)}
   body.print-labels .lab-one{page-break-after:always;break-after:page}
   body.print-labels .lab-one:last-child{page-break-after:auto}
 }
+.ic.has-img{background:transparent !important;padding:0;overflow:hidden}
+.ic .kimg{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
+.key .ic.has-img{width:100%;height:76px;border-radius:8px}
