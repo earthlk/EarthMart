@@ -717,8 +717,15 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   m9('savePromo', T, { name: 'กาแฟ+ขนมปัง 40', type: 'combo', items: [{ sku: 'C1', qty: 1 }, { sku: 'B1', qty: 1 }], price: 40 });
   m9('savePromo', T, { name: 'เช้า ลูกอม', type: 'multi', items: ['K1'], buyQty: 2, price: 6, timeFrom: '06:00', timeTo: '10:00' });
   m9('savePromo', T, { name: 'เสาร์อาทิตย์', type: 'multi', items: ['B1'], buyQty: 2, price: 20, days: [0, 6] });
-  ok(m9('bootstrap', T).promos.length === 5, 'till gets the active promotions');
+  f9(/ไม่เกิน 99/, 'savePromo', T, { name: 'x', type: 'single', items: ['W2'], discType: 'pct', value: 100 });
+  f9(/ถูกกว่า/, 'savePromo', T, { name: 'x', type: 'single', items: ['W2'], discType: 'price', value: 12 });
+  const sg = m9('savePromo', T, { name: 'โซดาลด 20%', type: 'single', items: ['W2'], discType: 'pct', value: 20 });
+  ok(m9('bootstrap', T).promos.length === 6, 'till gets the active promotions');
 
+  // single-item cut: 2 soda alone, multi-buy (needs pairs that save) takes them first: (10+10)->15 saves 5
+  const rs = m9('commitSale', T, { saleUid: 'PS1', payMethod: 'cash', received: 50, lines: [{ sku: 'W2', qty: 3 }] });
+  eq([rs.promoDiscount, rs.promos.map(a => a.name)], [7, ['น้ำ+โซดา 2 ขวด 15', 'โซดาลด 20%']], 'pair goes to the multi-buy, the third soda gets 20% off');
+  m9('setPromoActive', T, sg.promoId, false);
   // 3 water + 1 soda: (10+7)->15 saves 2; (7+7) would cost more as a set, so stays normal; the pack is not eligible
   const r1 = m9('commitSale', T, { saleUid: 'P1', payMethod: 'cash', received: 200, lines: [{ sku: 'W1', qty: 3 }, { sku: 'W2', qty: 1 }, { barcode: '8850000000102', qty: 1 }] });
   eq([r1.subtotal, r1.promoDiscount, r1.total], [71, 2, 69], 'multi-buy across two products; packs keep their own price');
@@ -740,8 +747,8 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
     promo: { lines: [1], applied: [{ promoId: pm.promoId, name: 'น้ำ+โซดา 2 ขวด 15', times: 1, discount: 1 }] } });
   eq([r6.total, r6.promoDiscount], [13, 1], 'offline sale keeps the promotion the till applied');
   const rep = m9('report', T, { from: '2026-11-05', to: '2026-11-05' });
-  eq(rep.summary.promo, 18, 'report totals promotion discounts');
-  ok(rep.promos.find(p => p.name === 'น้ำ+โซดา 2 ขวด 15').discount === 3, 'report lists promotion use');
+  eq(rep.summary.promo, 25, 'report totals promotion discounts');
+  ok(rep.promos.find(p => p.name === 'น้ำ+โซดา 2 ขวด 15').discount === 8, 'report lists promotion use');
   // return part of a promo bill: refund what was actually paid for that line
   const ret = m9('returnSale', T, { returnUid: 'RP1', billNo: r3.billNo, refundMethod: 'cash', reason: 'x', lines: [{ lineNo: 1, qty: 1 }] });
   ok(ret.total < 30, 'refund of a combo item is its share after the promotion (' + ret.total + ')');

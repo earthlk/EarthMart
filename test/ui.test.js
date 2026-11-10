@@ -613,6 +613,7 @@ call('importProducts', T, [
   await page.click('[data-act=promoOpen]');
   await page.waitForSelector('#promo-rows .empty');
   await page.click('[data-act=promoNew]');
+  await page.click('[data-pt=multi]');
   await page.fill('#pe-name', 'น้ำดื่ม 2 ขวด 14');
   await page.fill('#pe-q', 'น้ำดื่ม');
   await page.click('#pe-sug [data-padd=W0001]');
@@ -622,9 +623,23 @@ call('importProducts', T, [
   await shot('04e-promo-edit');
   await page.click('.modal [data-x=ok]');
   await page.waitForSelector('#promo-rows .promo-card .tag.green');
+  // single-item price cut on the bread: 15 -> 12 (12 = 20% off)
+  await page.click('[data-act=promoNew]');
+  await page.fill('#pe-name', 'ขนมปังลด 20%');
+  await page.fill('#pe-q', 'ขนมปัง');
+  await page.click('#pe-sug [data-padd]');
+  await page.fill('#pe-value', '20');
+  await page.waitForSelector('#pe-prev:has-text("12.00")');
+  await page.click('.modal [data-x=ok]');
+  await page.waitForFunction(() => document.querySelectorAll('#promo-rows .promo-card .tag.green').length === 2);
   await shot('04f-promos');
   await page.click('[data-act=promoClose]');
   await page.click('nav button[data-v=sale]');
+  await page.click('.key:has-text("ขนมปัง")');
+  await page.waitForSelector('.line .promo-tag:has-text("โปร −3")');
+  await page.click('[data-act=clearCart]');
+  if (await page.$('.modal [data-x=yes]')) await page.click('.modal [data-x=yes]');
+  await page.waitForFunction(() => !document.querySelector('#lines .line'));
   await page.fill('#scan', '2*8851234567890'); await page.keyboard.press('Enter');
   await page.waitForSelector('.line .promo-tag');
   await page.waitForFunction(() => /14\.00/.test(document.querySelector('#totalbar .amt').textContent));

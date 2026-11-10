@@ -4,14 +4,15 @@
  *
  * promoApply(lines, promos, when)
  *   lines:  [{ key, sku, qty, unitPrice, eligible }]   eligible = single piece, no open price, no near-expiry markdown
- *   promos: [{ promoId, name, type: 'multi'|'bxgy'|'combo', active, items, buyQty, freeQty, price,
- *              startDate, endDate, days, timeFrom, timeTo }]
+ *   promos: [{ promoId, name, type: 'multi'|'bxgy'|'combo'|'single', active, items, buyQty, freeQty, price,
+ *              discType, value, startDate, endDate, days, timeFrom, timeTo }]
  *           multi: buy buyQty pieces from items (skus, mix allowed) for price
  *           bxgy:  every buyQty + freeQty pieces from items, the freeQty cheapest are free
  *           combo: items = [{ sku, qty }] together for price
+ *           single: every piece of items gets discType 'pct' (value % off), 'baht' (value baht off) or 'price' (sells at value)
  *   when:   { ymd: 'yyyy-MM-dd', dow: 0-6 (Sunday = 0), hm: 'HH:mm' } in the shop's time zone
  * Returns { byKey: { key: discount }, applied: [{ promoId, name, times, discount }], total }
- * Each piece is used by one promotion at most: combos first, then multi-buys, then buy-X-get-Y.
+ * Each piece is used by one promotion at most: combos first, then multi-buys, then buy-X-get-Y, then single-item price cuts.
  */
 function promoLive(p, when) {
   if (!p || !(p.active === true || p.active === 'TRUE' || p.active === 'true')) return false;
@@ -56,7 +57,7 @@ function promoApply(lines, promos, when) {
     applied.push({ promoId: p.promoId, name: p.name, times: times, discount: disc });
     total = Math.round((total + disc) * 100) / 100;
   };
-  var order = { combo: 0, multi: 1, bxgy: 2 };
+  var order = { combo: 0, multi: 1, bxgy: 2, single: 3 };
   (promos || []).filter(function (p) { return promoLive(p, when) && order[p.type] !== undefined; })
     .map(function (p, i) { return { p: p, i: i }; })
     .sort(function (a, b) { return order[a.p.type] - order[b.p.type] || a.i - b.i; })
@@ -91,6 +92,18 @@ function promoApply(lines, promos, when) {
         if (!k) return;
         t.forEach(function (u) { u.used = true; });
         share(t, d); done(p, k, d);
+        return;
+      }
+      if (p.type === 'single') {
+        var v = Number(p.value) || 0, cnt = 0, sd = 0;
+        pool(skus).forEach(function (u) {
+          var off = p.discType === 'pct' ? u.price * Math.min(v, 100) / 100 : p.discType === 'baht' ? Math.min(v, u.price) : p.discType === 'price' ? u.price - v : 0;
+          off = Math.round(Math.max(0, off) * 100) / 100;
+          if (off <= 0) return;
+          u.used = true; cnt++; sd += off;
+          byKey[u.key] = Math.round(((byKey[u.key] || 0) + off) * 100) / 100;
+        });
+        if (cnt) done(p, cnt, sd);
         return;
       }
       if (p.type === 'bxgy') {

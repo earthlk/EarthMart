@@ -1110,6 +1110,7 @@ function promoText(p) {
   if (p.type === 'combo') return it.map(function (c) { var x = S.idx.bySku[c.sku]; return (x ? x.name : c.sku) + (c.qty > 1 ? ' ×' + c.qty : ''); }).join(' + ') + ' = ฿' + money(p.price);
   var names = it.map(function (k) { var x = S.idx.bySku[k]; return x ? x.name : k; });
   var who = names.length > 2 ? names.slice(0, 2).join(', ') + ' และอีก ' + (names.length - 2) + ' รายการ' : names.join(' / ');
+  if (p.type === 'single') return who + ' ' + promoCut(p);
   return p.type === 'multi' ? who + ' ' + p.buyQty + ' ชิ้น ฿' + money(p.price) : who + ' ซื้อ ' + p.buyQty + ' แถม ' + p.freeQty;
 }
 
@@ -2125,14 +2126,16 @@ function returnModal(rc) {
 
 /* ---------------- Bulk price edit (owner) ---------------- */
 /* ---------------- Promotions (owner) ---------------- */
-var PROMO_TYPE_TH = { multi: 'ซื้อหลายชิ้นราคาพิเศษ', bxgy: 'ซื้อ X แถม Y', combo: 'เซ็ตคอมโบ' };
+var PROMO_TYPE_TH = { single: 'ลดราคาชิ้นเดียว', multi: 'ซื้อหลายชิ้นราคาพิเศษ', bxgy: 'ซื้อ X แถม Y', combo: 'เซ็ตคอมโบ' };
+var PROMO_DISC_TH = { pct: 'ลด %', baht: 'ลดเป็นบาท', price: 'ขายราคา' };
+function promoCut(p) { return p.discType === 'pct' ? 'ลด ' + Number(p.value) + '%' : p.discType === 'baht' ? 'ลด ' + money(p.value) + ' บาท' : 'เหลือ ฿' + money(p.value); }
 var DOW_TH = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
 function renderPromos() {
   return '<div class="page" style="flex-direction:column;gap:12px"><section class="card pad col" style="gap:10px">' +
     '<div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">โปรโมชั่น</h2><span class="grow"></span>' +
     '<button class="btn" data-act="promoClose">‹ กลับหน้าสินค้า</button><button class="btn primary" data-act="promoNew">+ สร้างโปรโมชั่น</button></div>' +
-    '<div class="muted" style="font-size:13px">ระบบคิดให้เองตอนสแกน · ใช้กับสินค้าที่ขายเป็นชิ้น (แพ็ค/ลังมีราคาของตัวเองอยู่แล้ว) · สินค้าลดราคาใกล้หมดอายุไม่ร่วมโปร · 1 ชิ้นเข้าได้โปรเดียว (เซ็ตก่อน แล้วหลายชิ้น แล้วแถม)</div></section>' +
+    '<div class="muted" style="font-size:13px">ระบบคิดให้เองตอนสแกน · ใช้กับสินค้าที่ขายเป็นชิ้น (แพ็ค/ลังมีราคาของตัวเองอยู่แล้ว) · สินค้าลดราคาใกล้หมดอายุไม่ร่วมโปร · 1 ชิ้นเข้าได้โปรเดียว (เซ็ต → หลายชิ้น → แถม → ลดชิ้นเดียว)</div></section>' +
     '<div id="promo-rows" class="promo-list"><div class="empty">กำลังโหลด…</div></div></div>';
 }
 
@@ -2175,7 +2178,7 @@ function promoModal(id) {
   var src = id ? (S.promoList || []).filter(function (p) { return p.promoId === id; })[0] : null;
   var ed = src ? Object.assign({}, src, { items: promoItems(src).map(function (x) { return typeof x === 'object' ? Object.assign({}, x) : x; }),
     days: String(src.days || '').split(',').filter(function (d) { return d !== ''; }).map(Number) })
-    : { promoId: '', name: '', type: 'multi', items: [], buyQty: 2, freeQty: 1, price: '', startDate: today(), endDate: '', days: [], timeFrom: '', timeTo: '', active: true };
+    : { promoId: '', name: '', type: 'single', items: [], buyQty: 2, freeQty: 1, price: '', discType: 'pct', value: '', startDate: today(), endDate: '', days: [], timeFrom: '', timeTo: '', active: true };
   var skuOf = function (it) { return typeof it === 'object' ? it.sku : it; };
   var priceOf = function (sku) { var x = S.idx.bySku[sku]; return x ? Number(x.price) || 0 : 0; };
   var m = openModal('<header><h1>' + (id ? 'แก้ไขโปรโมชั่น' : 'สร้างโปรโมชั่น') + '</h1></header><div class="body promo-ed" id="pe"></div>' +
@@ -2191,6 +2194,13 @@ function promoModal(id) {
       var hi = Math.max.apply(null, ed.items.map(priceOf)), lo = Math.min.apply(null, ed.items.map(priceOf));
       var n = Number(ed.buyQty) || 0;
       txt = 'ซื้อปกติ ' + n + ' ชิ้น ฿' + money(lo * n) + (hi !== lo ? '–' + money(hi * n) : '') + (Number(ed.price) > 0 ? ' → ฿' + money(ed.price) : '');
+    } else if (ed.type === 'single' && ed.items.length && Number(ed.value) > 0) {
+      var v = Number(ed.value);
+      txt = ed.items.slice(0, 3).map(function (k) {
+        var pr = priceOf(k), np = ed.discType === 'pct' ? pr * (1 - Math.min(v, 100) / 100) : ed.discType === 'baht' ? pr - v : Math.min(pr, v);
+        var x = S.idx.bySku[k];
+        return (x ? x.name : k) + ' ฿' + money(pr) + ' → ฿' + money(Math.max(0, np));
+      }).join(' · ') + (ed.items.length > 3 ? ' · …' : '');
     } else if (ed.type === 'bxgy' && ed.items.length) {
       txt = 'ทุก ' + ((Number(ed.buyQty) || 0) + (Number(ed.freeQty) || 0)) + ' ชิ้น ฟรี ' + (Number(ed.freeQty) || 0) + ' ชิ้นที่ถูกที่สุด';
     }
@@ -2206,11 +2216,14 @@ function promoModal(id) {
     var num = function (key, label, step) { return '<div class="field"><label for="pe-' + key + '">' + label + '</label><input id="pe-' + key + '" data-pf="' + key + '" type="number" inputmode="decimal" min="0" step="' + (step || 1) + '" value="' + esc(ed[key]) + '"></div>'; };
     $('#pe', m).innerHTML =
       '<div class="field"><label for="pe-name">ชื่อโปรโมชั่น (ขึ้นบนใบเสร็จ)</label><input id="pe-name" data-pf="name" value="' + esc(ed.name) + '" placeholder="เช่น น้ำดื่ม 2 ขวด 12 บาท"></div>' +
-      '<div class="seg pe-type">' + ['multi', 'bxgy', 'combo'].map(function (t) { return '<button type="button" data-pt="' + t + '" class="' + (ed.type === t ? 'on' : '') + '">' + PROMO_TYPE_TH[t] + '</button>'; }).join('') + '</div>' +
-      '<div class="field"><label for="pe-q">' + (ed.type === 'combo' ? 'สินค้าในเซ็ต (ปรับจำนวนต่อเซ็ตได้)' : 'สินค้าที่ร่วมโปร (คละกันได้)') + '</label>' +
+      '<div class="seg pe-type">' + ['single', 'multi', 'bxgy', 'combo'].map(function (t) { return '<button type="button" data-pt="' + t + '" class="' + (ed.type === t ? 'on' : '') + '">' + PROMO_TYPE_TH[t] + '</button>'; }).join('') + '</div>' +
+      '<div class="field"><label for="pe-q">' + (ed.type === 'combo' ? 'สินค้าในเซ็ต (ปรับจำนวนต่อเซ็ตได้)' : ed.type === 'single' ? 'สินค้าที่ลดราคา (เลือกได้หลายรายการ)' : 'สินค้าที่ร่วมโปร (คละกันได้)') + '</label>' +
       '<input id="pe-q" autocomplete="off" placeholder="พิมพ์ชื่อ หรือสแกนบาร์โค้ด"><div id="pe-sug" class="pe-sug"></div></div>' +
       '<div class="pchips">' + (chips || '<span class="muted">ยังไม่ได้เลือกสินค้า</span>') + '</div>' +
-      '<div class="grid3">' + (ed.type === 'multi' ? num('buyQty', 'จำนวนชิ้น') + num('price', 'ราคารวม (บาท)', 0.25)
+      '<div class="grid3">' + (ed.type === 'single' ? '<div class="field"><label for="pe-dt">วิธีลด</label><select id="pe-dt" data-pf="discType">' +
+        ['pct', 'baht', 'price'].map(function (k) { return '<option value="' + k + '"' + (ed.discType === k ? ' selected' : '') + '>' + PROMO_DISC_TH[k] + '</option>'; }).join('') + '</select></div>' +
+        num('value', ed.discType === 'pct' ? 'ลดกี่ %' : ed.discType === 'baht' ? 'ลดกี่บาทต่อชิ้น' : 'ราคาต่อชิ้น (บาท)', 0.25)
+        : ed.type === 'multi' ? num('buyQty', 'จำนวนชิ้น') + num('price', 'ราคารวม (บาท)', 0.25)
         : ed.type === 'bxgy' ? num('buyQty', 'ซื้อ (ชิ้น)') + num('freeQty', 'แถม (ชิ้น)') : num('price', 'ราคาเซ็ต (บาท)', 0.25)) + '</div>' +
       '<div class="pe-prev brand-text" id="pe-prev"></div>' +
       '<h3 style="margin:6px 0 0;font-size:15px">ช่วงเวลา</h3>' +
@@ -2246,7 +2259,11 @@ function promoModal(id) {
     ed[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
     preview();
   });
-  m.addEventListener('change', function (e) { var k = e.target.getAttribute('data-pf'); if (k === 'active') ed.active = e.target.checked; });
+  m.addEventListener('change', function (e) {
+    var k = e.target.getAttribute('data-pf');
+    if (k === 'active') ed.active = e.target.checked;
+    if (k === 'discType') { ed.discType = e.target.value; draw(); }
+  });
   m.addEventListener('keydown', function (e) {
     if (e.target.id === 'pe-q' && e.key === 'Enter') { e.preventDefault(); var b = $('#pe-sug [data-padd]', m); if (b) addSku(b.getAttribute('data-padd')); }
   });

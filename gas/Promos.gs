@@ -4,7 +4,8 @@
  * dates, times or "1,2,3" into something else. Pricing itself is in PromoEngine.gs (shared with the browser).
  */
 
-var PROMO_TYPES = ['multi', 'bxgy', 'combo'];
+var PROMO_TYPES = ['multi', 'bxgy', 'combo', 'single'];
+var PROMO_DISC = ['pct', 'baht', 'price'];
 
 function promoRow_(r) {
   var rule = {};
@@ -12,6 +13,7 @@ function promoRow_(r) {
   return {
     promoId: String(r.promoId), name: r.name, type: r.type, active: bool_(r.active),
     items: rule.items || [], buyQty: num_(rule.buyQty), freeQty: num_(rule.freeQty), price: num_(rule.price),
+    discType: rule.discType || '', value: num_(rule.value),
     startDate: rule.startDate || '', endDate: rule.endDate || '', days: (rule.days || []).join(','),
     timeFrom: rule.timeFrom || '', timeTo: rule.timeTo || '', updatedAt: r.updatedAt
   };
@@ -65,7 +67,17 @@ function api_savePromo(token, p) {
       if (!rule.items.length) throw new Error('เลือกสินค้าอย่างน้อย 1 รายการ');
       rule.items.forEach(function (k) { if (!products[k]) throw new Error('ไม่พบสินค้า ' + k); });
       rule.buyQty = Math.floor(num_(p.buyQty));
-      if (p.type === 'multi') {
+      if (p.type === 'single') {
+        delete rule.buyQty;
+        rule.discType = String(p.discType || '');
+        if (PROMO_DISC.indexOf(rule.discType) < 0) throw new Error('เลือกวิธีลดราคา');
+        rule.value = round2_(num_(p.value));
+        if (!(rule.value > 0)) throw new Error('ใส่ส่วนลด');
+        if (rule.discType === 'pct' && rule.value >= 100) throw new Error('ลดได้ไม่เกิน 99%');
+        var hi = Math.max.apply(null, rule.items.map(function (k) { return num_(products[k].price); }));
+        if (rule.discType === 'price' && rule.value >= hi) throw new Error('ราคาโปรต้องถูกกว่าราคาปกติ (' + round2_(hi) + ' บาท)');
+        if (rule.discType === 'baht' && rule.value >= hi) throw new Error('ส่วนลดต้องน้อยกว่าราคาสินค้า (' + round2_(hi) + ' บาท)');
+      } else if (p.type === 'multi') {
         if (rule.buyQty < 2) throw new Error('จำนวนชิ้นต้องตั้งแต่ 2 ขึ้นไป');
         rule.price = round2_(num_(p.price));
         if (!(rule.price > 0)) throw new Error('ใส่ราคาโปร');
