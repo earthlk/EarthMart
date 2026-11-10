@@ -622,4 +622,72 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   ok(new Date(fut.createdAt).toISOString() !== '2026-11-06T03:00:00.000Z', 'a time in the future is ignored');
 }
 
+{
+  // Full offline: PIN credentials for the counter, signed offline work, offline shift + cash moves, oversell flag
+  const crypto = require('crypto');
+  const sha = t => crypto.createHash('sha256').update(t, 'utf8').digest('hex');
+  const h = makeContext({ now: '2026-11-05T03:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c8 = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m8 = (fn, ...a) => { const r = c8(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  h.createOwner('O', '1111');
+  const DEV = 'Dcounter8xxxxxxxxxx';
+  const ownerUid = m8('status').users[0].userId;
+  const notCounter = m8('login', ownerUid, '1111', 'Dother');
+  ok(!notCounter.offline, 'no offline credentials for a device that is not a counter');
+  const T = m8('login', ownerUid, '1111', DEV).token;
+  m8('registerDevice', T, DEV, 'เครื่อง');
+  m8('addUser', T, 'แคช', 'cashier', '2222');
+  m8('addUser', T, 'บี', 'cashier', '3333');
+  const users = m8('listUsers', T);
+  const cashUid = users.find(u => u.name === 'แคช').userId, beeUid = users.find(u => u.name === 'บี').userId;
+  const lc = m8('login', cashUid, '2222', DEV);
+  ok(lc.offline && lc.offline.salt && lc.offline.hash === sha(lc.offline.salt + ':2222'), 'counter gets salt+hash that match the PIN');
+  const C = lc.token;
+  const lo = m8('login', ownerUid, '1111', DEV).offline;
+  const lb = m8('login', beeUid, '3333', DEV).offline;
+  m8('importProducts', T, ['sku,name,category,type,unit,cost,price,minStock,openingStock',
+    'A1,น้ำ,เครื่องดื่ม,nobarcode,ขวด,4,10,0,2'].join('\n'));
+  const at = '2026-11-05T01:00:00.000Z';
+
+  // shift opened offline by บี, resent twice
+  const by = (cred, ref) => ({ userId: cred.userId, proof: sha(cred.hash + ':' + ref) });
+  const sh1 = m8('openShift', C, 300, '', { openUid: 'OS1', openedAt: at, offlineBy: by(lb, 'OS1') });
+  const sh1b = m8('openShift', C, 300, '', { openUid: 'OS1', openedAt: at, offlineBy: by(lb, 'OS1') });
+  eq(sh1b.shiftId, sh1.shiftId, 'offline shift open is idempotent');
+  eq([new Date(sh1.openedAt).toISOString(), sh1.userId], [at, beeUid], 'offline shift keeps its time and who opened it');
+  ok(c8('openShift', C, 300, '').ok === false, 'a second normal open still fails');
+
+  // cash move offline, resent
+  m8('cashMove', C, 'OUT', 20, 'ค่าน้ำแข็ง', { moveId: 'CM1', at, shiftId: sh1.shiftId, offlineBy: by(lb, 'CM1') });
+  const sm = m8('cashMove', C, 'OUT', 20, 'ค่าน้ำแข็ง', { moveId: 'CM1', at, shiftId: sh1.shiftId, offlineBy: by(lb, 'CM1') });
+  eq([sm.cashOut, sm.expectedCash], [20, 280], 'offline cash move counted once');
+
+  // sale signed by บี, with an offline owner approval for the discount; sells 3 when only 2 are on the shelf
+  const sale = { saleUid: 'OFS1', payMethod: 'cash', received: 30, billDiscount: 2, offlineAt: at, shiftId: sh1.shiftId,
+    offlineBy: by(lb, 'OFS1'), offlineApproval: by(lo, 'OFS1'), lines: [{ sku: 'A1', qty: 3 }] };
+  const r1 = m8('commitSale', C, sale);
+  const hdr = h.__sheet('Sales').find(x => x.saleUid === 'OFS1');
+  eq([r1.total, hdr.userId], [28, beeUid], 'offline sale credited to the signed-in cashier');
+  const log = h.__sheet('AuditLog');
+  ok(log.some(l => l.action === 'DISCOUNT' && l.ref === r1.billNo && l.approvedBy === 'O'), 'offline owner approval is accepted');
+  ok(log.some(l => l.action === 'OVERSELL' && l.ref === r1.billNo && /น้ำ 1 ชิ้น/.test(l.detail)), 'overselling is flagged');
+
+  // bad signature: never lose the sale, but credit the session user and flag it
+  const r2 = m8('commitSale', C, { saleUid: 'OFS2', payMethod: 'cash', received: 10, billDiscount: 1, offlineAt: at, shiftId: sh1.shiftId,
+    offlineBy: { userId: beeUid, proof: 'bad' }, offlineApproval: { userId: ownerUid, proof: 'bad' }, lines: [{ sku: 'A1', qty: 1 }] });
+  const h2 = h.__sheet('Sales').find(x => x.saleUid === 'OFS2');
+  eq(h2.userId, cashUid, 'unverified offline user falls back to the session');
+  ok(h.__sheet('AuditLog').some(l => l.action === 'OFFLINE_CHECK' && l.ref === r2.billNo && /ส่วนลด/.test(l.detail) && /ผู้ขาย/.test(l.detail)), 'unverified offline work is flagged');
+  // PIN reset makes old credentials useless
+  m8('resetPin', T, beeUid, '4444');
+  m8('commitSale', C, { saleUid: 'OFS3', payMethod: 'cash', received: 10, offlineAt: at, shiftId: sh1.shiftId, offlineBy: by(lb, 'OFS3'), lines: [{ sku: 'A1', qty: 1 }] });
+  eq(h.__sheet('Sales').find(x => x.saleUid === 'OFS3').userId, cashUid, 'old PIN credentials stop working after a reset');
+  // approve also hands the owner credentials to the counter
+  ok(m8('approve', C, '1111', 'DISCOUNT').offline.userId === ownerUid, 'approval returns owner credentials on a counter');
+  const rep = m8('report', T, { from: '2026-11-05', to: '2026-11-05' });
+  ok(rep.exceptions.some(e => e.action === 'OVERSELL'), 'oversell shows in the report exceptions');
+}
+
 console.log('server tests passed:', pass);

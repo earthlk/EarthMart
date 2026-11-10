@@ -45,6 +45,12 @@ function api_commitSale(token, sale) {
       var off = offlineSale_(sale, s);
       var shift = off.shift || openShiftForDevice_(s.deviceId);
       if (!shift) throw new Error('ยังไม่ได้เปิดกะ');
+      // Who rang it up: whoever signed in offline on the counter (signed with their PIN), else this session.
+      var actor = s, unverified = [];
+      if (off.at && sale.offlineBy) {
+        actor = offlineActor_(s, sale.offlineBy, sale.saleUid) || s;
+        if (actor === s && sale.offlineBy.userId !== s.userId) unverified.push('ผู้ขายตอนออฟไลน์ยืนยันไม่ได้ (บันทึกเป็น ' + s.name + ')');
+      }
 
       var priced = priceLines_(sale.lines);
       var lineDiscount = 0, manual = 0, markdowns = [];
@@ -62,7 +68,19 @@ function api_commitSale(token, sale) {
       var approver = '';
       // Near-expiry markdowns are pre-approved on the expiry page; only manual discounts need the owner.
       manual = round2_(manual + billDiscount);
-      if (manual > 0) approver = consumeApproval_(s, sale.approvalId, 'DISCOUNT');
+      if (manual > 0) {
+        if (!off.at) approver = consumeApproval_(actor, sale.approvalId, 'DISCOUNT');
+        else {
+          // Offline: the owner typed their PIN on the counter. Never lose a sale over it — flag it instead.
+          var ow = sale.offlineApproval ? offlineActor_(s, sale.offlineApproval, sale.saleUid) : null;
+          if (actor.role === 'owner') approver = actor.name;
+          else if (ow && ow.role === 'owner') approver = ow.name;
+          else {
+            try { approver = consumeApproval_(actor, sale.approvalId, 'DISCOUNT'); }
+            catch (e) { approver = ''; unverified.push('ส่วนลด ' + manual + ' บาท ไม่มีการอนุมัติที่ยืนยันได้'); }
+          }
+        }
+      }
 
       var parts = { cash: 0, qr: 0, transfer: 0 };
       if (sale.payMethod === 'split') {
@@ -88,7 +106,7 @@ function api_commitSale(token, sale) {
       var stamp = off.at || now_();
       var header = {
         billNo: billNo, saleUid: sale.saleUid, createdAt: stamp, shiftId: shift.shiftId, deviceId: s.deviceId,
-        userId: s.userId, itemsCount: priced.reduce(function (a, l) { return a + l.qty; }, 0),
+        userId: actor.userId, itemsCount: priced.reduce(function (a, l) { return a + l.qty; }, 0),
         subtotal: subtotal, discount: discount, total: total, payMethod: sale.payMethod,
         received: received, change: change, status: 'PAID',
         cashPaid: parts.cash, qrPaid: parts.qr, transferPaid: parts.transfer, returnedTotal: 0, offline: off.at ? true : ''
@@ -115,14 +133,20 @@ function api_commitSale(token, sale) {
       append_('Sales', header);
       appendMany_('SaleLines', lines);
       fifoFlush_(ctx);
-      addStockMoves_(s, explodeMoves_(lines, -1, 'SALE', billNo, ''));
-      if (manual > 0) log_(s, 'DISCOUNT', billNo, 'ส่วนลด ' + manual + ' บาท', approver);
+      addStockMoves_(actor, explodeMoves_(lines, -1, 'SALE', billNo, ''));
+      if (manual > 0) log_(actor, 'DISCOUNT', billNo, 'ส่วนลด ' + manual + ' บาท' + (off.at ? ' (ขายตอนออฟไลน์)' : ''), approver);
+      if (unverified.length) log_(actor, 'OFFLINE_CHECK', billNo, unverified.join(' · '), '');
+      // Sold more than the system thinks is on the shelf: someone forgot to receive, or the count is off.
+      var over = {};
+      ctx.uses.forEach(function (u) { if (u.refNo === billNo && !u.lotId) over[u.sku] = round2_((over[u.sku] || 0) + u.qty); });
+      var overTxt = Object.keys(over).map(function (k) { return (prodBySku[k] ? prodBySku[k].name : k) + ' ' + over[k] + ' ชิ้น'; });
+      if (overTxt.length) log_(actor, 'OVERSELL', billNo, 'ขายเกินสต็อกในระบบ: ' + overTxt.join(', '), '');
       if (markdowns.length) {
         moveMarkdown_(markdowns, -1);
-        log_(s, 'MARKDOWN_SALE', billNo, markdowns.map(function (m) { return m.qty + ' ชิ้น −' + m.pct + '%'; }).join(', '), '');
+        log_(actor, 'MARKDOWN_SALE', billNo, markdowns.map(function (m) { return m.qty + ' ชิ้น −' + m.pct + '%'; }).join(', '), '');
       }
       priced.filter(function (l) { return l.openPrice; }).forEach(function (l) {
-        log_(s, 'OPEN_PRICE', billNo, l.name + ' ราคา ' + l.unitPrice, '');
+        log_(actor, 'OPEN_PRICE', billNo, l.name + ' ราคา ' + l.unitPrice, '');
       });
       return receipt_(header, lines);
     });
@@ -433,9 +457,7 @@ function api_returnSale(token, ret) {
 function offlineSale_(sale, s) {
   var out = { at: null, shift: null };
   if (!sale.offlineAt) return out;
-  var t = new Date(sale.offlineAt);
-  var nowT = now_().getTime();
-  if (!isNaN(t.getTime()) && t.getTime() <= nowT + 5 * 60000 && t.getTime() >= nowT - 7 * 86400000) out.at = t;
+  out.at = offlineTime_(sale.offlineAt);
   if (sale.shiftId) {
     var sh = readAll_('Shifts').filter(function (x) { return x.shiftId === sale.shiftId && x.deviceId === s.deviceId; })[0];
     if (sh) out.shift = { shiftId: sh.shiftId, openedAt: sh.openedAt, openingCash: num_(sh.openingCash), userId: sh.userId, status: sh.status };

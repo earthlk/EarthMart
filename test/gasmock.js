@@ -92,6 +92,12 @@ function makeContext(opts = {}) {
     console,
     __ss: ss, __fetches: fetches, __cache: cache, __props: props, __backups: backups,
     __advance(ms) { clock += ms; },
+    __sheet(name) {   // rows of a sheet as objects (tests only)
+      const sh = ss.getSheetByName(name);
+      if (!sh || !sh.data.length) return [];
+      const head = sh.data[0];
+      return sh.data.slice(1).map(r => Object.fromEntries(head.map((k, i) => [k, r[i]])));
+    },
     SpreadsheetApp: { getActiveSpreadsheet: () => ss, openById: () => ss,
       create: n => { const b = new Spreadsheet(); b.id = 'BK' + backups.length; b.name = n; backups.push(b); return b; } },
     PropertiesService: { getScriptProperties: () => ({

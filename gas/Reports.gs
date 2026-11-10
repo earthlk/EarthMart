@@ -3,7 +3,8 @@
  */
 
 var EXCEPTION_ACTIONS = ['VOID', 'DISCOUNT', 'OPEN_PRICE', 'CASH_IN', 'CASH_OUT', 'STOCK_ADJUST',
-                         'PRICE_CHANGE', 'APPROVE_FAIL', 'NO_SALE', 'WRITEOFF', 'STOCK_COUNT', 'MARKDOWN', 'EXPIRY_CLOSE', 'STORE_USE', 'RETURN'];
+                         'PRICE_CHANGE', 'APPROVE_FAIL', 'NO_SALE', 'WRITEOFF', 'STOCK_COUNT', 'MARKDOWN', 'EXPIRY_CLOSE', 'STORE_USE', 'RETURN',
+                         'OVERSELL', 'OFFLINE_CHECK'];
 
 /** day: 'yyyy-MM-dd' in the shop time zone. Defaults to today. */
 function api_dailyReport(token, day) {

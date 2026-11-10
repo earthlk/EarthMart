@@ -453,3 +453,7 @@ a{color:var(--brand-text)}
 .table.bulk tr.below td{background:var(--warn-soft)}
 .table.bulk td.was{text-decoration:line-through;color:var(--muted)}
 .bulk-tools select,.bulk-tools input{height:38px}
+
+/* offline: things that need the internet */
+.needs-net{opacity:.45}
+.topbar nav button.needs-net{text-decoration:line-through;text-decoration-thickness:1px}

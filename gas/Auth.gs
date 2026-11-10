@@ -92,7 +92,9 @@ function api_login(userId, pin, deviceId) {
     var sess = { userId: u.userId, name: u.name, role: u.role, deviceId: deviceId || '' };
     cache_().put('sess_' + token, JSON.stringify(sess), SESSION_SECONDS);
     log_(sess, 'LOGIN', '', '', '');
-    return { token: token, user: { userId: u.userId, name: u.name, role: u.role } };
+    var out = { token: token, user: { userId: u.userId, name: u.name, role: u.role } };
+    if (isCounter_(deviceId)) out.offline = offlineCred_(u);   // lets this counter check the PIN while the internet is down
+    return out;
   });
 }
 
@@ -134,8 +136,40 @@ function api_approve(token, pin, action) {
     }
     var id = uid_('A');
     cache_().put('appr_' + id, JSON.stringify({ ownerId: match.userId, ownerName: match.name, action: action }), APPROVAL_SECONDS);
-    return { approvalId: id, ownerName: match.name };
+    var out = { approvalId: id, ownerName: match.name };
+    if (isCounter_(s.deviceId)) out.offline = offlineCred_(match);
+    return out;
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Offline work on a counter                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What a counter keeps so it can check a PIN with no internet: the same salt + hash the server stores.
+ * Work done offline is signed with  sha256(hash + ':' + uid)  and checked here when it is sent.
+ * A PIN reset changes the salt, so old credentials stop working.
+ */
+function offlineCred_(u) {
+  return { userId: u.userId, name: u.name, role: u.role, salt: u.salt, hash: u.pinHash, pinLen: num_(u.pinLen) || String(u.pinLen || '').length };
+}
+
+function sha256Hex_(text) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8)
+    .map(function (b) { var h = (b & 0xff).toString(16); return h.length === 1 ? '0' + h : h; }).join('');
+}
+
+/**
+ * by = { userId, proof } signed for refUid. Returns a session-like actor for that user, or null when it
+ * does not check out (unknown or disabled user, PIN changed since).
+ */
+function offlineActor_(sess, by, refUid) {
+  if (!by || !by.userId || !by.proof) return null;
+  var u = readAll_('Users').filter(function (x) { return x.userId === by.userId; })[0];
+  if (!u || !bool_(u.active)) return null;
+  if (sha256Hex_(u.pinHash + ':' + refUid) !== String(by.proof)) return null;
+  return { userId: u.userId, name: u.name, role: u.role, deviceId: sess.deviceId };
 }
 
 /**

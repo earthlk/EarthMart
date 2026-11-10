@@ -98,21 +98,62 @@ function conn() {
   return saved && saved.url ? saved : { url: preset.apiUrl || '', key: preset.apiKey || '' };
 }
 
-/* ---------------- Offline outbox: sales rung up while the internet is down ---------------- */
+/* ---------------- Offline outbox: work done on the counter while the internet is down ---------------- */
+/*
+ * Items: { kind: 'sale' | 'shift' | 'cash', id, at, error, pending, ... } sent in order when the server is back.
+ * Each is signed with the PIN credentials of whoever did it, so it can be sent later by any session.
+ */
 function setOffline(v) {
   if (S.offline === v) return;
   S.offline = v;
   drawNetPill();
-  if (!v && outbox().length) setTimeout(function () { syncOutbox(); }, 500);
+  markOfflineNav();
+  if (!v) {
+    if (S.user && !S.token) reauth();
+    else if (outbox().length) setTimeout(function () { syncOutbox(); }, 500);
+  }
 }
-function outbox() { try { return JSON.parse(store('em_outbox') || '[]') || []; } catch (e) { return []; } }
+function outbox() {
+  try {
+    return (JSON.parse(store('em_outbox') || '[]') || []).map(function (x) { if (!x.kind) { x.kind = 'sale'; x.id = x.saleUid; } return x; });
+  } catch (e) { return []; }
+}
 function saveOutbox(list) { store('em_outbox', list.length ? JSON.stringify(list) : null); drawNetPill(); }
+function outboxPut(item) { var l = outbox(); l.push(item); saveOutbox(l); }
+function outboxPatch(id, fn) { var l = outbox(); l.forEach(function (x) { if (x.id === id) fn(x); }); saveOutbox(l); }
+
+/** Sign an outbox item for the user doing it (and the owner who approved a discount). */
+function signItem(id, uid, ownerUid) {
+  return Promise.all([proofFor(uid, id), ownerUid ? proofFor(ownerUid, id) : null]).then(function (r) {
+    outboxPatch(id, function (x) {
+      x.pending = false;
+      var by = r[0], ok = r[1];
+      if (x.kind === 'sale') { if (by) x.sale.offlineBy = by; if (ok) x.sale.offlineApproval = ok; }
+      else if (by) x.opt.offlineBy = by;
+    });
+  }, function () { outboxPatch(id, function (x) { x.pending = false; }); });
+}
 
 /** Keep the sale on this device; it is sent (idempotent by saleUid) as soon as the server can be reached. */
-function queueSale(sale, rc) {
-  var list = outbox();
-  list.push({ saleUid: sale.saleUid, sale: sale, rc: rc, at: sale.offlineAt, error: '' });
-  saveOutbox(list);
+function queueSale(sale, rc, ownerUid) {
+  outboxPut({ kind: 'sale', id: sale.saleUid, saleUid: sale.saleUid, sale: sale, rc: rc, at: sale.offlineAt, error: '', pending: true });
+  signItem(sale.saleUid, S.user.userId, ownerUid);
+}
+
+function nextOffNo() {
+  var n = Number(store('em_offno') || 0) + 1;
+  store('em_offno', String(n));
+  return 'OFF-' + String(n).padStart(4, '0');
+}
+
+/* Shift opened while offline: kept here until the server gives it a real id. */
+function localShift() { try { return JSON.parse(store('em_offshift') || 'null'); } catch (e) { return null; } }
+function shiftMap() { try { return JSON.parse(store('em_shiftmap') || '{}') || {}; } catch (e) { return {}; } }
+function realShiftId(id) {
+  if (!id || id.indexOf('OFS-') !== 0) return id;
+  var real = shiftMap()[id];
+  if (!real) throw new Error('กะที่เปิดตอนออฟไลน์ยังส่งไม่สำเร็จ');
+  return real;
 }
 
 var syncing = false;
@@ -123,63 +164,249 @@ function syncOutbox(manual) {
   if (!c.url) return Promise.resolve();
   syncing = true; drawNetPill();
   var sent = 0, failed = 0;
-  var todo = list.filter(function (x) { return manual || !x.error; }).map(function (x) { return x.saleUid; });
+  var todo = list.filter(function (x) { return !x.pending && (manual || !x.error); }).map(function (x) { return x.id; });
+  var sendOne = function (item) {
+    if (item.kind === 'shift') {
+      return rawCall(c, 'openShift', [S.token, item.cash, '', item.opt]).then(function (sh) {
+        var map = shiftMap(); map[item.localId] = sh.shiftId; store('em_shiftmap', JSON.stringify(map));
+        if (S.shift && S.shift.shiftId === item.localId) S.shift = sh;
+        store('em_offshift', null);
+        saveCache();
+      });
+    }
+    if (item.kind === 'cash') {
+      var opt = Object.assign({}, item.opt, { shiftId: realShiftId(item.opt.shiftId) });
+      return rawCall(c, 'cashMove', [S.token, item.type, item.amount, item.reason, opt]);
+    }
+    var sale = Object.assign({}, item.sale, { shiftId: realShiftId(item.sale.shiftId) });
+    return rawCall(c, 'commitSale', [S.token, sale]);
+  };
   var step = function (i) {
     if (i >= todo.length) return Promise.resolve();
-    var item = outbox().filter(function (x) { return x.saleUid === todo[i]; })[0];
+    var item = outbox().filter(function (x) { return x.id === todo[i]; })[0];
     if (!item) return step(i + 1);
-    return rawCall(c, 'commitSale', [S.token, item.sale]).then(function () {
-      saveOutbox(outbox().filter(function (x) { return x.saleUid !== item.saleUid; }));
+    return Promise.resolve().then(function () { return sendOne(item); }).then(function () {
+      saveOutbox(outbox().filter(function (x) { return x.id !== item.id; }));
       sent++;
       return step(i + 1);
     }, function (e) {
       if (e.offline || /เข้าสู่ระบบ/.test(e.message)) throw e;
-      var l2 = outbox();
-      l2.forEach(function (x) { if (x.saleUid === item.saleUid) x.error = e.message; });
-      saveOutbox(l2);
+      outboxPatch(item.id, function (x) { x.error = e.message; });
       failed++;
       return step(i + 1);
     });
   };
   return step(0).catch(function () {}).then(function () {
     syncing = false; drawNetPill();
-    if (sent) { toast('ส่งบิลที่ค้างตอนออฟไลน์แล้ว ' + sent + ' บิล'); if (S.view === 'bills' || S.view === 'shift') render(); }
-    if (failed) toast('มีบิลค้างส่งไม่ผ่าน ' + failed + ' บิล — แตะป้ายด้านบนเพื่อดู', true);
+    if (sent) { toast('ส่งรายการที่ทำตอนออฟไลน์แล้ว ' + sent + ' รายการ'); if (S.view === 'bills' || S.view === 'shift') render(); }
+    if (failed) toast('มีรายการค้างส่งไม่ผ่าน ' + failed + ' รายการ — แตะป้ายด้านบนเพื่อดู', true);
+    if (sent && S.token && !outbox().length) reloadCatalog().then(function () { if (S.view === 'stock') render(); }).catch(function () {});
   });
 }
-setInterval(function () { if (outbox().length && navigator.onLine !== false) syncOutbox(); }, 20000);
-window.addEventListener('online', function () { syncOutbox(); });
+setInterval(function () { if (outbox().length && navigator.onLine !== false && !S.offline) syncOutbox(); }, 20000);
+// While offline, knock on the server now and then; the first answer brings everything back online.
+setInterval(function () { if (S.offline) pingServer(); }, 15000);
+window.addEventListener('online', function () { if (S.offline) pingServer(); else syncOutbox(); });
+function pingServer() {
+  var c = conn();
+  if (!c.url) return;
+  rawCall(c, 'status', []).then(function (st) { S.status = st; }).catch(function () {});
+}
 
+var STALE_MS = 60 * 60 * 1000;
 function drawNetPill() {
   var el = $('#netpill');
   if (!el) return;
   var list = outbox(), n = list.length, bad = list.filter(function (x) { return x.error; }).length;
+  var stale = list.some(function (x) { return Date.now() - new Date(x.at).getTime() > STALE_MS; });
   el.classList.toggle('hidden', !n && !S.offline);
-  el.classList.toggle('bad', !!(S.offline || bad));
-  el.innerHTML = '<span class="dot"></span>' + (S.offline ? 'ออฟไลน์' : syncing ? 'กำลังส่ง…' : bad ? 'ส่งไม่ผ่าน' : 'รอส่ง') + (n ? ' · ' + n + ' บิล' : '');
+  el.classList.toggle('bad', !!(S.offline || bad || stale));
+  var what = list.every(function (x) { return x.kind === 'sale'; }) ? ' บิล' : ' รายการ';
+  el.innerHTML = '<span class="dot"></span>' + (S.offline ? 'ออฟไลน์' : syncing ? 'กำลังส่ง…' : bad ? 'ส่งไม่ผ่าน' : stale ? 'ค้างส่ง' : 'รอส่ง') + (n ? ' · ' + n + what : '');
+  el.title = stale ? 'มีรายการค้างส่งนานเกิน 1 ชั่วโมง — ตรวจอินเทอร์เน็ต' : 'รายการที่ทำตอนออฟไลน์';
+}
+
+function outboxRow(x) {
+  if (x.kind === 'shift') return '<td class="num">' + dateTime(x.at) + '</td><td>เปิดกะ</td><td class="r num">' + money(x.cash) + '</td><td>เงินทอนตั้งต้น</td>';
+  if (x.kind === 'cash') return '<td class="num">' + dateTime(x.at) + '</td><td>' + (x.type === 'IN' ? 'เงินเข้า' : 'เงินออก') + '</td><td class="r num">' + money(x.amount) + '</td><td>' + esc(x.reason) + '</td>';
+  return '<td class="num">' + dateTime(x.at) + '</td><td>' + esc(x.rc.billNo || 'บิล') + '</td><td class="r num">' + money(x.rc.total) + '</td><td>' + payText(x.rc) + '</td>';
 }
 
 function outboxModal() {
   var list = outbox();
-  var m = openModal('<header><h1>บิลที่ขายตอนออฟไลน์</h1><span class="muted">' + list.length + ' บิล · เก็บไว้ในเครื่องนี้</span></header><div class="body" style="gap:10px">' +
-    (S.offline ? '<div class="banner">ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ขายต่อได้ตามปกติ บิลจะส่งเองเมื่อเน็ตกลับมา</div>' : '') +
-    (list.length ? '<table class="table"><thead><tr><th>เวลา</th><th class="r">ยอด</th><th>ชำระ</th><th>สถานะ</th><th></th></tr></thead><tbody>' + list.map(function (x) {
-      return '<tr><td class="num">' + dateTime(x.at) + '</td><td class="r num">' + money(x.rc.total) + '</td><td>' + payText(x.rc) + '</td><td>' +
+  var m = openModal('<header><h1>ทำตอนออฟไลน์ · รอส่ง</h1><span class="muted">' + list.length + ' รายการ · เก็บไว้ในเครื่องนี้</span></header><div class="body" style="gap:10px">' +
+    (S.offline ? '<div class="banner">ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ขายต่อได้ตามปกติ จะส่งเองเมื่อเน็ตกลับมา</div>' : '') +
+    (!S.offline && S.user && !S.token ? '<div class="banner">เน็ตกลับมาแล้ว — เข้าสู่ระบบอีกครั้งเพื่อส่งรายการ</div>' : '') +
+    (list.length ? '<table class="table"><thead><tr><th>เวลา</th><th>รายการ</th><th class="r">ยอด</th><th>รายละเอียด</th><th>สถานะ</th><th></th></tr></thead><tbody>' + list.map(function (x) {
+      return '<tr>' + outboxRow(x) + '<td>' +
         (x.error ? '<span class="warn-text">' + esc(x.error) + '</span>' : '<span class="tag amber">รอส่ง</span>') + '</td><td class="r">' +
-        (x.error && S.user.role === 'owner' ? '<button class="btn sm" data-del="' + esc(x.saleUid) + '">ลบออก</button>' : '') + '</td></tr>';
-    }).join('') + '</tbody></table>' : '<div class="empty">ไม่มีบิลค้างส่ง</div>') +
-    '<div class="muted" style="font-size:13px">ส่งอัตโนมัติทุก 20 วินาทีเมื่อเชื่อมต่อได้ · บิลที่ส่งไม่ผ่าน (เช่น โควตาราคาลดหมด) ให้เจ้าของตรวจแล้วลบออก แล้วขายใหม่ถ้าจำเป็น</div></div>' +
-    '<footer><button class="btn" data-x="close">ปิด</button><button class="btn primary" data-x="sync"' + (list.length ? '' : ' disabled') + '>ส่งตอนนี้</button></footer>');
+        (x.error && S.user.role === 'owner' ? '<button class="btn sm" data-del="' + esc(x.id) + '">ลบออก</button>' : '') + '</td></tr>';
+    }).join('') + '</tbody></table>' : '<div class="empty">ไม่มีรายการค้างส่ง</div>') +
+    '<div class="muted" style="font-size:13px">ส่งอัตโนมัติเมื่อเชื่อมต่อได้ · รายการที่ส่งไม่ผ่าน (เช่น สินค้าถูกลบ) ให้เจ้าของตรวจแล้วลบออก · อย่าล้างข้อมูลเบราว์เซอร์ระหว่างมีรายการค้าง</div></div>' +
+    '<footer><button class="btn" data-x="close">ปิด</button>' +
+    (!S.offline && S.user && !S.token ? '<button class="btn primary" data-x="relog">เข้าสู่ระบบ</button>' :
+      '<button class="btn primary" data-x="sync"' + (list.length ? '' : ' disabled') + '>ส่งตอนนี้</button>') + '</footer>');
   $('[data-x=close]', m).onclick = function () { closeModal(); };
-  $('[data-x=sync]', m).onclick = function () { closeModal(); syncOutbox(true).then(function () { if (outbox().length) outboxModal(); }); };
+  if ($('[data-x=relog]', m)) $('[data-x=relog]', m).onclick = function () { closeModal(); forceLogin(); };
+  if ($('[data-x=sync]', m)) $('[data-x=sync]', m).onclick = function () {
+    closeModal();
+    (S.offline ? rawCall(conn(), 'status', []).catch(function () {}) : Promise.resolve()).then(function () {
+      if (S.offline) return toast('ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — จะลองส่งเองเรื่อย ๆ', true);
+      if (!S.token) return;   // reauth() takes over
+      return syncOutbox(true).then(function () { if (outbox().length) outboxModal(); });
+    });
+  };
   m.addEventListener('click', function (e) {
     var b = e.target.closest('[data-del]');
     if (!b) return;
     closeModal();
-    confirm2('ลบบิลค้างส่ง', 'บิลนี้จะไม่ถูกบันทึกเข้าระบบ (เงินที่รับไว้ต้องปรับเองตอนปิดกะ)', 'ลบออก', true).then(function (ok) {
-      if (ok) saveOutbox(outbox().filter(function (x) { return x.saleUid !== b.getAttribute('data-del'); }));
+    confirm2('ลบรายการค้างส่ง', 'รายการนี้จะไม่ถูกบันทึกเข้าระบบ (เงินที่เกี่ยวข้องต้องปรับเองตอนปิดกะ)', 'ลบออก', true).then(function (ok) {
+      if (ok) saveOutbox(outbox().filter(function (x) { return x.id !== b.getAttribute('data-del'); }));
       outboxModal();
     });
+  });
+}
+
+/* ---------------- Full offline: shop data + PIN check kept on the counter ---------------- */
+function sha256Hex(text) {
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (b) {
+    return Array.prototype.map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+  });
+}
+function offCreds() { try { return JSON.parse(store('em_pins') || '{}') || {}; } catch (e) { return {}; } }
+function saveCred(c) { if (!c || !c.userId) return; var all = offCreds(); all[c.userId] = c; store('em_pins', JSON.stringify(all)); }
+function dropCred(uid) { var all = offCreds(); delete all[uid]; store('em_pins', JSON.stringify(all)); }
+/** Users removed or disabled on the server lose their offline sign-in here too. */
+function pruneCreds(st) {
+  if (!st || !st.users) return;
+  var all = offCreds(), keep = {};
+  st.users.forEach(function (u) { if (all[u.userId]) keep[u.userId] = all[u.userId]; });
+  store('em_pins', JSON.stringify(keep));
+}
+function checkPinLocal(uid, pin) {
+  var c = offCreds()[uid];
+  if (!c || !window.crypto || !crypto.subtle) return Promise.resolve(false);
+  return sha256Hex(c.salt + ':' + pin).then(function (h) { return h === c.hash ? c : false; });
+}
+function proofFor(uid, ref) {
+  var c = offCreds()[uid];
+  if (!c || !window.crypto || !crypto.subtle) return Promise.resolve(null);
+  return sha256Hex(c.hash + ':' + ref).then(function (p) { return { userId: uid, proof: p }; });
+}
+
+if (window.EM_TEST) window.__S = S;   // tests only
+
+function readCache() { try { return JSON.parse(store('em_cache') || 'null'); } catch (e) { return null; } }
+var cacheTimer = null;
+/** Last known shop data, so the counter can start and sell with no internet. Debounced unless now. */
+function saveCache(now) {
+  clearTimeout(cacheTimer);
+  if (!now) { cacheTimer = setTimeout(function () { saveCache(true); }, 300); return; }
+  if (!S.products || !S.status || !S.user) return;
+  try {
+    localStorage.setItem('em_cache', JSON.stringify({ at: new Date().toISOString(), status: S.status, boot: {
+      isCounter: S.isCounter, settings: S.settings, shift: S.shift && !S.shift.offline ? S.shift : null, markdowns: S.markdowns, expiryTodo: S.expiryTodo,
+      products: S.products, barcodes: S.barcodes, recipes: S.recipeRows || [] } }));
+  } catch (e) { /* storage full: selling still works from memory */ }
+}
+window.addEventListener('pagehide', function () { if (cacheTimer) saveCache(true); });
+
+/** Start the counter from the saved copy. False when this device has never loaded the shop online. */
+function bootOffline(user) {
+  var c = readCache();
+  if (!c || !c.boot || !c.boot.products) return false;
+  S.user = user; S.isCounter = !!c.boot.isCounter; S.settings = c.boot.settings || S.settings;
+  S.shift = localShift() || c.boot.shift; S.markdowns = c.boot.markdowns || []; S.expiryTodo = c.boot.expiryTodo || 0;
+  sstore('em_user', JSON.stringify(user));
+  setCatalog(c.boot.products, c.boot.barcodes || [], c.boot.recipes || []);
+  applyTheme();
+  S.offline = true;
+  newCart();
+  cdPublish('idle');
+  S.lastActivity = Date.now();
+  go(S.isCounter && !S.shift ? 'shift' : 'sale');
+  toast('ออฟไลน์ — ใช้ข้อมูลร้านที่เก็บไว้ในเครื่อง (' + dateTime(c.at) + ')');
+  return true;
+}
+
+var offTries = { n: 0, until: 0 };
+/** Sign in with no internet: only people who have signed in on this counter before. */
+function offlineLogin(uid, pin) {
+  if (Date.now() < offTries.until) return Promise.reject(new Error('ใส่ PIN ผิดหลายครั้ง รอ 5 นาทีแล้วลองใหม่'));
+  if (!offCreds()[uid]) return Promise.reject(new Error('ออฟไลน์อยู่ — คนนี้ยังไม่เคยเข้าเครื่องนี้ ต้องต่อเน็ตก่อน'));
+  return checkPinLocal(uid, pin).then(function (c) {
+    if (!c) {
+      if (++offTries.n >= 5) { offTries = { n: 0, until: Date.now() + 5 * 60000 }; }
+      throw new Error('PIN ไม่ถูกต้อง');
+    }
+    offTries.n = 0;
+    S.offlinePin = { uid: uid, pin: pin };   // memory only: used to get a real session once the internet is back
+    S.token = null; sstore('em_token', null); sstore('em_offuser', uid);
+    if (!bootOffline({ userId: c.userId, name: c.name, role: c.role })) throw new Error('เครื่องนี้ยังไม่มีข้อมูลร้าน — ต้องต่อเน็ตครั้งแรกก่อน');
+  });
+}
+
+var reauthing = false;
+/** Back online after an offline sign-in: get a real session, then send what was queued. */
+function reauth() {
+  if (reauthing || S.token) return;
+  var c = conn();
+  if (S.offlinePin && S.user && S.offlinePin.uid === S.user.userId) {
+    reauthing = true;
+    rawCall(c, 'login', [S.offlinePin.uid, S.offlinePin.pin, S.deviceId]).then(function (r) {
+      S.token = r.token; S.user = r.user; sstore('em_token', r.token); sstore('em_user', JSON.stringify(r.user)); sstore('em_offuser', null);
+      if (r.offline) saveCred(r.offline);
+      S.offlinePin = null;
+      toast('เน็ตกลับมาแล้ว');
+      return syncOutbox().then(function () { return reloadCatalog(); }).then(function () { render(); });
+    }, function (e) {
+      if (!e.offline) { S.offlinePin = null; forceLogin('เน็ตกลับมาแล้ว — ' + e.message); }
+    }).catch(function () {}).then(function () { reauthing = false; });
+    return;
+  }
+  // Page was reloaded while offline, so the PIN is gone: ask for it when the cashier is free.
+  if (!(S.cart && S.cart.lines.length) && !modalStack.length) forceLogin('เน็ตกลับมาแล้ว — ใส่ PIN อีกครั้งเพื่อส่งรายการที่ค้าง');
+  else { drawNetPill(); toast('เน็ตกลับมาแล้ว — จบบิลนี้แล้วเข้าสู่ระบบใหม่เพื่อส่งรายการที่ค้าง'); }
+}
+
+/** Views that need the server (fresh data or changes that must be checked right away). */
+var ONLINE_VIEWS = ['bills', 'products', 'stock', 'expiry', 'receive', 'reports', 'settings'];
+function markOfflineNav() {
+  $all('.topbar nav [data-v]').forEach(function (b) { b.classList.toggle('needs-net', !!S.offline && ONLINE_VIEWS.indexOf(b.getAttribute('data-v')) >= 0); });
+}
+
+/** Take what was just sold off the stock shown on this device (the server does the real count). */
+function localDeduct(lines) {
+  lines.forEach(function (l) {
+    var pieces = l.qty * (l.multiplier || 1);
+    var comps = S.recipes[l.sku];
+    (comps && comps.length ? comps.map(function (c) { return { sku: c.sku, n: pieces * c.qty }; }) : [{ sku: l.sku, n: pieces }]).forEach(function (x) {
+      var p = S.idx.bySku[x.sku];
+      if (p) p.onHand = round2(Number(p.onHand || 0) - x.n);
+    });
+  });
+  saveCache();
+}
+
+/** Warn (never block) when the bill takes more than the system thinks is on the shelf. */
+function stockWarn(p) {
+  if (!S.cart || !p) return;
+  var need = {};
+  S.cart.lines.forEach(function (l) {
+    var pieces = l.qty * (l.multiplier || 1), comps = S.recipes[l.sku];
+    (comps && comps.length ? comps.map(function (c) { return [c.sku, pieces * c.qty]; }) : [[l.sku, pieces]]).forEach(function (x) { need[x[0]] = (need[x[0]] || 0) + x[1]; });
+  });
+  var comps = S.recipes[p.sku];
+  var skus = comps && comps.length ? comps.map(function (c) { return c.sku; }) : [p.sku];
+  S.cart.warned = S.cart.warned || {};
+  skus.forEach(function (sku) {
+    var x = S.idx.bySku[sku];
+    if (!x || S.cart.warned[sku]) return;
+    var left = Number(x.onHand || 0);
+    if (need[sku] > left) {
+      S.cart.warned[sku] = true;
+      toast('สต็อกในระบบของ ' + x.name + ' ' + (left > 0 ? 'เหลือแค่ ' + left : 'หมดแล้ว') + ' — ขายต่อได้ แจ้งเจ้าของตรวจสต็อก', true);
+    }
   });
 }
 
@@ -306,6 +533,7 @@ function confirm2(title, text, okLabel, warn) {
  */
 function approval(action, title) {
   if (S.user && S.user.role === 'owner') return Promise.resolve('');
+  if ((S.offline || !S.token) && action !== 'DISCOUNT') { toast('ต้องต่อเน็ตก่อน', true); return Promise.resolve(null); }
   return new Promise(function (resolve) {
     var done = false;
     var m = openModal('<header><h1>' + esc(title || 'ต้องให้เจ้าของอนุมัติ') + '</h1></header>' +
@@ -313,8 +541,22 @@ function approval(action, title) {
       '<input id="apin" type="password" inputmode="numeric" autocomplete="off" maxlength="6" autofocus class="big-input" style="text-align:center"></div></form>' +
       '<footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="yes">อนุมัติ</button></footer>',
       { onClose: function () { if (!done) resolve(null); } });
+    var offlineOk = function (pin) {
+      // Offline: check against owners who have signed in (or approved) on this counter before.
+      var owners = Object.keys(offCreds()).map(function (k) { return offCreds()[k]; }).filter(function (c) { return c.role === 'owner'; });
+      if (!owners.length) return Promise.reject(new Error('ออฟไลน์อยู่ — เจ้าของยังไม่เคยเข้าเครื่องนี้ อนุมัติไม่ได้'));
+      return Promise.all(owners.map(function (o) { return checkPinLocal(o.userId, pin); })).then(function (r) {
+        var o = r.filter(Boolean)[0];
+        if (!o) throw new Error('PIN เจ้าของไม่ถูกต้อง');
+        return { approvalId: 'OFF:' + o.userId, ownerName: o.name };
+      });
+    };
     var go = function () {
-      api('approve', S.token, $('#apin', m).value, action).then(function (r) {
+      var pin = $('#apin', m).value;
+      (S.offline || !S.token ? offlineOk(pin) : api('approve', S.token, pin, action).then(function (r) { if (r.offline) saveCred(r.offline); return r; }, function (e) {
+        if (e.offline && action === 'DISCOUNT') return offlineOk(pin);
+        throw e;
+      })).then(function (r) {
         done = true; closeModal(); toast('อนุมัติโดย ' + r.ownerName); resolve(r.approvalId);
       }).catch(function (e) { fail(e); $('#apin', m).value = ''; $('#apin', m).focus(); });
     };
@@ -344,9 +586,14 @@ function start() {
   if (window.CustomerDisplay && CustomerDisplay.isDisplay) return CustomerDisplay.startDisplay();
   S.deviceId = deviceId();
   readConnectLink();
+  if ('serviceWorker' in navigator && window.isSecureContext && !window.EM_NO_SW) {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  }
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
   api('status').then(function (st) {
     S.status = st;
     S.settings = st.settings || {};
+    pruneCreds(st);
     applyTheme();
     var saved = sstore('em_token');
     if (saved) {
@@ -356,6 +603,19 @@ function start() {
     showLogin();
   }).catch(function (e) {
     if (e.code === 'NO_CONN' || e.code === 'BAD_KEY') return showConnect(e.code === 'BAD_KEY' ? e.message : '');
+    var c = e.offline ? readCache() : null;
+    if (c && c.status) {
+      // No internet: start from what this counter saved last time.
+      S.status = c.status; S.settings = c.status.settings || {}; S.offline = true;
+      applyTheme();
+      var user = null;
+      try { user = JSON.parse(sstore('em_user') || 'null'); } catch (x) { user = null; }
+      if (user && (sstore('em_token') || sstore('em_offuser') === user.userId)) {
+        S.token = sstore('em_token') || null;
+        if (bootOffline(user)) return;
+      }
+      return showLogin();
+    }
     $('#app').innerHTML = '<div class="center"><div class="card pad col" style="max-width:520px;gap:10px"><h2>ยังใช้งานไม่ได้</h2><p>' + esc(e.message) +
       '</p><div class="row"><button class="btn primary" data-act="reload">ลองใหม่</button><button class="btn" data-act="connect">ตั้งค่าการเชื่อมต่อ</button></div></div></div>';
   });
@@ -415,7 +675,7 @@ function showLogin(msg) {
 }
 
 function forceLogin(msg) {
-  S.token = null; S.user = null; sstore('em_token', null);
+  S.token = null; S.user = null; S.offlinePin = null; sstore('em_token', null); sstore('em_user', null); sstore('em_offuser', null);
   closeAllModals();
   showLogin(msg);
 }
@@ -426,8 +686,11 @@ function renderLogin() {
     return '<div class="center"><div class="card pad" style="max-width:560px"><h2>ยังไม่มีบัญชีเจ้าของร้าน</h2>' +
       '<p>เปิด Apps Script แล้วรันฟังก์ชัน <b>setup</b> และ <b>createOwner("ชื่อ", "PIN")</b> ตามคู่มือ จากนั้นรีเฟรชหน้านี้</p></div></div>';
   }
+  var creds = S.offline ? offCreds() : null;
   var users = st.users.map(function (u) {
-    return '<button type="button" data-act="pickUser" data-id="' + esc(u.userId) + '" class="' + (S.loginUser === u.userId ? 'on' : '') + '">' +
+    var cant = creds && !creds[u.userId];
+    return '<button type="button" data-act="pickUser" data-id="' + esc(u.userId) + '" class="' + (S.loginUser === u.userId ? 'on' : '') + (cant ? ' needs-net' : '') + '"' +
+      (cant ? ' title="ยังไม่เคยเข้าเครื่องนี้ — ต้องต่อเน็ต"' : '') + '>' +
       '<span class="avatar">' + esc(u.name.charAt(0)) + '</span><span class="col" style="gap:0"><b>' + esc(u.name) + '</b>' +
       '<span class="muted" style="font-size:13px">' + (u.role === 'owner' ? 'เจ้าของ' : 'แคชเชียร์') + '</span></span></button>';
   }).join('');
@@ -442,6 +705,7 @@ function renderLogin() {
   }).join('');
   return '<header class="topbar"><span class="brand">' + esc(S.settings.shopName || 'EarthMart') + '</span><span class="grow"></span>' +
     '<span class="meta">' + (S.isCounter ? 'เครื่องหน้าร้าน' : 'เครื่องนี้ยังไม่ได้ลงทะเบียน') + '</span></header>' +
+    (S.offline ? '<div class="banner warn">ออฟไลน์ — เข้าได้เฉพาะคนที่เคยเข้าเครื่องนี้แล้ว · ขายได้ตามปกติ รายการจะส่งเองเมื่อเน็ตกลับมา</div>' : '') +
     '<div class="center"><div class="card login"><div class="users"><h2 style="margin:0 0 6px">เลือกผู้ใช้</h2>' + users + '</div>' +
     '<div class="pin"><div class="muted">' + (who ? 'ใส่ PIN ของ ' + esc(who.name) : 'เลือกผู้ใช้ก่อน') + '</div>' +
     '<div class="dots' + (S.loginBusy ? ' busy' : '') + '">' + dots + '</div><div class="pinpad">' + keys + '</div>' +
@@ -473,14 +737,24 @@ function doLogin() {
   if (S.pin.length < 4 || S.loginBusy) return;
   var pin = S.pin, uid = S.loginUser;
   S.loginBusy = true; render();
+  var failed = function (e) { S.loginBusy = false; S.pin = ''; render(); shakeDots(); fail(e); };
+  var offline = function () { return offlineLogin(uid, pin).then(function () { S.loginBusy = false; S.pin = ''; }, failed); };
+  if (S.offline) return offline();
   api('login', uid, pin, S.deviceId).then(function (r) {
     S.loginBusy = false;
     S.token = r.token; S.user = r.user;
-    sstore('em_token', r.token);
+    sstore('em_token', r.token); sstore('em_user', JSON.stringify(r.user)); sstore('em_offuser', null);
+    if (r.offline) saveCred(r.offline);
+    S.offlinePin = null;
     var u = (S.status.users || []).filter(function (x) { return x.userId === uid; })[0];
     if (u) u.pinLen = pin.length;
     return boot();
-  }).catch(function (e) { S.loginBusy = false; S.pin = ''; render(); shakeDots(); fail(e); });
+  }).catch(function (e) {
+    if (e.offline) return offline();
+    // PIN changed on the server: the copy on this counter is out of date.
+    if (/PIN ไม่ถูกต้อง/.test(e.message)) checkPinLocal(uid, pin).then(function (c) { if (c) dropCred(uid); });
+    failed(e);
+  });
 }
 
 function shakeDots() {
@@ -491,10 +765,12 @@ function shakeDots() {
 
 function boot() {
   return api('bootstrap', S.token).then(function (d) {
-    S.user = d.user; S.isCounter = d.isCounter; S.settings = d.settings; S.shift = d.shift;
+    S.user = d.user; S.isCounter = d.isCounter; S.settings = d.settings; S.shift = d.shift || localShift();
+    sstore('em_user', JSON.stringify(d.user));
     S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0;
     if (outbox().length) setTimeout(function () { syncOutbox(); }, 1500);
     setCatalog(d.products, d.barcodes, d.recipes);
+    saveCache(true);
     applyTheme();
     newCart();
     cdPublish('idle');
@@ -516,6 +792,7 @@ function logout() {
 
 function setCatalog(products, barcodes, recipes) {
   S.products = products;
+  S.recipeRows = recipes || [];
   S.recipes = {};
   (recipes || []).forEach(function (r) { (S.recipes[r.sku] = S.recipes[r.sku] || []).push({ sku: r.componentSku, qty: r.qty }); });
   S.barcodes = barcodes;
@@ -526,7 +803,11 @@ function setCatalog(products, barcodes, recipes) {
 }
 
 function reloadCatalog() {
-  return api('bootstrap', S.token).then(function (d) { setCatalog(d.products, d.barcodes, d.recipes); S.shift = d.shift; S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0; });
+  return api('bootstrap', S.token).then(function (d) {
+    setCatalog(d.products, d.barcodes, d.recipes); S.shift = d.shift || localShift(); S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0;
+    S.isCounter = d.isCounter; S.settings = d.settings || S.settings;
+    saveCache(true);
+  });
 }
 
 function categories() {
@@ -546,6 +827,7 @@ var NAV = [
 
 function go(view) {
   if (view === 'sale' && S.isCounter && !S.shift) view = 'shift';
+  if ((S.offline || !S.token) && ONLINE_VIEWS.indexOf(view) >= 0) return toast('หน้านี้ต้องต่อเน็ต — ตอนออฟไลน์ใช้ได้เฉพาะ ขาย และ กะ', true);
   S.view = view;
   render();
   if (view === 'bills') loadBills();
@@ -597,6 +879,7 @@ function render() {
   }
   $('#app').innerHTML = html;
   drawNetPill();
+  markOfflineNav();
   if (S.view === 'sale') focusScan();
 }
 
@@ -632,6 +915,7 @@ function addItem(p, b, qty) {
     }
     S.suggest = [];
     renderCartOnly();
+    stockWarn(p);
   };
   if (p.openPrice) {
     prompt2('ราคาเปิด: ' + p.name, 'ราคาต่อหน่วย (บาท)', '', { type: 'number', inputmode: 'decimal', step: '0.25', ok: 'ใส่ในบิล' })
@@ -1203,8 +1487,36 @@ function openPay(initial) {
           markdownLotId: l.md ? l.md.lotId : undefined, markdownQty: l.md ? l.md.qty : undefined };
       })
     };
+    var offApproval = String(S.cart.approvalId || '').indexOf('OFF:') === 0 ? S.cart.approvalId.slice(4) : '';
+    if (offApproval) sale.approvalId = '';
+    var soldLines = S.cart.lines.slice();
+    var queueOffline = function () {
+      // No internet (or signed in offline): keep the bill on this device and carry on; it is sent when the connection is back.
+      sale.offlineAt = new Date().toISOString();
+      sale.shiftId = S.shift.shiftId;
+      var t2 = cartTotals();
+      var pp = { cash: 0, qr: 0, transfer: 0 };
+      if (sale.payMethod === 'split') (sale.payments || []).forEach(function (x) { pp[x.method] += x.amount; }); else pp[sale.payMethod] = t2.total;
+      var cashPart = pp.cash;
+      var rc = { billNo: nextOffNo(), offline: true, createdAt: sale.offlineAt, payMethod: sale.payMethod, subtotal: t2.subtotal, discount: round2(t2.subtotal - t2.total),
+        total: t2.total, payments: pp, received: sale.payMethod === 'split' ? round2(sale.received + pp.qr + pp.transfer) : sale.received,
+        change: cashPart ? round2(sale.received - cashPart) : 0, status: 'PAID', cashier: S.user.name,
+        lines: S.cart.lines.map(function (l) { return { name: l.name, unitName: l.unitName, qty: l.qty, unitPrice: l.unitPrice, lineDiscount: ldTotal(l), lineTotal: round2(l.qty * l.unitPrice - ldTotal(l)) }; }) };
+      queueSale(sale, rc, offApproval);
+      localDeduct(soldLines);
+      paid = true;
+      cdPublish('done', { method: sale.payMethod === 'split' ? (cashPart > 0 ? 'cash' : 'qr') : sale.payMethod, total: rc.total, received: cashPart ? sale.received : rc.total, change: rc.change });
+      closeModal();
+      var print2 = $('#autoprint', m).checked;
+      newCart();
+      renderCartOnly();
+      if (cashPart > 0) openDrawer(true);
+      showReceipt(rc, print2);
+    };
+    if (S.offline || !S.token || S.shift.offline || offApproval) return queueOffline();
     api('commitSale', S.token, sale).then(function (rc) {
       paid = true;
+      localDeduct(soldLines);
       var cashIn = rc.payMethod === 'split' ? round2(rc.received - rc.payments.qr - rc.payments.transfer) : rc.received;
       cdPublish('done', { method: rc.payMethod === 'split' ? (rc.payments.cash > 0 ? 'cash' : 'qr') : rc.payMethod, total: rc.total, received: cashIn, change: rc.change, split: rc.payMethod === 'split' ? rc.payments : null });
       closeModal();
@@ -1215,26 +1527,7 @@ function openPay(initial) {
       showReceipt(rc, print);
     }).catch(function (e) {
       if (!e.offline) { submitting = false; return fail(e); }
-      // Internet down: keep the bill on this device and carry on; it is sent when the connection is back.
-      sale.offlineAt = new Date().toISOString();
-      sale.shiftId = S.shift.shiftId;
-      var t2 = cartTotals();
-      var pp = { cash: 0, qr: 0, transfer: 0 };
-      if (sale.payMethod === 'split') (sale.payments || []).forEach(function (x) { pp[x.method] += x.amount; }); else pp[sale.payMethod] = t2.total;
-      var cashPart = pp.cash;
-      var rc = { billNo: 'รอส่ง', offline: true, createdAt: sale.offlineAt, payMethod: sale.payMethod, subtotal: t2.subtotal, discount: round2(t2.subtotal - t2.total),
-        total: t2.total, payments: pp, received: sale.payMethod === 'split' ? round2(sale.received + pp.qr + pp.transfer) : sale.received,
-        change: cashPart ? round2(sale.received - cashPart) : 0, status: 'PAID',
-        lines: S.cart.lines.map(function (l) { return { name: l.name, unitName: l.unitName, qty: l.qty, unitPrice: l.unitPrice, lineDiscount: ldTotal(l), lineTotal: round2(l.qty * l.unitPrice - ldTotal(l)) }; }) };
-      queueSale(sale, rc);
-      paid = true;
-      cdPublish('done', { method: sale.payMethod === 'split' ? (cashPart > 0 ? 'cash' : 'qr') : sale.payMethod, total: rc.total, received: cashPart ? sale.received : rc.total, change: rc.change });
-      closeModal();
-      var print2 = $('#autoprint', m).checked;
-      newCart();
-      renderCartOnly();
-      if (cashPart > 0) openDrawer(true);
-      showReceipt(rc, print2);
+      queueOffline();
     });
   };
   $('[data-x=ok]', m).onclick = submit;
@@ -1246,8 +1539,8 @@ function openPay(initial) {
 function maskPP(id) { id = String(id || ''); return id.length > 4 ? id.slice(0, 3) + 'x'.repeat(id.length - 6) + id.slice(-3) : id; }
 
 function showReceipt(rc, autoPrint) {
-  var m = openModal('<header><h1>' + (rc.offline ? 'บันทึกไว้ในเครื่อง · รอส่ง' : 'บันทึกแล้ว · ' + esc(rc.billNo)) + '</h1></header><div class="body">' +
-    (rc.offline ? '<div class="banner">อินเทอร์เน็ตหลุด — บิลนี้เก็บไว้ในเครื่องแล้ว จะส่งเข้าระบบเองเมื่อเน็ตกลับมา (เลขบิลจะออกตอนส่งสำเร็จ)</div>' : '') +
+  var m = openModal('<header><h1>' + (rc.offline ? 'บันทึกไว้ในเครื่อง · ' + esc(rc.billNo) : 'บันทึกแล้ว · ' + esc(rc.billNo)) + '</h1></header><div class="body">' +
+    (rc.offline ? '<div class="banner">ออฟไลน์ — บิลนี้เก็บไว้ในเครื่องแล้ว จะส่งเข้าระบบเองเมื่อเน็ตกลับมา (' + esc(rc.billNo) + ' เป็นเลขชั่วคราว เลขบิลจริงจะออกตอนส่งสำเร็จ)</div>' : '') +
     (rc.payMethod === 'cash' || rc.payMethod === 'split' && rc.payments.cash > 0 ? '<div class="row" style="justify-content:space-between;align-items:baseline"><span>เงินทอน</span><span class="num brand-text" style="font-size:44px;font-weight:700">฿' + money(rc.change) + '</span></div>' +
       '<div class="muted">' + (rc.payMethod === 'split' ? payText(rc) + ' · รับเงินสดมา ฿' + money(round2(rc.received - rc.payments.qr - rc.payments.transfer)) : 'รับมา ฿' + money(rc.received)) + ' · ยอด ฿' + money(rc.total) + '</div>'
       : '<div>ชำระด้วย ' + payText(rc) + ' ฿' + money(rc.total) + '</div>') +
@@ -2861,6 +3154,12 @@ function denomSum(prefix) {
 }
 
 function loadShift() {
+  if (S.offline || !S.token || S.shift.offline) {
+    var box = $('#shiftsum');
+    if (box) box.innerHTML = '<h2>สรุปจากระบบ</h2><div class="muted">ออฟไลน์ — ดูสรุปและปิดกะได้เมื่อเน็ตกลับมา<br>เปิดกะ ' + dateTime(S.shift.openedAt) +
+      ' · เงินทอนตั้งต้น ' + money(S.shift.openingCash) + '<br>ขายตอนออฟไลน์ ' + outbox().filter(function (x) { return x.kind === 'sale'; }).length + ' บิล (รอส่ง)</div>';
+    return;
+  }
   api('shiftSummary', S.token).then(drawShiftSum).catch(fail);
 }
 
@@ -2879,13 +3178,41 @@ function drawShiftSum(s) {
 
 function openShift() {
   var cash = denomSum('o');
+  var offline = function () {
+    // Opened with no internet: a temporary shift on this counter; the server gets it (and its real id) later.
+    var id = 'OS' + Date.now().toString(36) + randomId(6);
+    var sh = { shiftId: 'OFS-' + id, openedAt: new Date().toISOString(), openingCash: cash, userId: S.user.userId, offline: true };
+    store('em_offshift', JSON.stringify(sh));
+    outboxPut({ kind: 'shift', id: id, localId: sh.shiftId, cash: cash, at: sh.openedAt, error: '', pending: true, opt: { openUid: id, openedAt: sh.openedAt } });
+    signItem(id, S.user.userId);
+    S.shift = sh; toast('เปิดกะแล้ว (ออฟไลน์ — จะส่งเข้าระบบเมื่อเน็ตกลับมา)'); go('sale');
+    openDrawer(true);
+  };
+  if (S.offline || !S.token) return offline();
   api('openShift', S.token, cash, '').then(function (sh) {
-    S.shift = sh; toast('เปิดกะแล้ว'); go('sale');
+    S.shift = sh; saveCache(true); toast('เปิดกะแล้ว'); go('sale');
     if (sh) openDrawer(true);
-  }).catch(fail);
+  }).catch(function (e) { if (e.offline) offline(); else fail(e); });
+}
+
+/** Cash in/out. Offline it is queued against the current shift. Resolves with the shift summary when online. */
+function cashMove(type, amount, reason) {
+  var amt = round2(Number(amount));
+  if (!(amt > 0)) return Promise.reject(new Error('จำนวนเงินต้องมากกว่า 0'));
+  if (!String(reason || '').trim()) return Promise.reject(new Error('ต้องใส่เหตุผล'));
+  var offline = function () {
+    var id = 'C' + Date.now().toString(36) + randomId(8);
+    var at = new Date().toISOString();
+    outboxPut({ kind: 'cash', id: id, type: type, amount: amt, reason: reason, at: at, error: '', pending: true, opt: { moveId: id, at: at, shiftId: S.shift.shiftId } });
+    signItem(id, S.user.userId);
+    return null;
+  };
+  if (S.offline || !S.token || (S.shift && S.shift.offline)) return Promise.resolve(offline());
+  return api('cashMove', S.token, type, amt, reason).catch(function (e) { if (e.offline) return offline(); throw e; });
 }
 
 function closeShift() {
+  if (S.offline || !S.token) return toast('ปิดกะต้องต่อเน็ต — ขายต่อได้ตามปกติ ปิดกะเมื่อเน็ตกลับมา', true);
   if (outbox().length) {
     return toast('ยังมีบิลขายตอนออฟไลน์ค้างส่ง ' + outbox().length + ' บิล — ส่งให้ครบก่อนปิดกะ (แตะป้าย "รอส่ง" ด้านบน)', true);
   }
@@ -2926,7 +3253,7 @@ var REP_TABS = [['overview', 'ภาพรวม'], ['products', 'สินค�
 var ACTION_TH = { VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
   STOCK_ADJUST: 'ปรับสต็อก', PRICE_CHANGE: 'แก้ราคา', APPROVE_FAIL: 'PIN อนุมัติผิด', NO_SALE: 'เปิดลิ้นชัก', WRITEOFF: 'ตัดของเสีย',
   STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า',
-  BELOW_COST: 'ขายต่ำกว่าทุน', LOW_MARGIN: 'กำไรต่ำ' };
+  BELOW_COST: 'ขายต่ำกว่าทุน', LOW_MARGIN: 'กำไรต่ำ', OVERSELL: 'ขายเกินสต็อก', OFFLINE_CHECK: 'ตรวจรายการออฟไลน์' };
 
 function repState() {
   if (!S.rep) S.rep = { f: { from: today(), to: today(), slowDays: 30 }, tab: 'overview', preset: 'today', sort: 'revenue',
@@ -3588,8 +3915,8 @@ var ACTIONS = {
       '<footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">บันทึก</button></footer>');
     $all('[data-t]', m).forEach(function (b) { b.onclick = function () { type = b.getAttribute('data-t'); $all('[data-t]', m).forEach(function (x) { x.classList.toggle('on', x === b); }); }; });
     var save = function () {
-      api('cashMove', S.token, type, $('#cm-amt', m).value, $('#cm-why', m).value).then(function () {
-        closeModal(); toast(type === 'IN' ? 'บันทึกเงินเข้าแล้ว' : 'บันทึกเงินออกแล้ว'); openDrawer(true);
+      cashMove(type, $('#cm-amt', m).value, $('#cm-why', m).value).then(function (sum) {
+        closeModal(); toast((type === 'IN' ? 'บันทึกเงินเข้าแล้ว' : 'บันทึกเงินออกแล้ว') + (sum ? '' : ' (รอส่ง)')); openDrawer(true);
       }).catch(fail);
     };
     $('[data-x=ok]', m).onclick = save;
@@ -3702,8 +4029,8 @@ document.addEventListener('submit', function (e) {
   }
   if (kind === 'cashMove') {
     var type = ($('[data-mv].on') || {}).getAttribute ? $('[data-mv].on').getAttribute('data-mv') : 'OUT';
-    api('cashMove', S.token, type, $('#mvamt').value, $('#mvwhy').value).then(function (s) {
-      toast('บันทึกแล้ว'); $('#mvamt').value = ''; $('#mvwhy').value = ''; drawShiftSum(s);
+    cashMove(type, $('#mvamt').value, $('#mvwhy').value).then(function (s) {
+      toast(s ? 'บันทึกแล้ว' : 'บันทึกแล้ว (รอส่ง)'); $('#mvamt').value = ''; $('#mvwhy').value = ''; if (s) drawShiftSum(s);
     }).catch(fail);
   }
 });

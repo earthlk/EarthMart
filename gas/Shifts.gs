@@ -11,41 +11,79 @@ function openShiftForDevice_(deviceId) {
   return { shiftId: sh.shiftId, openedAt: sh.openedAt, openingCash: num_(sh.openingCash), userId: sh.userId };
 }
 
-function api_openShift(token, openingCash, note) {
+/**
+ * opt (sent from the offline outbox) = { openUid, openedAt, offlineBy }: the shift was opened on the counter
+ * while the internet was down. openUid makes resending safe.
+ */
+function api_openShift(token, openingCash, note, opt) {
   return respond_(function () {
     var s = session_(token);
     requireCounter_(s);
+    opt = opt || {};
     var cash = round2_(num_(openingCash));
     if (cash < 0) throw new Error('เงินทอนตั้งต้นติดลบไม่ได้');
     return withLock_(function () {
-      if (openShiftForDevice_(s.deviceId)) throw new Error('เครื่องนี้มีกะที่เปิดอยู่แล้ว');
+      if (opt.openUid) {
+        var dup = readAll_('Shifts').filter(function (x) { return x.openUid === opt.openUid; })[0];
+        if (dup) return shiftView_(dup);
+      }
+      var open = openShiftForDevice_(s.deviceId);
+      if (open) {
+        if (opt.openUid) return open;   // a shift is already running here: offline work joins it
+        throw new Error('เครื่องนี้มีกะที่เปิดอยู่แล้ว');
+      }
+      var actor = opt.offlineBy ? offlineActor_(s, opt.offlineBy, opt.openUid) || s : s;
+      var at = offlineTime_(opt.openedAt) || now_();
       var shift = {
-        shiftId: 'SH' + fmtDate_(now_(), 'yyMMddHHmm') + '-' + uid_('').slice(0, 4),
-        deviceId: s.deviceId, userId: s.userId, openedAt: now_(), openingCash: cash,
-        note: note || '', status: 'OPEN'
+        shiftId: 'SH' + fmtDate_(at, 'yyMMddHHmm') + '-' + uid_('').slice(0, 4),
+        deviceId: s.deviceId, userId: actor.userId, openedAt: at, openingCash: cash,
+        note: note || '', status: 'OPEN', openUid: opt.openUid || '', offline: opt.openedAt ? true : ''
       };
       append_('Shifts', shift);
-      log_(s, 'SHIFT_OPEN', shift.shiftId, 'เงินทอนตั้งต้น ' + cash, '');
+      log_(actor, 'SHIFT_OPEN', shift.shiftId, 'เงินทอนตั้งต้น ' + cash + (opt.openedAt ? ' (เปิดตอนออฟไลน์)' : ''), '');
       return openShiftForDevice_(s.deviceId);
     });
   });
 }
 
-/** type: 'IN' | 'OUT'. Cash put into or taken out of the drawer during the shift. */
-function api_cashMove(token, type, amount, reason) {
+/** A time sent from the outbox: kept when within the last 7 days and not in the future. */
+function offlineTime_(iso) {
+  if (!iso) return null;
+  var t = new Date(iso), nowT = now_().getTime();
+  return !isNaN(t.getTime()) && t.getTime() <= nowT + 5 * 60000 && t.getTime() >= nowT - 7 * 86400000 ? t : null;
+}
+
+function shiftView_(sh) {
+  return { shiftId: sh.shiftId, openedAt: sh.openedAt, openingCash: num_(sh.openingCash), userId: sh.userId, status: sh.status };
+}
+
+/**
+ * type: 'IN' | 'OUT'. Cash put into or taken out of the drawer during the shift.
+ * opt (offline outbox) = { moveId, at, shiftId, offlineBy }.
+ */
+function api_cashMove(token, type, amount, reason, opt) {
   return respond_(function () {
     var s = session_(token);
     requireCounter_(s);
+    opt = opt || {};
     if (type !== 'IN' && type !== 'OUT') throw new Error('ประเภทไม่ถูกต้อง');
     var amt = round2_(num_(amount));
     if (amt <= 0) throw new Error('จำนวนเงินต้องมากกว่า 0');
     if (!String(reason || '').trim()) throw new Error('ต้องใส่เหตุผล');
     return withLock_(function () {
-      var shift = openShiftForDevice_(s.deviceId);
+      if (opt.moveId && readAll_('CashMoves').some(function (x) { return x.moveId === opt.moveId; })) {
+        var prev = readAll_('CashMoves').filter(function (x) { return x.moveId === opt.moveId; })[0];
+        return shiftSummary_(prev.shiftId);
+      }
+      var shift = null;
+      if (opt.shiftId) shift = readAll_('Shifts').filter(function (x) { return x.shiftId === opt.shiftId && x.deviceId === s.deviceId; })[0] || null;
+      shift = shift || openShiftForDevice_(s.deviceId);
       if (!shift) throw new Error('ยังไม่ได้เปิดกะ');
-      append_('CashMoves', { moveId: uid_('C'), shiftId: shift.shiftId, createdAt: now_(), type: type,
-                             amount: amt, reason: reason, userId: s.userId });
-      log_(s, type === 'IN' ? 'CASH_IN' : 'CASH_OUT', shift.shiftId, amt + ' บาท · ' + reason, '');
+      var actor = opt.offlineBy ? offlineActor_(s, opt.offlineBy, opt.moveId) || s : s;
+      var at = offlineTime_(opt.at);
+      append_('CashMoves', { moveId: opt.moveId || uid_('C'), shiftId: shift.shiftId, createdAt: at || now_(), type: type,
+                             amount: amt, reason: reason, userId: actor.userId, offline: at ? true : '' });
+      log_(actor, type === 'IN' ? 'CASH_IN' : 'CASH_OUT', shift.shiftId, amt + ' บาท · ' + reason + (at ? ' (ตอนออฟไลน์)' : ''), '');
       return shiftSummary_(shift.shiftId);
     });
   });

@@ -32,7 +32,7 @@ call('importProducts', T, [
 
 (async () => {
   const browser = await chromium.launch();
-  const ctx = await browser.newContext({ viewport: { width: 1366, height: 800 } });
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 800 }, serviceWorkers: 'block' });
   const page = await ctx.newPage();
   const errors = []; errorsRef = errors;
   page.on('pageerror', e => errors.push(e.message));
@@ -589,7 +589,7 @@ call('importProducts', T, [
   netDown = false;
   await page.click('#netpill');
   await page.click('.modal [data-x=sync]');
-  await page.waitForSelector('.toast:has-text("ส่งบิลที่ค้างตอนออฟไลน์แล้ว 1 บิล")');
+  await page.waitForSelector('.toast:has-text("ส่งรายการที่ทำตอนออฟไลน์แล้ว 1 รายการ")');
   await page.waitForSelector('#netpill.hidden', { state: 'attached' });
   assert.ok(call('listBills', T).some(b => b.total === 7), 'queued sale reached the server');
 

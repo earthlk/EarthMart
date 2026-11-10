@@ -42,8 +42,8 @@ var SCHEMA = {
   StockMoves: ['moveId', 'createdAt', 'sku', 'qtyPieces', 'type', 'refNo', 'userId', 'note'],
   Shifts:     ['shiftId', 'deviceId', 'userId', 'openedAt', 'openingCash', 'closedAt', 'closedBy', 'cashSales',
                'qrSales', 'transferSales', 'cashIn', 'cashOut', 'expectedCash', 'countedCash', 'diff', 'billCount',
-               'voidCount', 'note', 'status', 'cashRefunds', 'otherRefunds'],
-  CashMoves:  ['moveId', 'shiftId', 'createdAt', 'type', 'amount', 'reason', 'userId'],
+               'voidCount', 'note', 'status', 'cashRefunds', 'otherRefunds', 'openUid', 'offline'],
+  CashMoves:  ['moveId', 'shiftId', 'createdAt', 'type', 'amount', 'reason', 'userId', 'offline'],
   AuditLog:   ['logId', 'createdAt', 'userId', 'action', 'ref', 'detail', 'approvedBy', 'deviceId']
 };
 
@@ -253,7 +253,7 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '8';
+var SCHEMA_VERSION = '9';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {
