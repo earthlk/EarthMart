@@ -550,3 +550,59 @@ a{color:var(--brand-text)}
 .slide-row.off{opacity:.55}
 .slide-row img{width:96px;height:60px;object-fit:cover;border-radius:6px;background:var(--surface-muted);flex:0 0 96px}
 .promo-hint{color:var(--brand-text);font-weight:600}
+
+/* ===== Labels: screen ===== */
+.lab-page{align-items:flex-start}
+.lab-left{flex:1 1 0;min-width:0}
+.lab-right{width:520px;flex:0 0 520px;position:sticky;top:0}
+.lab-seg{flex-wrap:wrap}
+.lab-items{display:flex;flex-direction:column;gap:6px}
+.lab-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.lab-row.on{border-color:var(--brand-line);background:var(--brand-soft)}
+.lab-row .qty{display:flex;align-items:center;gap:6px}
+.lab-row .qty button{width:34px;height:34px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font:inherit;font-size:18px;cursor:pointer}
+.lab-row .qty b{min-width:26px;text-align:center}
+.lab-preview{background:var(--surface-muted);border-radius:10px;padding:8px;overflow:hidden;max-height:62vh;overflow-y:auto}
+.lab-preview:empty{display:none}
+.lab-scale{transform-origin:top left;display:flex;flex-direction:column;gap:8px;width:max-content}
+.lab-preview .lab-sheet{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.lab-preview .lab-one .lab,.lab-preview .lab-strip{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+@media (max-width:1100px){ .lab-page{flex-direction:column} .lab-right{width:auto;flex:0 0 auto;position:static} }
+
+/* ===== Labels: the printed thing (also used in the preview) ===== */
+.lab-sheet{display:grid;overflow:hidden}
+.lab{box-sizing:border-box;overflow:hidden;color:#000;background:#fff;font-family:'IBM Plex Sans Thai',sans-serif;line-height:1.15;display:flex;flex-direction:column}
+.lab-sheet .lab{border:0.2mm dashed #bbb}
+.lab-strip .lab{border-bottom:0.3mm dashed #000}
+.lab svg{display:block}
+.lab-shelf{padding:2mm 2.4mm}
+.lsh-name{font-weight:700;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lsh-mid{flex:1;display:flex;align-items:flex-end;justify-content:space-between;gap:1mm;min-height:0}
+.lsh-unit{color:#333}
+.lsh-price{font-weight:800;line-height:.95;white-space:nowrap}
+.lsh-price small{font-size:45%;font-weight:700}
+.lsh-code{height:28%;margin-top:.8mm}
+.lab-stk{padding:1.4mm 2mm;gap:.6mm}
+.ls-top{display:flex;justify-content:space-between;gap:1mm;font-weight:700;white-space:nowrap}
+.ls-name{overflow:hidden;text-overflow:ellipsis}
+.ls-code{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.ls-shop{text-align:center;color:#333}
+.lab-promo{border:0.6mm solid #000}
+.lab-sheet .lab-promo{border:0.6mm solid #000}
+.lp-band{background:#000;color:#fff;text-align:center;font-weight:800;padding:1.2mm 0;letter-spacing:.1em}
+.lp-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:1mm 3mm;gap:.8mm;min-height:0}
+.lp-name{font-weight:700}
+.lp-big{font-weight:800;line-height:1}
+.lp-was{text-decoration:line-through;color:#333}
+.lp-sub{color:#333}
+.lp-foot{display:flex;justify-content:space-between;gap:2mm;padding:1mm 2.4mm;border-top:0.3mm solid #000}
+
+@media print{
+  body.print-labels #print{width:auto;margin:0;padding:0;font-size:inherit}
+  body.print-labels .lab-sheet{page-break-after:always;break-after:page}
+  body.print-labels .lab-sheet:last-child{page-break-after:auto;break-after:auto}
+  body.print-labels .lab-sheet .lab{border-color:transparent}
+  body.print-labels .lab-sheet .lab-promo{border-color:#000}
+  body.print-labels .lab-one{page-break-after:always;break-after:page}
+  body.print-labels .lab-one:last-child{page-break-after:auto}
+}

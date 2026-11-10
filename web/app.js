@@ -834,7 +834,7 @@ function go(view) {
   S.view = view;
   render();
   if (view === 'bills') loadBills();
-  if (view === 'products') { if (S.promoMode) loadPromos(); else renderProductRows(); }
+  if (view === 'products') { if (S.promoMode) loadPromos(); else if (S.labelMode) drawLabItems(); else renderProductRows(); }
   if (view === 'stock') loadStock();
   if (view === 'receive') loadReceive();
   if (view === 'expiry') { S.expSel = null; loadExpiry(); }
@@ -2129,6 +2129,292 @@ function returnModal(rc) {
 
 /* ---------------- Bulk price edit (owner) ---------------- */
 
+/* =================================================================== */
+/* Labels: shelf price tags, barcode stickers, promotion signs          */
+/* =================================================================== */
+
+var LAB_KINDS = [['shelf', 'ป้ายราคาหน้าชั้น'], ['sticker', 'สติกเกอร์บาร์โค้ด'], ['promo', 'ป้ายโปรโมชั่น']];
+/* A4 layouts: [id, label, cols, rows] — labels fill the page edge to edge (common sticker sheets) */
+var LAB_A4 = {
+  shelf: [['a4-24', '24 ดวง (3×8 · 70×37 มม.)', 3, 8], ['a4-14', '14 ดวง (2×7 · 105×42 มม.)', 2, 7], ['a4-40', '40 ดวง (4×10 · 52×30 มม.)', 4, 10]],
+  sticker: [['a4-40', '40 ดวง (4×10 · 52×30 มม.)', 4, 10], ['a4-65', '65 ดวง (5×13 · 42×23 มม.)', 5, 13], ['a4-24', '24 ดวง (3×8 · 70×37 มม.)', 3, 8]],
+  promo: [['a4-4', '4 ป้าย (A6 · 105×148 มม.)', 2, 2], ['a4-2', '2 ป้าย (A5 · 210×148 มม.)', 1, 2], ['a4-1', '1 ป้าย (เต็ม A4)', 1, 1], ['a4-8', '8 ป้าย (105×74 มม.)', 2, 4]]
+};
+var LAB_ROLL = { shelf: [50, 30], sticker: [40, 30], promo: [100, 75] };
+
+function labState() {
+  if (!S.lab) {
+    var saved = {};
+    try { saved = JSON.parse(store('em_labels') || '{}') || {}; } catch (e) { saved = {}; }
+    S.lab = Object.assign({ kind: 'shelf', paper: 'a4', a4: {}, roll: {}, receiptW: 80, opts: { barcode: true, price: true, shop: true } }, saved, { items: [], promos: {} });
+  }
+  return S.lab;
+}
+function labSave() { var l = S.lab; store('em_labels', JSON.stringify({ kind: l.kind, paper: l.paper, a4: l.a4, roll: l.roll, receiptW: l.receiptW, opts: l.opts })); }
+
+/** Size of one label in mm, and how they sit on the paper. */
+function labLayout() {
+  var l = labState(), k = l.kind;
+  if (l.paper === 'a4') {
+    var pre = LAB_A4[k].filter(function (x) { return x[0] === l.a4[k]; })[0] || LAB_A4[k][0];
+    return { paper: 'a4', id: pre[0], cols: pre[2], rows: pre[3], w: 210 / pre[2], h: 297 / pre[3], pageW: 210, pageH: 297 };
+  }
+  if (l.paper === 'roll') {
+    var r = l.roll[k] || LAB_ROLL[k];
+    return { paper: 'roll', cols: 1, rows: 1, w: Number(r[0]) || LAB_ROLL[k][0], h: Number(r[1]) || LAB_ROLL[k][1] };
+  }
+  var w = Number(l.receiptW) === 58 ? 48 : 72;
+  return { paper: 'receipt', cols: 1, rows: 1, w: w, h: k === 'promo' ? w * 1.1 : k === 'shelf' ? w * 0.55 : w * 0.6 };
+}
+
+/** Barcode as inline SVG (EAN-13 / EAN-8 / UPC when the digits fit, otherwise Code 128). */
+function barcodeSvg(code, withText) {
+  if (!window.JsBarcode || !code) return '';
+  code = String(code);
+  var fmt = /^\d{13}$/.test(code) ? 'EAN13' : /^\d{8}$/.test(code) ? 'EAN8' : /^\d{12}$/.test(code) ? 'UPC' : 'CODE128';
+  var el = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  try { JsBarcode(el, code, { format: fmt, displayValue: !!withText, margin: 0, height: 60, width: 2, fontSize: 18, textMargin: 2, flat: fmt === 'CODE128' }); }
+  catch (e) { try { JsBarcode(el, code, { format: 'CODE128', displayValue: !!withText, margin: 0, height: 60, width: 2, fontSize: 18 }); } catch (x) { return ''; } }
+  var w = el.getAttribute('width'), h = el.getAttribute('height');
+  el.setAttribute('viewBox', '0 0 ' + parseFloat(w) + ' ' + parseFloat(h));
+  el.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  el.setAttribute('width', '100%'); el.setAttribute('height', '100%');
+  el.removeAttribute('style');
+  return el.outerHTML;
+}
+
+/** Units a product can be labelled in: the piece itself plus each barcode unit. */
+function labUnits(sku) {
+  var p = S.idx.bySku[sku];
+  if (!p) return [];
+  var codes = codesOf(sku);
+  var out = codes.map(function (b) { return { barcode: b.barcode, name: b.unitName || p.unit || 'ชิ้น', mult: b.multiplier, price: unitPriceOf(p, b) }; });
+  if (!codes.some(function (b) { return b.multiplier === 1; })) out.unshift({ barcode: '', name: p.unit || 'ชิ้น', mult: 1, price: Number(p.price) || 0 });
+  return out;
+}
+/** What goes in the bars: the unit's barcode, else the PLU (the till reads it too). */
+function labCode(sku, barcode) {
+  if (barcode) return barcode;
+  var p = S.idx.bySku[sku];
+  return p && p.plu ? String(p.plu) : '';
+}
+
+function labAdd(sku, barcode, copies) {
+  var l = labState(), p = S.idx.bySku[sku];
+  if (!p) return;
+  if (barcode === undefined) { var u = labUnits(sku); barcode = u.length ? u[0].barcode : ''; }
+  var key = sku + '|' + barcode;
+  var ex = l.items.filter(function (x) { return x.key === key; })[0];
+  if (ex) ex.copies += copies || 1;
+  else l.items.push({ key: key, sku: sku, barcode: barcode, copies: copies || 1 });
+}
+
+function renderLabels() {
+  var l = labState(), lay = labLayout();
+  var cats = categories().map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('');
+  var kinds = LAB_KINDS.map(function (k) { return '<button type="button" data-act="labKind" data-k="' + k[0] + '" class="' + (l.kind === k[0] ? 'on' : '') + '">' + k[1] + '</button>'; }).join('');
+  var papers = [['a4', 'กระดาษ A4'], ['roll', 'ม้วนสติกเกอร์'], ['receipt', 'เครื่องพิมพ์ใบเสร็จ']].map(function (x) {
+    return '<button type="button" data-act="labPaper" data-p="' + x[0] + '" class="' + (l.paper === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
+  }).join('');
+  var paperOpts = l.paper === 'a4' ? '<div class="field"><label for="lab-a4">แบบแผ่น</label><select id="lab-a4" data-change="labA4">' + LAB_A4[l.kind].map(function (x) {
+      return '<option value="' + x[0] + '"' + (x[0] === lay.id ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></div>'
+    : l.paper === 'roll' ? '<div class="row" style="gap:8px"><div class="field"><label for="lab-rw">กว้าง (มม.)</label><input id="lab-rw" type="number" data-change="labRoll" value="' + lay.w + '" style="width:90px"></div>' +
+      '<div class="field"><label for="lab-rh">สูง (มม.)</label><input id="lab-rh" type="number" data-change="labRoll" value="' + lay.h + '" style="width:90px"></div></div>'
+    : '<div class="field"><label for="lab-rcw">ขนาดกระดาษ</label><select id="lab-rcw" data-change="labRcw"><option value="80">80 มม.</option><option value="58"' + (Number(l.receiptW) === 58 ? ' selected' : '') + '>58 มม.</option></select></div>';
+  var opt = function (k, t) { return '<label class="row" style="gap:6px"><input type="checkbox" data-change="labOpt" data-o="' + k + '"' + (l.opts[k] ? ' checked' : '') + '> ' + t + '</label>'; };
+  var opts = l.kind === 'shelf' ? opt('barcode', 'มีบาร์โค้ด') + opt('shop', 'ชื่อร้าน')
+    : l.kind === 'sticker' ? opt('price', 'มีราคา') + opt('shop', 'ชื่อร้าน') : opt('shop', 'ชื่อร้าน');
+  var recent = (S.lastPriceSkus || []).length;
+  var adders = l.kind === 'promo' ? '' :
+    '<div class="row" style="gap:8px;flex-wrap:wrap"><label class="sr" for="lab-q">เพิ่มสินค้า</label><input id="lab-q" class="grow" autocomplete="off" placeholder="พิมพ์ชื่อ หรือสแกนบาร์โค้ดเพื่อเพิ่ม" style="min-width:200px">' +
+    '<select data-change="labCat" aria-label="เพิ่มทั้งหมวด" style="width:170px"><option value="">+ ทั้งหมวด…</option>' + cats + '</select></div><div id="lab-sug" class="pe-sug"></div>' +
+    '<div class="row" style="gap:6px;flex-wrap:wrap">' + (recent ? '<button class="btn sm" data-act="labRecent">+ ราคาเพิ่งเปลี่ยน (' + recent + ')</button>' : '') +
+    '<button class="btn sm" data-act="labPromoItems">+ สินค้าที่มีโปร</button>' + (l.items.length ? '<button class="btn sm ghost" data-act="labClear">ล้างรายการ</button>' : '') + '</div>';
+  return '<div class="page lab-page"><section class="card pad col lab-left" style="gap:12px">' +
+    '<div class="row" style="gap:8px;flex-wrap:wrap"><h2 style="margin:0">พิมพ์ป้าย</h2><span class="grow"></span><button class="btn" data-act="labClose">‹ กลับหน้าสินค้า</button></div>' +
+    '<div class="seg lab-seg">' + kinds + '</div>' + adders + '<div id="lab-items" class="lab-items"></div></section>' +
+    '<section class="card pad col lab-right" style="gap:10px"><div class="seg lab-seg">' + papers + '</div>' + paperOpts +
+    '<div class="row" style="gap:14px;flex-wrap:wrap">' + opts + '</div>' +
+    '<div class="muted" style="font-size:13px" id="lab-info"></div><div class="lab-preview" id="lab-prev"></div>' +
+    '<button class="btn primary lg" data-act="labPrint" id="lab-print">พิมพ์</button>' +
+    '<div class="muted" style="font-size:12px">ตอนพิมพ์: ตั้งขนาดกระดาษให้ตรง · ระยะขอบ "ไม่มี" · สเกล 100% (ไม่ย่อให้พอดี)</div></section></div>';
+}
+
+/** Promotions a sign can be printed for: on now or starting later. */
+function labPromoList() {
+  var d = today();
+  return (S.promos || []).filter(function (p) { return p.active && (!p.endDate || p.endDate >= d); });
+}
+
+function drawLabItems() {
+  var box = $('#lab-items'), l = labState();
+  if (!box) return;
+  if (l.kind === 'promo') {
+    var list = labPromoList();
+    box.innerHTML = list.length ? list.map(function (p) {
+      var n = l.promos[p.promoId] || 0;
+      return '<div class="lab-row' + (n ? ' on' : '') + '"><div class="col" style="gap:1px;min-width:0;flex:1"><b>' + esc(p.name) + '</b><span class="muted" style="font-size:13px">' + esc(promoText(p)) + ' · ' + esc(promoWhenText(p)) + '</span></div>' +
+        '<div class="qty"><button data-act="labPromoN" data-id="' + esc(p.promoId) + '" data-d="-1" aria-label="ลด">−</button><b class="num">' + n + '</b><button data-act="labPromoN" data-id="' + esc(p.promoId) + '" data-d="1" aria-label="เพิ่ม">+</button></div></div>';
+    }).join('') : '<div class="empty">ยังไม่มีโปรโมชั่นที่เปิดอยู่ — สร้างได้ที่ หน้าสินค้า › โปรโมชั่น</div>';
+    drawLabPreview();
+    return;
+  }
+  box.innerHTML = l.items.length ? l.items.map(function (it, i) {
+    var p = S.idx.bySku[it.sku], units = labUnits(it.sku);
+    var u = units.filter(function (x) { return x.barcode === it.barcode; })[0] || units[0];
+    var code = labCode(it.sku, it.barcode);
+    var warn = l.kind === 'sticker' && !code ? '<div class="warn-text" style="font-size:12px">ไม่มีบาร์โค้ด/PLU ' +
+      (S.user.role === 'owner' && p.type !== 'recipe' ? '<button class="btn sm" data-act="labMakeCode" data-i="' + i + '">สร้างโค้ดภายใน</button>' : '— ตั้ง PLU หรือบาร์โค้ดในหน้าสินค้า') + '</div>' : '';
+    return '<div class="lab-row"><div class="col" style="gap:2px;min-width:0;flex:1"><b>' + esc(p ? p.name : it.sku) + '</b>' +
+      '<div class="row" style="gap:6px;flex-wrap:wrap">' + (units.length > 1 ? '<select data-labunit="' + i + '" aria-label="หน่วย" style="height:32px;font-size:13px;width:auto">' + units.map(function (x) {
+        return '<option value="' + esc(x.barcode) + '"' + (x === u ? ' selected' : '') + '>' + esc(x.name) + (x.mult > 1 ? ' (' + x.mult + ')' : '') + ' ฿' + money(x.price) + '</option>'; }).join('') + '</select>'
+        : '<span class="muted" style="font-size:13px">' + esc(u ? u.name : '') + ' · ฿' + money(u ? u.price : 0) + '</span>') +
+      (code ? '<span class="muted num" style="font-size:12px">' + esc(code) + (it.barcode ? '' : ' (PLU)') + '</span>' : '') + '</div>' + warn + '</div>' +
+      '<div class="qty"><button data-act="labN" data-i="' + i + '" data-d="-1" aria-label="ลด">−</button><b class="num">' + it.copies + '</b><button data-act="labN" data-i="' + i + '" data-d="1" aria-label="เพิ่ม">+</button></div>' +
+      '<button class="btn sm ghost" data-act="labDel" data-i="' + i + '" aria-label="เอาออก">✕</button></div>';
+  }).join('') : '<div class="empty">ยังไม่มีรายการ — ค้นหา/สแกนสินค้า หรือกดปุ่มเพิ่มด้านบน</div>';
+  drawLabPreview();
+}
+
+/* ---- one label's HTML (sizes in mm) ---- */
+function labelHtml(kind, data, w, h) {
+  var l = labState(), shop = l.opts.shop ? esc(S.settings.shopName || '') : '';
+  var f = function (mm) { return 'font-size:' + (Math.round(mm * 100) / 100) + 'mm'; };
+  var box = 'width:' + w + 'mm;height:' + h + 'mm';
+  if (kind === 'promo') {
+    var p = data, pb = promoBig(p);
+    var s = Math.min(w / 80, h / 80);   // scale against an 80×80 mm sign
+    return '<div class="lab lab-promo" style="' + box + '"><div class="lp-band" style="' + f(6 * s) + '">โปรโมชั่น</div>' +
+      '<div class="lp-body"><div class="lp-name" style="' + f(6.2 * s) + '">' + esc(p.name) + '</div>' +
+      '<div class="lp-big" style="' + f(14 * s) + '">' + esc(pb.big) + '</div>' +
+      (pb.was ? '<div class="lp-was" style="' + f(4.6 * s) + '">ปกติ ' + esc(pb.was) + '</div>' : '') +
+      '<div class="lp-sub" style="' + f(3.6 * s) + '">' + esc(promoText(p)) + '</div></div>' +
+      '<div class="lp-foot" style="' + f(3.2 * s) + '"><span>' + esc(promoWhenText(p)) + '</span><span>' + shop + '</span></div></div>';
+  }
+  var p2 = S.idx.bySku[data.sku], units = labUnits(data.sku);
+  var u = units.filter(function (x) { return x.barcode === data.barcode; })[0] || units[0] || { name: '', price: 0, mult: 1 };
+  var code = labCode(data.sku, data.barcode);
+  var name = esc(p2 ? p2.name : data.sku), unit = esc(u.name + (u.mult > 1 ? ' (' + u.mult + ' ชิ้น)' : ''));
+  if (kind === 'sticker') {
+    var withPrice = l.opts.price;
+    return '<div class="lab lab-stk" style="' + box + '"><div class="ls-top" style="' + f(Math.min(h * 0.12, w * 0.07)) + '"><span class="ls-name">' + name + '</span>' +
+      (withPrice ? '<b>฿' + money(u.price) + '</b>' : '') + '</div>' +
+      '<div class="ls-code">' + (code ? barcodeSvg(code, true) : '<span style="' + f(h * 0.1) + '">ไม่มีบาร์โค้ด</span>') + '</div>' +
+      (shop ? '<div class="ls-shop" style="' + f(Math.min(h * 0.08, 2.4)) + '">' + shop + '</div>' : '') + '</div>';
+  }
+  var big = money(u.price).split('.');
+  var withCode = l.opts.barcode && code;
+  return '<div class="lab lab-shelf" style="' + box + '"><div class="lsh-name" style="' + f(Math.min(h * 0.13, w * 0.075)) + '">' + name + '</div>' +
+    '<div class="lsh-mid"><div class="lsh-unit" style="' + f(Math.min(h * 0.09, 3.2)) + '">' + unit + (shop ? '<br>' + shop : '') + '</div>' +
+    '<div class="lsh-price" style="' + f(Math.min(h * (withCode ? 0.36 : 0.46), w * 0.22)) + '"><small>฿</small>' + big[0] + (big[1] !== '00' ? '<small>.' + big[1] + '</small>' : '') + '</div></div>' +
+    (withCode ? '<div class="lsh-code">' + barcodeSvg(code, true) + '</div>' : '') + '</div>';
+}
+
+/** Every label to print, in order (copies expanded). */
+function labList() {
+  var l = labState(), out = [];
+  if (l.kind === 'promo') labPromoList().forEach(function (p) { for (var i = 0; i < (l.promos[p.promoId] || 0); i++) out.push(p); });
+  else l.items.forEach(function (it) { for (var i = 0; i < it.copies; i++) out.push(it); });
+  return out;
+}
+
+/** Pages of labels (HTML) for the print area. */
+function labPages(limitPages) {
+  var l = labState(), lay = labLayout(), all = labList(), pages = [];
+  var per = lay.cols * lay.rows;
+  if (lay.paper === 'a4') {
+    for (var i = 0; i < all.length && (!limitPages || pages.length < limitPages); i += per) {
+      pages.push('<div class="lab-sheet" style="width:210mm;height:297mm;grid-template-columns:repeat(' + lay.cols + ',' + lay.w + 'mm);grid-template-rows:repeat(' + lay.rows + ',' + lay.h + 'mm)">' +
+        all.slice(i, i + per).map(function (d) { return labelHtml(l.kind, d, lay.w, lay.h); }).join('') + '</div>');
+    }
+  } else if (lay.paper === 'roll') {
+    all.slice(0, limitPages ? limitPages * 4 : all.length).forEach(function (d) { pages.push('<div class="lab-one">' + labelHtml(l.kind, d, lay.w, lay.h) + '</div>'); });
+  } else {
+    pages.push('<div class="lab-strip">' + all.slice(0, limitPages ? 6 : all.length).map(function (d) { return labelHtml(l.kind, d, lay.w, lay.h); }).join('') + '</div>');
+  }
+  return { pages: pages, count: all.length, lay: lay };
+}
+
+function drawLabPreview() {
+  var box = $('#lab-prev');
+  if (!box) return;
+  var r = labPages(1), lay = r.lay;
+  var sheets = lay.paper === 'a4' ? Math.ceil(r.count / (lay.cols * lay.rows)) : 0;
+  $('#lab-info').textContent = r.count ? r.count + ' ดวง' + (sheets ? ' · ' + sheets + ' แผ่น A4' : '') + ' · ขนาดดวง ' + Math.round(lay.w * 10) / 10 + '×' + Math.round(lay.h * 10) / 10 + ' มม.' : 'ยังไม่มีป้ายที่จะพิมพ์';
+  $('#lab-print').disabled = !r.count;
+  box.innerHTML = r.count ? '<div class="lab-scale">' + r.pages.join('') + '</div>' : '';
+  var sc = $('.lab-scale', box);
+  if (sc) {
+    var mmPx = 96 / 25.4, wmm = lay.paper === 'a4' ? 210 : lay.w;
+    var k = Math.min(1, (box.clientWidth - 16) / (wmm * mmPx));
+    sc.style.transform = 'scale(' + k + ')';
+    sc.style.height = (sc.scrollHeight * k) + 'px';
+  }
+}
+
+function labPrint() {
+  var r = labPages(0), lay = r.lay;
+  if (!r.count) return;
+  var size = lay.paper === 'a4' ? 'A4 portrait' : lay.paper === 'roll' ? lay.w + 'mm ' + lay.h + 'mm' : (lay.w === 48 ? '58mm' : '80mm') + ' auto';
+  var st = document.getElementById('lab-page-style') || document.createElement('style');
+  st.id = 'lab-page-style';
+  st.textContent = '@media print{@page{size:' + size + ';margin:0}}';
+  document.head.appendChild(st);
+  document.body.classList.add('print-labels');
+  $('#print').innerHTML = r.pages.join('');
+  var done = function () { document.body.classList.remove('print-labels'); st.textContent = ''; window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+  setTimeout(done, 1500);
+}
+
+function labSug(q) {
+  var box = $('#lab-sug');
+  if (!box) return;
+  q = String(q || '').trim().toLowerCase();
+  if (!q) { box.innerHTML = ''; return; }
+  var list = S.products.filter(function (p) { return p.active && p.forSale !== false && (p.name.toLowerCase().indexOf(q) >= 0 || String(p.sku).toLowerCase() === q || String(p.plu || '') === q); }).slice(0, 8);
+  box.innerHTML = list.map(function (p) { return '<button type="button" data-act="labPick" data-sku="' + esc(p.sku) + '">' + esc(p.name) + ' <span class="muted">฿' + money(p.price) + '</span></button>'; }).join('') ||
+    '<div class="muted" style="padding:6px">ไม่พบสินค้า</div>';
+}
+/** Enter in the add box: a scanned barcode adds that unit; text adds the first match. */
+function labEnter(v) {
+  v = String(v || '').trim();
+  if (!v) return;
+  var b = S.idx.byBarcode[v];
+  if (b) labAdd(b.sku, b.barcode);
+  else {
+    var p = S.idx.byPlu[v] || S.products.filter(function (x) { return x.active && x.forSale !== false && x.name.toLowerCase().indexOf(v.toLowerCase()) >= 0; })[0];
+    if (!p) return toast('ไม่พบสินค้า "' + v + '"', true);
+    labAdd(p.sku);
+  }
+  $('#lab-q').value = ''; labSug(''); drawLabItems();
+}
+
+/** Owner: give a product without any code an internal EAN-13 (20…) so it can get stickers. */
+function labMakeCode(i) {
+  var it = labState().items[i], p = S.idx.bySku[it.sku];
+  if (!p) return;
+  api('newInternalBarcode', S.token).then(function (code) {
+    var codes = codesOf(p.sku).map(function (c) { return { barcode: c.barcode, unitName: c.unitName, multiplier: c.multiplier, price: c.price === null || c.price === '' ? null : Number(c.price) }; });
+    codes.push({ barcode: code, unitName: p.unit || 'ชิ้น', multiplier: 1, price: null });
+    var payload = Object.assign({}, p, { type: 'barcode' });
+    return api('saveProduct', S.token, payload, codes, []).then(function () { return reloadCatalog(); }).then(function () {
+      it.barcode = code; it.key = it.sku + '|' + code;
+      toast('สร้างโค้ดภายในแล้ว ' + code); drawLabItems();
+    });
+  }).catch(fail);
+}
+
+function labOpen(kind, promoId) {
+  var l = labState();
+  S.labelMode = true; S.bulk = null; S.promoMode = false;
+  if (kind) l.kind = kind;
+  if (promoId) l.promos[promoId] = (l.promos[promoId] || 0) + 1;
+  if (S.view !== 'products') go('products'); else render();
+  drawLabItems();
+}
+
 /* ---------------- Customer-display slides ---------------- */
 var SLIDE_CACHE = 'em-slides';
 function slideKey(id) { return location.origin + location.pathname.replace(/[^/]*$/, '') + '__slide/' + encodeURIComponent(id); }
@@ -2163,6 +2449,23 @@ function syncSlides() {
     });
   }).then(function () { cdPublish(); }).catch(function () {});
 }
+/** Headline price of a promotion: { big, was } (for slides and signs). */
+function promoBig(p) {
+  var it = promoItems(p), first = S.idx.bySku[String(it[0] && it[0].sku !== undefined ? it[0].sku : it[0])];
+  var big = '', was = '';
+  if (p.type === 'single') {
+    if (first && it.length === 1) {
+      var pr = Number(first.price) || 0, v = Number(p.value) || 0;
+      big = '฿' + money(Math.max(0, p.discType === 'pct' ? pr * (1 - v / 100) : p.discType === 'baht' ? pr - v : v)); was = '฿' + money(pr);
+    } else big = promoCut(p).replace('เหลือ ', '');
+  } else if (p.type === 'multi') { big = p.buyQty + ' ชิ้น ฿' + money(p.price); if (first && it.length === 1) was = '฿' + money(first.price * p.buyQty); }
+  else if (p.type === 'bxgy') big = 'ซื้อ ' + p.buyQty + ' แถม ' + p.freeQty;
+  else if (p.type === 'combo') {
+    big = '฿' + money(p.price);
+    was = '฿' + money(it.reduce(function (a, c) { var x = S.idx.bySku[c.sku]; return a + (x ? x.price * c.qty : 0); }, 0));
+  }
+  return { big: big, was: was, first: first };
+}
 /** What the customer display cycles through while nobody is at the counter. */
 function cdSlides() {
   var out = [];
@@ -2170,18 +2473,7 @@ function cdSlides() {
   if (S.settings.slidesAuto !== '0') {
     var w = promoNow();
     (S.promos || []).filter(function (p) { return promoLive(p, w); }).forEach(function (p) {
-      var it = promoItems(p), first = S.idx.bySku[String(it[0] && it[0].sku !== undefined ? it[0].sku : it[0])];
-      var big = '', was = '';
-      if (p.type === 'single' && first) {
-        var pr = Number(first.price) || 0, v = Number(p.value) || 0;
-        big = '฿' + money(Math.max(0, p.discType === 'pct' ? pr * (1 - v / 100) : p.discType === 'baht' ? pr - v : v)); was = '฿' + money(pr);
-        if (it.length > 1) big = promoCut(p).replace('เหลือ ', '');
-      } else if (p.type === 'multi') { big = p.buyQty + ' ชิ้น ฿' + money(p.price); if (first) was = '฿' + money(first.price * p.buyQty); }
-      else if (p.type === 'bxgy') big = 'ซื้อ ' + p.buyQty + ' แถม ' + p.freeQty;
-      else if (p.type === 'combo') {
-        big = '฿' + money(p.price);
-        was = '฿' + money(it.reduce(function (a, c) { var x = S.idx.bySku[c.sku]; return a + (x ? x.price * c.qty : 0); }, 0));
-      }
+      var pb = promoBig(p), first = pb.first, big = pb.big, was = pb.was;
       var col = first ? (KEY_COLORS[first.color] || KEY_COLORS.gray) : KEY_COLORS.gray;
       out.push({ kind: 'promo', title: p.name, sub: promoText(p), big: big, was: was, icon: first ? iconHtml(first) : '', bg: col[0], fg: col[1],
         when: p.timeFrom && p.timeTo ? 'เฉพาะ ' + p.timeFrom + '–' + p.timeTo + ' น.' : p.endDate ? 'ถึง ' + thDate(p.endDate) : '' });
@@ -2320,7 +2612,8 @@ function loadPromos() {
         '<span class="muted" style="font-size:13px">' + PROMO_TYPE_TH[p.type] + ' · ' + esc(promoWhenText(p)) + '</span></div>' +
         '<span class="tag ' + st[1] + '" style="white-space:nowrap">' + st[0] + '</span></div>' +
         '<div class="row" style="gap:8px;margin-top:8px"><button class="btn sm" data-act="promoEdit" data-id="' + esc(p.promoId) + '">แก้ไข</button>' +
-        '<button class="btn sm" data-act="promoToggle" data-id="' + esc(p.promoId) + '" data-on="' + (p.active ? '0' : '1') + '">' + (p.active ? 'ปิดโปร' : 'เปิดโปร') + '</button></div></div>';
+        '<button class="btn sm" data-act="promoToggle" data-id="' + esc(p.promoId) + '" data-on="' + (p.active ? '0' : '1') + '">' + (p.active ? 'ปิดโปร' : 'เปิดโปร') + '</button>' +
+        (st[1] !== 'gray' ? '<button class="btn sm" data-act="labPromo" data-id="' + esc(p.promoId) + '">พิมพ์ป้ายโปร</button>' : '') + '</div></div>';
     }).join('') : '<div class="card pad empty">ยังไม่มีโปรโมชั่น — กด "+ สร้างโปรโมชั่น"</div>';
   }).catch(fail);
 }
@@ -2548,9 +2841,16 @@ function bulkSave() {
   confirm2('บันทึกราคาใหม่', 'เปลี่ยนราคา ' + ch.length + ' รายการ — มีผลกับบิลใหม่ทันที', 'บันทึก').then(function (ok) {
     if (!ok) return;
     return api('bulkPrice', S.token, ch).then(function (r) {
-      toast('เปลี่ยนราคาแล้ว ' + r.changed + ' รายการ');
+      S.lastPriceSkus = ch.map(function (c) { if (c.sku) return c.sku; var b = S.barcodes.filter(function (x) { return x.barcode === c.barcode; })[0]; return b ? b.sku : ''; })
+        .filter(function (k, i, a) { return k && a.indexOf(k) === i; });
       S.bulk = null;
-      return reloadCatalog().then(function () { render(); });
+      return reloadCatalog().then(function () {
+        render(); renderProductRows();
+        return confirm2('เปลี่ยนราคาแล้ว ' + r.changed + ' รายการ', 'พิมพ์ป้ายราคาใหม่สำหรับ ' + S.lastPriceSkus.length + ' สินค้าเลยไหม?', 'พิมพ์ป้าย').then(function (go2) {
+          if (!go2) return;
+          var l = labState(); l.kind = 'shelf'; S.lastPriceSkus.forEach(function (k) { labAdd(k); }); labOpen('shelf');
+        });
+      });
     });
   }).catch(fail);
 }
@@ -2558,12 +2858,14 @@ function bulkSave() {
 function renderProducts() {
   if (S.bulk) return renderBulkPrice();
   if (S.promoMode) return renderPromos();
+  if (S.labelMode) return renderLabels();
   var owner = S.user.role === 'owner';
   var cats = categories().map(function (c) { return '<option ' + (S.prodFilter.cat === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('');
   return '<div class="page"><div class="prod">' +
     '<section class="card prod-list"><div class="prod-tools">' +
     '<label class="sr" for="pq">ค้นหาสินค้า</label><input id="pq" class="grow" placeholder="ค้นหา ชื่อ, EAN, SKU, PLU" value="' + esc(S.prodFilter.q) + '" data-input="prodQ" style="min-width:180px">' + camBtn('pq') +
     '<label class="sr" for="pcat">หมวด</label><select id="pcat" data-change="prodCat" style="width:170px"><option value="">ทุกหมวด</option>' + cats + '</select>' +
+    '<button class="btn sm" data-act="labOpen" style="height:40px">พิมพ์ป้าย</button>' +
     (owner ? '<button class="btn sm" data-act="promoOpen" style="height:40px">โปรโมชั่น' + ((S.promos || []).length ? ' (' + S.promos.length + ')' : '') + '</button>' +
       '<button class="btn sm" data-act="bulkOpen" style="height:40px">แก้ราคาหลายรายการ</button><button class="btn sm" data-act="importCsv" style="height:40px">นำเข้า CSV</button>' +
       '<button class="btn sm primary" data-act="selProduct" data-sku="" style="height:40px">+ เพิ่มสินค้า</button>' : '') +
@@ -4488,6 +4790,26 @@ var ACTIONS = {
       if (ok) api('deleteSlide', S.token, el.getAttribute('data-id')).then(slidesChanged).catch(fail);
     });
   },
+  labOpen: function () { labOpen(); },
+  labClose: function () { S.labelMode = false; render(); renderProductRows(); },
+  labPromo: function (el) { labOpen('promo', el.getAttribute('data-id')); },
+  labKind: function (el) { labState().kind = el.getAttribute('data-k'); labSave(); render(); drawLabItems(); },
+  labPaper: function (el) { labState().paper = el.getAttribute('data-p'); labSave(); render(); drawLabItems(); },
+  labPick: function (el) { labAdd(el.getAttribute('data-sku')); $('#lab-q').value = ''; labSug(''); drawLabItems(); },
+  labN: function (el) { var it = labState().items[Number(el.getAttribute('data-i'))]; it.copies = Math.max(1, it.copies + Number(el.getAttribute('data-d'))); drawLabItems(); },
+  labDel: function (el) { labState().items.splice(Number(el.getAttribute('data-i')), 1); render(); drawLabItems(); },
+  labClear: function () { labState().items = []; render(); drawLabItems(); },
+  labRecent: function () { (S.lastPriceSkus || []).forEach(function (k) { labAdd(k); }); render(); drawLabItems(); },
+  labPromoItems: function () {
+    var w = promoNow();
+    (S.promos || []).filter(function (p) { return promoLive(p, w); }).forEach(function (p) {
+      promoItems(p).forEach(function (it) { var k = String(it && it.sku !== undefined ? it.sku : it); if (!labState().items.some(function (x) { return x.sku === k; })) labAdd(k); });
+    });
+    render(); drawLabItems();
+  },
+  labPromoN: function (el) { var l = labState(), id = el.getAttribute('data-id'); l.promos[id] = Math.max(0, (l.promos[id] || 0) + Number(el.getAttribute('data-d'))); drawLabItems(); },
+  labMakeCode: function (el) { labMakeCode(Number(el.getAttribute('data-i'))); },
+  labPrint: function () { labPrint(); },
   mBulk: function () { S.bulk = { edits: {} }; go('products'); drawBulk(); },
   mPromo: function () { S.promoMode = true; S.bulk = null; go('products'); loadPromos(); },
   promoOpen: function () { S.promoMode = true; S.bulk = null; render(); loadPromos(); },
@@ -4577,6 +4899,7 @@ document.addEventListener('click', function (e) {
 });
 
 document.addEventListener('input', function (e) {
+  if (e.target.id === 'lab-q') return labSug(e.target.value);
   S.lastActivity = Date.now();
   var t = e.target;
   if (t.hasAttribute('data-den')) {
@@ -4623,6 +4946,17 @@ document.addEventListener('change', function (e) {
     if (fk === 'category') rs.f.sku = '';
     loadReport();
   }
+  if (k === 'labA4') { labState().a4[labState().kind] = t.value; labSave(); drawLabPreview(); }
+  if (k === 'labRoll') { labState().roll[labState().kind] = [Number($('#lab-rw').value) || 0, Number($('#lab-rh').value) || 0]; labSave(); drawLabPreview(); }
+  if (k === 'labRcw') { labState().receiptW = Number(t.value); labSave(); drawLabPreview(); }
+  if (k === 'labOpt') { labState().opts[t.getAttribute('data-o')] = t.checked; labSave(); drawLabPreview(); }
+  if (k === 'labCat' && t.value) {
+    S.products.filter(function (p) { return p.active && p.forSale !== false && p.category === t.value; }).forEach(function (p) { labAdd(p.sku); });
+    t.value = ''; render(); drawLabItems();
+  }
+  if (t.hasAttribute && t.hasAttribute('data-labunit')) {
+    var li = labState().items[Number(t.getAttribute('data-labunit'))]; li.barcode = t.value; li.key = li.sku + '|' + t.value; drawLabItems();
+  }
   if (k === 'slideFile' && t.files && t.files[0]) {
     var file = t.files[0]; t.value = '';
     shrinkImage(file).then(function (u) { slideModal(null, u); }).catch(fail);
@@ -4637,6 +4971,7 @@ document.addEventListener('change', function (e) {
 
 document.addEventListener('keydown', function (e) {
   S.lastActivity = Date.now();
+  if (e.target.id === 'lab-q' && e.key === 'Enter' && !modalStack.length) { e.preventDefault(); labEnter(e.target.value); return; }
   if (e.key === 'Escape' && modalStack.length) { e.preventDefault(); closeModal(); return; }
   if (S.view === 'login' && !modalStack.length) {
     if (/^\d$/.test(e.key)) { e.preventDefault(); pinKey(e.key); }

@@ -605,8 +605,35 @@ call('importProducts', T, [
   await shot('04d-bulk-price');
   await page.click('[data-act=bulkSave]');
   await page.click('[data-x=yes]');
-  await page.waitForSelector('.toast:has-text("เปลี่ยนราคาแล้ว")');
+  await page.waitForSelector('.modal h1:has-text("เปลี่ยนราคาแล้ว")');
   assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'W0001').price, 8, 'new price saved');
+
+  // 9zz-b. Labels: offered right after the price change; shelf tags with barcode on A4
+  await page.click('.modal [data-x=yes]');
+  await page.waitForSelector('.lab-page');
+  await page.waitForSelector('.lab-row:has-text("น้ำดื่ม")');
+  await page.waitForSelector('#lab-prev .lab-shelf svg rect');
+  assert.match(await page.textContent('#lab-prev .lab-shelf'), /8/, 'tag shows the new price');
+  await page.fill('#lab-q', '8851234567906'); await page.keyboard.press('Enter');   // scan the pack: its own tag
+  await page.waitForFunction(() => document.querySelectorAll('.lab-row').length === 2);
+  await page.click('.lab-row >> nth=0 >> [data-act=labN][data-d="1"]');
+  assert.match(await page.textContent('#lab-info'), /3 ดวง · 1 แผ่น A4/);
+  await shot('04g-labels-shelf');
+  const printed0 = await page.evaluate(() => window.__printed || 0);
+  await page.click('[data-act=labPrint]');
+  assert.strictEqual(await page.evaluate(() => window.__printed), printed0 + 1, 'labels printed');
+  assert.ok(await page.evaluate(() => document.querySelectorAll('#print .lab-sheet .lab').length === 3), 'print area has 3 labels');
+  // stickers on a label roll; a product without a code gets an internal EAN-13
+  await page.click('[data-act=labKind][data-k=sticker]');
+  await page.click('[data-act=labPaper][data-p=roll]');
+  await page.fill('#lab-q', 'ไข่'); 
+  await page.waitForSelector('#lab-sug [data-act=labPick]').catch(() => {});
+  await page.click('[data-act=labClear]');
+  await page.fill('#lab-q', 'ขนมปัง'); await page.keyboard.press('Enter');
+  await page.waitForSelector('.lab-row:has-text("ขนมปัง")');
+  await page.waitForSelector('#lab-prev .lab-stk svg');
+  await shot('04h-labels-sticker');
+  await page.click('[data-act=labClose]');
   await page.fill('#pq', '');
 
   // 9zzz. Promotion: owner sets "water 2 bottles 14", the till applies it by itself (QR so the drawer count is unchanged)
@@ -633,6 +660,16 @@ call('importProducts', T, [
   await page.click('.modal [data-x=ok]');
   await page.waitForFunction(() => document.querySelectorAll('#promo-rows .promo-card .tag.green').length === 2);
   await shot('04f-promos');
+  // promotion sign straight from the promotion card
+  await page.click('.promo-card:has-text("ขนมปังลด 20%") [data-act=labPromo]');
+  await page.waitForSelector('.lab-row.on:has-text("ขนมปังลด 20%")');
+  await page.click('[data-act=labPaper][data-p=a4]');
+  await page.waitForSelector('#lab-prev .lab-promo .lp-big');
+  assert.match(await page.textContent('#lab-prev .lab-promo'), /12\.00/, 'sign shows the promo price');
+  await shot('04i-labels-promo');
+  await page.click('[data-act=labKind][data-k=shelf]');
+  await page.click('[data-act=labClose]');
+  await page.click('[data-act=promoOpen]');
   await page.click('[data-act=promoClose]');
   await page.click('nav button[data-v=sale]');
   await page.click('.key:has-text("ขนมปัง")');
