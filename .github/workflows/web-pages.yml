@@ -30,7 +30,7 @@ jobs:
       - name: Version asset URLs
         run: |
           v="${GITHUB_SHA::8}"
-          sed -i -E "s#(href|src)=\"(styles\.css|drawer\.js|customer\.js|app\.js)\"#\1=\"\2?v=$v\"#g" web/index.html
+          sed -i -E "s#(href|src)=\"(styles\.css|drawer\.js|customer\.js|promo\.js|app\.js)\"#\1=\"\2?v=$v\"#g" web/index.html
           grep -n "?v=" web/index.html
       - uses: actions/upload-pages-artifact@v3
         with:

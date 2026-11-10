@@ -53,12 +53,18 @@ function api_commitSale(token, sale) {
       }
 
       var priced = priceLines_(sale.lines);
-      var lineDiscount = 0, manual = 0, markdowns = [];
+      // Promotions: worked out here at the time of sale; an offline sale keeps what the till charged.
+      var promoAt = off.at || now_();
+      var promosApplied = applySalePromos_(priced, promoAt, off.at && sale.promo ? sale.promo : null);
+      var lineDiscount = 0, manual = 0, promoTotal = 0, markdowns = [];
       priced.forEach(function (l) {
-        lineDiscount += l.lineDiscount;
+        if (round2_(l.lineDiscount + l.promo) > round2_(l.qty * l.unitPrice)) throw new Error('ส่วนลดของ ' + l.name + ' เกินราคา (มีโปรโมชั่นแล้ว)');
+        lineDiscount += l.lineDiscount + l.promo;
+        promoTotal += l.promo;
         manual += l.lineDiscount - (l.md ? l.md.amount : 0);
         if (l.md) markdowns.push(l.md);
       });
+      promoTotal = round2_(promoTotal);
       var billDiscount = round2_(Math.max(0, num_(sale.billDiscount)));
       var subtotal = round2_(priced.reduce(function (a, l) { return a + l.qty * l.unitPrice; }, 0));
       var discount = round2_(lineDiscount + billDiscount);
@@ -109,7 +115,8 @@ function api_commitSale(token, sale) {
         userId: actor.userId, itemsCount: priced.reduce(function (a, l) { return a + l.qty; }, 0),
         subtotal: subtotal, discount: discount, total: total, payMethod: sale.payMethod,
         received: received, change: change, status: 'PAID',
-        cashPaid: parts.cash, qrPaid: parts.qr, transferPaid: parts.transfer, returnedTotal: 0, offline: off.at ? true : ''
+        cashPaid: parts.cash, qrPaid: parts.qr, transferPaid: parts.transfer, returnedTotal: 0, offline: off.at ? true : '',
+        promoDiscount: promoTotal || '', promos: promosApplied.length ? JSON.stringify(promosApplied) : ''
       };
       // FIFO: each line costs what its pieces (or its recipe components) cost in the oldest lots.
       var ctx = fifoOpen_(), rec = recipesMap_(), prodBySku = {};
@@ -124,8 +131,8 @@ function api_commitSale(token, sale) {
         }
         return {
           billNo: billNo, lineNo: i + 1, sku: l.sku, name: l.name, barcode: l.barcode, unitName: l.unitName,
-          multiplier: l.multiplier, qty: l.qty, unitPrice: l.unitPrice, lineDiscount: l.lineDiscount,
-          lineTotal: round2_(l.qty * l.unitPrice - l.lineDiscount), cost: round2_(cost),
+          multiplier: l.multiplier, qty: l.qty, unitPrice: l.unitPrice, lineDiscount: round2_(l.lineDiscount + l.promo),
+          lineTotal: round2_(l.qty * l.unitPrice - l.lineDiscount - l.promo), cost: round2_(cost), promo: l.promo || '',
           markdownLotId: l.md ? l.md.lotId : '', markdownQty: l.md ? l.md.qty : '', markdown: l.md ? l.md.amount : ''
         };
       });
@@ -232,15 +239,18 @@ function linesOf_(billNo) {
   return readAll_('SaleLines').filter(function (l) { return l.billNo === billNo; });
 }
 
+function parsePromos_(v) { try { return v ? JSON.parse(v) : []; } catch (e) { return []; } }
+
 function receipt_(h, lines) {
   return {
     billNo: h.billNo, createdAt: h.createdAt, payMethod: h.payMethod, subtotal: num_(h.subtotal),
     discount: num_(h.discount), total: num_(h.total), received: num_(h.received), change: num_(h.change),
     status: h.status, payments: payParts_(h), returnedTotal: num_(h.returnedTotal),
+    promoDiscount: num_(h.promoDiscount), promos: parsePromos_(h.promos),
     lines: lines.map(function (l) {
       return { lineNo: num_(l.lineNo), sku: String(l.sku), name: l.name, unitName: l.unitName, multiplier: num_(l.multiplier) || 1,
                qty: num_(l.qty), unitPrice: num_(l.unitPrice), lineDiscount: num_(l.lineDiscount), lineTotal: num_(l.lineTotal),
-               returnedQty: num_(l.returnedQty) };
+               returnedQty: num_(l.returnedQty), promo: num_(l.promo) };
     })
   };
 }

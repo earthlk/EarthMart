@@ -39,6 +39,7 @@ function api_bootstrap(token) {
       }),
       shift: openShiftForDevice_(s.deviceId),
       markdowns: activeMarkdowns_(),
+      promos: promosForClient_(),
       expiryTodo: expiryTodoCount_()
     };
   });

@@ -146,7 +146,8 @@ function api_report(token, f) {
     };
     var byProduct = {}, hourly = [], daily = {}, byPay = { cash: 0, qr: 0, transfer: 0 };
     for (var h = 0; h < 24; h++) hourly.push(0);
-    var S = { gross: 0, cost: 0, discount: 0, bills: 0, pieces: 0 };
+    var S = { gross: 0, cost: 0, discount: 0, promo: 0, bills: 0, pieces: 0 };
+    var promoUse = {};
     var prod = function (sku, name) {
       var p = products[sku] || {};
       return byProduct[sku] || (byProduct[sku] = { sku: sku, name: p.name || name, category: p.category || '', unit: p.unit || '',
@@ -173,6 +174,13 @@ function api_report(token, f) {
       if (!any) return;
       S.gross += got; S.bills++;
       S.discount += f.sku || f.category ? 0 : num_(b.discount);
+      if (!(f.sku || f.category)) {
+        S.promo += num_(b.promoDiscount);
+        parsePromos_(b.promos).forEach(function (a) {
+          var u = promoUse[a.promoId || a.name] || (promoUse[a.promoId || a.name] = { promoId: a.promoId, name: a.name, bills: 0, times: 0, discount: 0 });
+          u.bills++; u.times += num_(a.times); u.discount += num_(a.discount);
+        });
+      }
       var share = num_(b.total) ? got / num_(b.total) : 0;
       var pp = payParts_(b);
       byPay.cash += pp.cash * share; byPay.qr += pp.qr * share; byPay.transfer += pp.transfer * share;
@@ -363,13 +371,15 @@ function api_report(token, f) {
     return {
       from: from, to: to, oneDay: oneDay, gran: month ? 'month' : 'day', trend: trend, hours: hours, history: history,
       summary: { gross: round2_(S.gross), refunds: round2_(refunds), net: round2_(net), bills: S.bills, avgBill: S.bills ? round2_(S.gross / S.bills) : 0,
-                 pieces: round2_(S.pieces), discount: round2_(S.discount), cost: cost, profit: round2_(net - cost),
+                 pieces: round2_(S.pieces), discount: round2_(S.discount), promo: round2_(S.promo), cost: cost, profit: round2_(net - cost),
                  margin: net ? Math.round((net - cost) / net * 1000) / 10 : 0,
                  voids: voids.length, voidTotal: round2_(voids.reduce(function (a, b) { return a + num_(b.total); }, 0)), returns: retCount,
                  loss: round2_(lossT.loss), expiry: round2_(lossT.expiry), use: round2_(lossT.use),
                  after: round2_(net - cost - lossT.loss - lossT.expiry - lossT.use) },
       byPay: { cash: round2_(byPay.cash), qr: round2_(byPay.qr), transfer: round2_(byPay.transfer) },
       hourly: hourly.map(round2_), daily: days,
+      promos: Object.keys(promoUse).map(function (k) { var u = promoUse[k]; u.discount = round2_(u.discount); return u; })
+        .sort(function (a, b) { return b.discount - a.discount; }),
       products: plist, categories: clist,
       staff: Object.keys(staff).map(function (k) { var x = staff[k]; ['net', 'discount', 'voidTotal', 'refunds'].forEach(function (q) { x[q] = round2_(x[q]); }); x.net = round2_(x.net - x.refunds); return x; })
         .sort(function (a, b) { return b.net - a.net; }),

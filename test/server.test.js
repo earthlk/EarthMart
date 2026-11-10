@@ -690,4 +690,61 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   ok(rep.exceptions.some(e => e.action === 'OVERSELL'), 'oversell shows in the report exceptions');
 }
 
+{
+  // Promotions: multi-buy, buy X get Y, combo; time windows; offline sales keep what the till charged
+  const fs = require('fs'), path = require('path');
+  eq(fs.readFileSync(path.join(__dirname, '../web/promo.js'), 'utf8'), fs.readFileSync(path.join(__dirname, '../gas/PromoEngine.gs'), 'utf8'), 'promo engine: browser and server copies are identical');
+  const h = makeContext({ now: '2026-11-05T07:00:00Z' });   // Thu 14:00 Bangkok
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c9 = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m9 = (fn, ...a) => { const r = c9(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  const f9 = (re, fn, ...a) => { const r = c9(fn, ...a); ok(!r.ok && re.test(r.error), fn + ' should fail ' + re + ' got ' + JSON.stringify(r)); };
+  h.createOwner('O', '1111');
+  const DEV = 'Dcounter9xxxxxxxxxx';
+  const T = m9('login', m9('status').users[0].userId, '1111', DEV).token;
+  m9('registerDevice', T, DEV, 'เครื่อง');
+  m9('importProducts', T, ['sku,name,category,type,unit,cost,price,minStock,openingStock,barcode,barcodeUnit,multiplier,barcodePrice',
+    'W1,น้ำ,เครื่องดื่ม,barcode,ขวด,4,7,0,100,8850000000101,ชิ้น,1,', 'W1,,,,,,,,,8850000000102,แพ็ค,6,40',
+    'W2,โซดา,เครื่องดื่ม,barcode,ขวด,6,10,0,100,8850000000201,ชิ้น,1,',
+    'C1,กาแฟ,เครื่องดื่มชง,nobarcode,แก้ว,10,30,0,100,,,,', 'B1,ขนมปัง,ขนม,nobarcode,ชิ้น,8,15,0,100,,,,',
+    'K1,ลูกอม,ขนม,nobarcode,ชิ้น,1,5,0,100,,,,'].join('\n'));
+  m9('openShift', T, 500, '');
+  f9(/ถูกกว่า/, 'savePromo', T, { name: 'แพง', type: 'multi', items: ['W1'], buyQty: 2, price: 14 });
+  f9(/ถูกกว่า/, 'savePromo', T, { name: 'เซ็ตแพง', type: 'combo', items: [{ sku: 'C1', qty: 1 }, { sku: 'B1', qty: 1 }], price: 45 });
+  const pm = m9('savePromo', T, { name: 'น้ำ+โซดา 2 ขวด 15', type: 'multi', items: ['W1', 'W2'], buyQty: 2, price: 15 });
+  m9('savePromo', T, { name: 'ลูกอม ซื้อ 2 แถม 1', type: 'bxgy', items: ['K1'], buyQty: 2, freeQty: 1 });
+  m9('savePromo', T, { name: 'กาแฟ+ขนมปัง 40', type: 'combo', items: [{ sku: 'C1', qty: 1 }, { sku: 'B1', qty: 1 }], price: 40 });
+  m9('savePromo', T, { name: 'เช้า ลูกอม', type: 'multi', items: ['K1'], buyQty: 2, price: 6, timeFrom: '06:00', timeTo: '10:00' });
+  m9('savePromo', T, { name: 'เสาร์อาทิตย์', type: 'multi', items: ['B1'], buyQty: 2, price: 20, days: [0, 6] });
+  ok(m9('bootstrap', T).promos.length === 5, 'till gets the active promotions');
+
+  // 3 water + 1 soda: (10+7)->15 saves 2; (7+7) would cost more as a set, so stays normal; the pack is not eligible
+  const r1 = m9('commitSale', T, { saleUid: 'P1', payMethod: 'cash', received: 200, lines: [{ sku: 'W1', qty: 3 }, { sku: 'W2', qty: 1 }, { barcode: '8850000000102', qty: 1 }] });
+  eq([r1.subtotal, r1.promoDiscount, r1.total], [71, 2, 69], 'multi-buy across two products; packs keep their own price');
+  eq(r1.promos.map(a => [a.name, a.times, a.discount]), [['น้ำ+โซดา 2 ขวด 15', 1, 2]], 'applied promotion on the receipt');
+  eq(r1.lines.reduce((a, l) => a + l.promo, 0), 2, 'per-line promo adds up');
+  // 7 candies: buy 2 get 1 -> 2 free (morning deal is outside its hours)
+  const r2 = m9('commitSale', T, { saleUid: 'P2', payMethod: 'cash', received: 50, lines: [{ sku: 'K1', qty: 7 }] });
+  eq([r2.promoDiscount, r2.total], [10, 25], 'buy 2 get 1 free, time window respected');
+  // combo + weekend promo (Thursday: off)
+  const r3 = m9('commitSale', T, { saleUid: 'P3', payMethod: 'cash', received: 100, lines: [{ sku: 'C1', qty: 1 }, { sku: 'B1', qty: 2 }] });
+  eq([r3.promoDiscount, r3.total], [5, 55], 'combo once; the extra bread pays full price; weekend deal off on Thursday');
+  // manual discount on top still needs the owner and must fit what is left
+  f9(/เกินราคา/, 'commitSale', T, { saleUid: 'P4', payMethod: 'cash', received: 100, lines: [{ sku: 'C1', qty: 1, lineDiscount: 30 }, { sku: 'B1', qty: 1 }] });
+  // switched off -> gone
+  m9('setPromoActive', T, pm.promoId, false);
+  eq(m9('commitSale', T, { saleUid: 'P5', payMethod: 'cash', received: 20, lines: [{ sku: 'W1', qty: 2 }] }).total, 14, 'switched-off promotion no longer applies');
+  // offline sale: keeps the amounts the till charged
+  const r6 = m9('commitSale', T, { saleUid: 'P6', payMethod: 'cash', received: 20, offlineAt: '2026-11-05T06:00:00.000Z', lines: [{ sku: 'W1', qty: 2 }],
+    promo: { lines: [1], applied: [{ promoId: pm.promoId, name: 'น้ำ+โซดา 2 ขวด 15', times: 1, discount: 1 }] } });
+  eq([r6.total, r6.promoDiscount], [13, 1], 'offline sale keeps the promotion the till applied');
+  const rep = m9('report', T, { from: '2026-11-05', to: '2026-11-05' });
+  eq(rep.summary.promo, 18, 'report totals promotion discounts');
+  ok(rep.promos.find(p => p.name === 'น้ำ+โซดา 2 ขวด 15').discount === 3, 'report lists promotion use');
+  // return part of a promo bill: refund what was actually paid for that line
+  const ret = m9('returnSale', T, { returnUid: 'RP1', billNo: r3.billNo, refundMethod: 'cash', reason: 'x', lines: [{ lineNo: 1, qty: 1 }] });
+  ok(ret.total < 30, 'refund of a combo item is its share after the promotion (' + ret.total + ')');
+}
+
 console.log('server tests passed:', pass);

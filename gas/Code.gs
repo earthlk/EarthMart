@@ -33,9 +33,10 @@ var SCHEMA = {
   Barcodes:   ['barcode', 'sku', 'unitName', 'multiplier', 'price'],
   Sales:      ['billNo', 'saleUid', 'createdAt', 'shiftId', 'deviceId', 'userId', 'itemsCount', 'subtotal',
                'discount', 'total', 'payMethod', 'received', 'change', 'status', 'voidReason', 'voidBy', 'voidAt',
-               'cashPaid', 'qrPaid', 'transferPaid', 'returnedTotal', 'offline'],
+               'cashPaid', 'qrPaid', 'transferPaid', 'returnedTotal', 'offline', 'promoDiscount', 'promos'],
   SaleLines:  ['billNo', 'lineNo', 'sku', 'name', 'barcode', 'unitName', 'multiplier', 'qty', 'unitPrice',
-               'lineDiscount', 'lineTotal', 'cost', 'markdownLotId', 'markdownQty', 'markdown', 'returnedQty'],
+               'lineDiscount', 'lineTotal', 'cost', 'markdownLotId', 'markdownQty', 'markdown', 'returnedQty', 'promo'],
+  Promotions: ['promoId', 'name', 'type', 'active', 'rule', 'createdAt', 'updatedAt', 'createdBy'],
   Returns:    ['returnNo', 'returnUid', 'createdAt', 'billNo', 'shiftId', 'deviceId', 'userId', 'itemsCount', 'total',
                'refundMethod', 'restock', 'reason', 'approvedBy'],
   ReturnLines: ['returnNo', 'billNo', 'lineNo', 'sku', 'name', 'qty', 'multiplier', 'refund', 'cost', 'restocked'],
@@ -253,7 +254,7 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '9';
+var SCHEMA_VERSION = '10';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {

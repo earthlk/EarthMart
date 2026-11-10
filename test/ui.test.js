@@ -609,6 +609,34 @@ call('importProducts', T, [
   assert.strictEqual(call('bootstrap', T).products.find(p => p.sku === 'W0001').price, 8, 'new price saved');
   await page.fill('#pq', '');
 
+  // 9zzz. Promotion: owner sets "water 2 bottles 14", the till applies it by itself (QR so the drawer count is unchanged)
+  await page.click('[data-act=promoOpen]');
+  await page.waitForSelector('#promo-rows .empty');
+  await page.click('[data-act=promoNew]');
+  await page.fill('#pe-name', 'น้ำดื่ม 2 ขวด 14');
+  await page.fill('#pe-q', 'น้ำดื่ม');
+  await page.click('#pe-sug [data-padd=W0001]');
+  await page.fill('#pe-buyQty', '2');
+  await page.fill('#pe-price', '14');
+  await page.waitForSelector('#pe-prev:has-text("16.00")');
+  await shot('04e-promo-edit');
+  await page.click('.modal [data-x=ok]');
+  await page.waitForSelector('#promo-rows .promo-card .tag.green');
+  await shot('04f-promos');
+  await page.click('[data-act=promoClose]');
+  await page.click('nav button[data-v=sale]');
+  await page.fill('#scan', '2*8851234567890'); await page.keyboard.press('Enter');
+  await page.waitForSelector('.line .promo-tag');
+  await page.waitForFunction(() => /14\.00/.test(document.querySelector('#totalbar .amt').textContent));
+  await shot('06q-promo-cart');
+  await page.click('[data-act=payQr]');
+  await page.waitForSelector('#qrbox svg');
+  await page.click('[data-x=ok]');
+  await page.waitForSelector('.modal h1:has-text("บันทึกแล้ว")');
+  await page.keyboard.press('Escape');
+  const pb = call('listBills', T)[0];
+  assert.strictEqual(pb.total, 14, 'server charged the promotion price too');
+
   // 10. Close shift
   await page.click('nav button[data-v=shift]');
   await page.waitForSelector('#shiftsum h2');

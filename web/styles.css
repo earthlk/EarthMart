@@ -522,3 +522,22 @@ a{color:var(--brand-text)}
 #app.m .grid3{grid-template-columns:1fr}
 #app.m .exp-grid{grid-template-columns:minmax(0,1fr) auto auto}
 #app.m .exp-grid>:nth-child(2){display:none}
+
+/* ===== Promotions ===== */
+.promo-tag{display:inline-block;margin-top:4px;padding:1px 8px;border-radius:10px;background:var(--brand-soft);color:var(--brand-text);font-size:12px;font-weight:700}
+.key{position:relative}
+.kpromo{position:absolute;top:6px;right:6px;padding:1px 6px;border-radius:8px;background:var(--brand);color:var(--brand-ink);font-size:11px;font-weight:700}
+.promo-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.promo-card.off{opacity:.6}
+.tag.blue{background:var(--tag-blue-bg);color:var(--tag-blue)}
+.promo-ed{gap:12px}
+.pe-type{flex-wrap:wrap}
+.pe-sug{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;margin-top:4px;max-height:220px;overflow:auto}
+.pe-sug:empty{display:none}
+.pe-sug button{text-align:left;padding:10px 12px;border:0;border-bottom:1px solid var(--line-soft);background:var(--surface);color:var(--ink);font:inherit;cursor:pointer}
+.pchips{display:flex;flex-wrap:wrap;gap:6px}
+.pchip{display:inline-flex;align-items:center;gap:6px;padding:4px 6px 4px 12px;border-radius:18px;border:1px solid var(--brand-line);background:var(--brand-soft);font-size:14px}
+.pchip .pq{display:inline-flex;align-items:center;gap:4px}
+.pchip .pq button,.pchip .px{width:26px;height:26px;border-radius:13px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);cursor:pointer;font:inherit;line-height:1}
+.pe-prev{min-height:20px;font-weight:600}
+#app.m .promo-list{grid-template-columns:1fr}
