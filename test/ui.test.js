@@ -640,8 +640,23 @@ call('importProducts', T, [
   await page.click('[data-act=clearCart]');
   if (await page.$('.modal [data-x=yes]')) await page.click('.modal [data-x=yes]');
   await page.waitForFunction(() => !document.querySelector('#lines .line'));
-  await page.fill('#scan', '2*8851234567890'); await page.keyboard.press('Enter');
+  // customer display: promo slides while idle, "add one more" hint while scanning
+  const cd2 = await page.context().newPage();
+  await cd2.setViewportSize({ width: 1024, height: 600 });
+  cd2.on('pageerror', e => errors.push('customer: ' + e.message));
+  await cd2.route('**/*', handler);
+  await cd2.goto(SITE + '?page=customer');
+  await cd2.waitForSelector('#cdslide .cd-sp');
+  await cd2.waitForFunction(() => /ขนมปังลด 20%|น้ำดื่ม 2 ขวด 14/.test(document.querySelector('#cdslide').textContent));
+  await cd2.screenshot({ path: path.join(SHOTS, 'c5-slide-promo.png') });
+  await page.bringToFront();
+  await page.fill('#scan', '8851234567890'); await page.keyboard.press('Enter');
+  await page.waitForSelector('#phint:has-text("เพิ่มอีก 1 ชิ้น")');
+  await cd2.waitForSelector('.cd-hintbox:has-text("เพิ่มอีก 1 ชิ้น")');
+  await cd2.screenshot({ path: path.join(SHOTS, 'c6-hint.png') });
+  await page.fill('#scan', '8851234567890'); await page.keyboard.press('Enter');
   await page.waitForSelector('.line .promo-tag');
+  assert.ok(!(await page.$('#phint')), 'hint gone once the deal applies');
   await page.waitForFunction(() => /14\.00/.test(document.querySelector('#totalbar .amt').textContent));
   await shot('06q-promo-cart');
   await page.click('[data-act=payQr]');
@@ -651,6 +666,20 @@ call('importProducts', T, [
   await page.keyboard.press('Escape');
   const pb = call('listBills', T)[0];
   assert.strictEqual(pb.total, 14, 'server charged the promotion price too');
+
+  // upload a poster slide from Settings: resized, stored, cached on the counter, shown on the display
+  await page.click('nav button[data-v=settings]');
+  await page.waitForSelector('#slidelist');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64');
+  await page.setInputFiles('#sl-file', { name: 'poster.png', mimeType: 'image/png', buffer: png });
+  await page.waitForSelector('.modal #sl-title');
+  await page.fill('#sl-title', 'โปสเตอร์กาแฟ');
+  await page.click('.modal [data-x=ok]');
+  await page.waitForSelector('.slide-row:has-text("โปสเตอร์กาแฟ") img[src^="blob:"]');
+  await shot('11b-slides-settings');
+  assert.strictEqual(call('listSlides', T).length, 1, 'slide saved on the server');
+  await cd2.waitForFunction(() => document.querySelectorAll('#cddots span').length === 3, null, { timeout: 20000 });   // 2 promotions + the poster
+  await cd2.close();
 
   // 10. Close shift
   await page.click('nav button[data-v=shift]');

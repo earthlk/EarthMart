@@ -541,3 +541,12 @@ a{color:var(--brand-text)}
 .pchip .pq button,.pchip .px{width:26px;height:26px;border-radius:13px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);cursor:pointer;font:inherit;line-height:1}
 .pe-prev{min-height:20px;font-weight:600}
 #app.m .promo-list{grid-template-columns:1fr}
+
+/* ===== Slides manager ===== */
+.set-grid2{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}
+#app.m .set-grid2{grid-template-columns:1fr}
+.slide-list{display:flex;flex-direction:column;gap:8px}
+.slide-row{display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--line);border-radius:10px}
+.slide-row.off{opacity:.55}
+.slide-row img{width:96px;height:60px;object-fit:cover;border-radius:6px;background:var(--surface-muted);flex:0 0 96px}
+.promo-hint{color:var(--brand-text);font-weight:600}

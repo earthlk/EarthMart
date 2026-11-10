@@ -85,7 +85,13 @@
     '.cd-disc{color:#B45309}' +
     '.cd-qr{width:min(28vw,46vh);height:min(28vw,46vh);background:#fff;padding:.6em;border:2px solid #1B1F1D;border-radius:.6em;box-sizing:border-box}' +
     '.cd-qr svg{width:100%;height:100%;display:block}' +
-    '.cd-hint{position:fixed;inset:auto 0 0 0;padding:.4em;text-align:center;font-size:.6em;color:#5B625E}';
+    '.cd-hint{position:fixed;inset:auto 0 0 0;padding:.4em;text-align:center;font-size:.6em;color:#5B625E}' +
+    '.cd-slide{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0}' +
+    '.cd-sp{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35em;text-align:center;padding:1.4em}' +
+    '.cd-spic{width:3.4em;height:3.4em;border-radius:.8em;display:flex;align-items:center;justify-content:center}.cd-spic svg{width:60%;height:60%}' +
+    '.cd-img{width:100%;height:100%;object-fit:contain;display:block}' +
+    '.cd-dots{display:flex;justify-content:center;gap:.4em}.cd-dots span{width:.5em;height:.5em;border-radius:50%;background:#C9CEC9}.cd-dots span.on{background:#1F6B45}' +
+    '.cd-hintbox{margin-top:1em;padding:.7em .9em;border-radius:.8em;background:#FFF7D6;color:#5A4500;font-weight:700;font-size:1em;line-height:1.3}';
 
   var S = { mode: 'idle', doneUntil: 0, timer: null };
 
@@ -107,7 +113,8 @@
         '<section class="cd-brand" style="width:38%;box-sizing:border-box;padding:2em 1.6em;display:flex;flex-direction:column;justify-content:center;gap:.4em">' +
         '<div class="cd-soft" style="font-size:1.1em">ยอดรวม</div><div class="cd-num" style="font-size:' + (money(st.total).length > 7 ? 2.3 : 2.9) + 'em;font-weight:700;line-height:1.05">฿' + money(st.total) + '</div>' +
         '<div class="cd-soft">' + st.items + ' ชิ้น</div><div style="height:1px;background:#3F8A63;margin:1em 0"></div>' +
-        '<div class="cd-soft" style="display:flex;justify-content:space-between"><span>ส่วนลด</span><span class="cd-num">฿' + money(st.discount) + '</span></div></section>';
+        '<div class="cd-soft" style="display:flex;justify-content:space-between"><span>ส่วนลด</span><span class="cd-num">฿' + money(st.discount) + '</span></div>' +
+        (st.hint ? '<div class="cd-hintbox">' + esc(st.hint) + '</div>' : '') + '</section>';
     }
     if (st.mode === 'pay') {
       var qr = st.method === 'qr' && st.qr;
@@ -139,16 +146,72 @@
     return '<section class="cd-brand" style="width:43%;box-sizing:border-box;padding:2.6em 2.2em;display:flex;flex-direction:column;justify-content:space-between">' +
       '<div><div style="font-size:2.6em;font-weight:700;line-height:1.1">' + shop + '</div><div class="cd-soft" style="font-size:1.1em;margin-top:.4em">' + esc(st.welcome || 'ยินดีต้อนรับค่ะ') + '</div></div>' +
       '<div class="cd-soft" style="font-size:.8em;line-height:1.6">' + (st.hours ? esc(st.hours) + '<br>' : '') + 'รับเงินสด · พร้อมเพย์ทุกธนาคาร</div></section>' +
+      ((st.slides || []).length ? '<section style="flex:1;padding:2em;display:flex;flex-direction:column;gap:.6em;min-width:0"><div class="cd-card cd-slide" id="cdslide"></div>' +
+        ((st.slides || []).length > 1 ? '<div class="cd-dots" id="cddots"></div>' : '') + '</section>' :
       '<section style="flex:1;padding:2em;display:flex"><div class="cd-card" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.5em;text-align:center;padding:1.6em">' +
       (st.promoTitle ? '<div class="cd-muted" style="font-size:.7em;font-weight:600;letter-spacing:.08em">โปรโมชั่น</div><div style="font-size:1.6em;font-weight:700">' + esc(st.promoTitle) + '</div>' +
         '<div class="cd-muted" style="font-size:.95em;white-space:pre-line">' + esc(st.promoText || '') + '</div>'
         : '<div style="font-size:1.6em;font-weight:700">' + shop + '</div><div class="cd-muted">' + esc(st.welcome || 'ยินดีต้อนรับค่ะ') + '</div>') +
-      '</div></section>';
+      '</div></section>');
+  }
+
+  /* ---- slideshow (idle) ---- */
+  var urls = {};
+  function slideImg(sl) {
+    if (urls[sl.id]) return Promise.resolve(urls[sl.id]);
+    if (!window.caches) return Promise.resolve('');
+    return caches.open('em-slides').then(function (c) { return c.match(sl.key); }).then(function (hit) {
+      return hit ? hit.blob().then(function (b) { urls[sl.id] = URL.createObjectURL(b); return urls[sl.id]; }) : '';
+    }).catch(function () { return ''; });
+  }
+  function slideHtml(sl) {
+    if (sl.kind === 'promo') {
+      return '<div class="cd-sp"><div class="cd-muted" style="font-size:.7em;font-weight:600;letter-spacing:.08em">โปรโมชั่น</div>' +
+        (sl.icon ? '<div class="cd-spic" style="background:' + esc(sl.bg) + ';color:' + esc(sl.fg) + '">' + sl.icon + '</div>' : '') +
+        '<div style="font-size:1.5em;font-weight:700;line-height:1.2">' + esc(sl.title) + '</div>' +
+        (sl.big ? '<div class="cd-num" style="font-size:2.6em;font-weight:700;color:#1F6B45;line-height:1.1">' + esc(sl.big) + '</div>' : '') +
+        (sl.was ? '<div class="cd-muted" style="text-decoration:line-through">ปกติ ' + esc(sl.was) + '</div>' : '') +
+        '<div class="cd-muted" style="font-size:.85em">' + esc(sl.sub || '') + (sl.when ? ' · ' + esc(sl.when) : '') + '</div></div>';
+    }
+    if (sl.kind === 'text') {
+      return '<div class="cd-sp"><div class="cd-muted" style="font-size:.7em;font-weight:600;letter-spacing:.08em">โปรโมชั่น</div><div style="font-size:1.7em;font-weight:700">' + esc(sl.title) + '</div>' +
+        '<div class="cd-muted" style="white-space:pre-line">' + esc(sl.sub || '') + '</div></div>';
+    }
+    return '<img class="cd-img" alt="' + esc(sl.title || '') + '" data-id="' + esc(sl.id) + '">';
+  }
+  function showSlide(st) {
+    var box = document.getElementById('cdslide');
+    var list = st.slides || [];
+    if (!box || !list.length) return;
+    S.slideIdx = S.slideIdx % list.length;
+    var sl = list[S.slideIdx];
+    box.innerHTML = slideHtml(sl);
+    if (sl.kind === 'img') {
+      slideImg(sl).then(function (u) {
+        var img = box.querySelector('img');
+        if (!img) return;
+        if (u) img.src = u;
+        else if (list.length > 1) { S.slideIdx++; showSlide(st); }   // image not on this device yet: skip it
+        else box.innerHTML = '<div class="cd-sp cd-muted">' + esc(sl.title || '') + '</div>';
+      });
+    }
+    var dots = document.getElementById('cddots');
+    if (dots) dots.innerHTML = list.map(function (x, i) { return '<span class="' + (i === S.slideIdx ? 'on' : '') + '"></span>'; }).join('');
+  }
+  function startSlides(st) {
+    clearInterval(S.slideTimer);
+    var list = st.slides || [];
+    var sig = JSON.stringify(list.map(function (x) { return x.kind + (x.id || x.title); }));
+    if (sig !== S.slideSig) { S.slideSig = sig; S.slideIdx = 0; }
+    S.slideIdx = S.slideIdx || 0;
+    showSlide(st);
+    if (list.length > 1) S.slideTimer = setInterval(function () { S.slideIdx = (S.slideIdx + 1) % list.length; showSlide(st); }, (st.slideSeconds || 8) * 1000);
   }
 
   function draw(st) {
     var root = document.getElementById('cd');
     root.innerHTML = view(st);
+    if (st.mode === 'idle') startSlides(st); else clearInterval(S.slideTimer);
     var box = document.getElementById('cdqr');
     if (box && st.qr) {
       if (typeof qrcode !== 'function') { box.textContent = 'โหลดตัวสร้าง QR ไม่ได้'; return; }

@@ -88,10 +88,15 @@ function makeContext(opts = {}) {
   const backups = [];
   let clock = opts.now ? new Date(opts.now).getTime() : Date.now();
 
+  const files = {};
+  let fileSeq = 0;
+  const folder = { getId: () => 'F1', getFiles: () => ({ hasNext: () => false }),
+    createFile: blob => { const id = 'FILE' + (++fileSeq); files[id] = blob; return { getId: () => id }; } };
   const ctx = {
     console,
     __ss: ss, __fetches: fetches, __cache: cache, __props: props, __backups: backups,
     __advance(ms) { clock += ms; },
+    __files: files,
     __sheet(name) {   // rows of a sheet as objects (tests only)
       const sh = ss.getSheetByName(name);
       if (!sh || !sh.data.length) return [];
@@ -115,6 +120,9 @@ function makeContext(opts = {}) {
     Logger: { log: () => {} },
     Utilities: {
       DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' },
+      base64Decode: b64 => Array.from(Buffer.from(b64, 'base64')).map(b => (b > 127 ? b - 256 : b)),
+      base64Encode: bytes => Buffer.from(bytes.map(b => b & 255)).toString('base64'),
+      newBlob: (bytes, mime, name) => ({ getBytes: () => bytes, getContentType: () => mime, getName: () => name }),
       computeDigest: (alg, s) => Array.from(crypto.createHash('sha256').update(s, 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
       getUuid: () => crypto.randomUUID(),
       formatDate: (d, tz, pattern) => {
@@ -128,9 +136,10 @@ function makeContext(opts = {}) {
     },
     UrlFetchApp: { fetch: (url, o) => { fetches.push({ url, o }); return { getResponseCode: () => 200, getContentText: () => '{}' }; } },
     DriveApp: {
-      createFolder: n => ({ getId: () => 'F1', getFiles: () => ({ hasNext: () => false }) }),
-      getFolderById: () => ({ getId: () => 'F1', getFiles: () => ({ hasNext: () => false }) }),
-      getFileById: id => ({ makeCopy: (n) => { throw new Error('makeCopy copies the bound script too — do not use'); }, moveTo: () => {} })
+      createFolder: n => folder,
+      getFolderById: () => folder,
+      getFileById: id => ({ makeCopy: (n) => { throw new Error('makeCopy copies the bound script too — do not use'); }, moveTo: () => {},
+        getBlob: () => { if (!files[id]) throw new Error('no file ' + id); return files[id]; }, setTrashed: () => { delete files[id]; } })
     },
     ScriptApp: { getProjectTriggers: () => [], deleteTrigger: () => {}, newTrigger: () => ({ timeBased: () => ({ everyDays: () => ({ atHour: () => ({ create: () => {} }) }) }) }) },
     ContentService: {

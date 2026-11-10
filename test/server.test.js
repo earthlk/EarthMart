@@ -754,4 +754,29 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   ok(ret.total < 30, 'refund of a combo item is its share after the promotion (' + ret.total + ')');
 }
 
+{
+  // Customer-display slides: upload (owner), list, image, reorder, switch off, delete
+  const h = makeContext({ now: '2026-11-05T03:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m = (fn, ...a) => { const r = c(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  h.createOwner('O', '1111');
+  const T = m('login', m('status').users[0].userId, '1111', 'Dx').token;
+  m('addUser', T, 'แคช', 'cashier', '2222');
+  const C = m('login', m('listUsers', T).find(u => u.name === 'แคช').userId, '2222', 'Dx').token;
+  const img = 'data:image/jpeg;base64,' + Buffer.from('fake-jpeg-bytes').toString('base64');
+  ok(!c('uploadSlide', C, { title: 'x', dataUrl: img }).ok, 'only the owner uploads slides');
+  ok(!c('uploadSlide', T, { title: 'x', dataUrl: 'data:text/plain;base64,aGk=' }).ok, 'only images');
+  const a = m('uploadSlide', T, { title: 'กาแฟใหม่', dataUrl: img, startDate: '2026-11-01', endDate: '2026-11-30' });
+  const b = m('uploadSlide', T, { title: 'น้ำแข็ง', dataUrl: img });
+  eq(m('listSlides', C).map(s => s.title), ['กาแฟใหม่', 'น้ำแข็ง'], 'slides listed in order');
+  eq(m('slideImage', C, a.slideId).dataUrl, img, 'image comes back as uploaded');
+  eq(m('saveSlide', T, { slideId: b.slideId, move: -1 }).map(s => s.title), ['น้ำแข็ง', 'กาแฟใหม่'], 'reorder');
+  ok(m('saveSlide', T, { slideId: a.slideId, active: false }).find(s => s.slideId === a.slideId).active === false, 'switch off');
+  ok(m('bootstrap', T).slides.length === 2 && m('bootstrap', T).settings.slideSeconds === '8', 'bootstrap carries slides + settings');
+  eq(m('deleteSlide', T, a.slideId).map(s => s.title), ['น้ำแข็ง'], 'delete removes the row');
+  ok(!Object.keys(h.__files).includes('FILE1'), 'deleted slide image is trashed in Drive');
+}
+
 console.log('server tests passed:', pass);

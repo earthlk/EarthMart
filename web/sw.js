@@ -47,7 +47,7 @@ self.addEventListener('install', function (e) {
 
 self.addEventListener('activate', function (e) {
   e.waitUntil(caches.keys().then(function (names) {
-    return Promise.all(names.filter(function (n) { return n !== CACHE; }).map(function (n) { return caches.delete(n); }));
+    return Promise.all(names.filter(function (n) { return n !== CACHE && n.indexOf('earthmart-') === 0; }).map(function (n) { return caches.delete(n); }));
   }).then(function () { return self.clients.claim(); }));
 });
 

@@ -36,6 +36,7 @@ var SCHEMA = {
                'cashPaid', 'qrPaid', 'transferPaid', 'returnedTotal', 'offline', 'promoDiscount', 'promos'],
   SaleLines:  ['billNo', 'lineNo', 'sku', 'name', 'barcode', 'unitName', 'multiplier', 'qty', 'unitPrice',
                'lineDiscount', 'lineTotal', 'cost', 'markdownLotId', 'markdownQty', 'markdown', 'returnedQty', 'promo'],
+  Slides:     ['slideId', 'title', 'fileId', 'mime', 'startDate', 'endDate', 'active', 'sort', 'createdAt', 'updatedAt'],
   Promotions: ['promoId', 'name', 'type', 'active', 'rule', 'createdAt', 'updatedAt', 'createdBy'],
   Returns:    ['returnNo', 'returnUid', 'createdAt', 'billNo', 'shiftId', 'deviceId', 'userId', 'itemsCount', 'total',
                'refundMethod', 'restock', 'reason', 'approvedBy'],
@@ -66,6 +67,9 @@ var DEFAULT_SETTINGS = {
   customerWelcome: 'ยินดีต้อนรับค่ะ',
   customerPromoTitle: '',
   customerPromoText: '',
+  slideSeconds: '8',
+  slidesAuto: '1',
+  cdHints: '1',
   expiryWarnDays: '{}',
   expiryDefaultDays: '3',
   markdownPct: '30'
@@ -254,7 +258,7 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '10';
+var SCHEMA_VERSION = '11';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {

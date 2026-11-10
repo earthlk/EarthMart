@@ -305,7 +305,7 @@ function saveCache(now) {
   if (!S.products || !S.status || !S.user) return;
   try {
     localStorage.setItem('em_cache', JSON.stringify({ at: new Date().toISOString(), status: S.status, boot: {
-      isCounter: S.isCounter, settings: S.settings, shift: S.shift && !S.shift.offline ? S.shift : null, markdowns: S.markdowns, expiryTodo: S.expiryTodo, promos: S.promos || [],
+      isCounter: S.isCounter, settings: S.settings, shift: S.shift && !S.shift.offline ? S.shift : null, markdowns: S.markdowns, expiryTodo: S.expiryTodo, promos: S.promos || [], slides: S.slides || [],
       products: S.products, barcodes: S.barcodes, recipes: S.recipeRows || [] } }));
   } catch (e) { /* storage full: selling still works from memory */ }
 }
@@ -316,7 +316,7 @@ function bootOffline(user) {
   var c = readCache();
   if (!c || !c.boot || !c.boot.products) return false;
   S.user = user; S.isCounter = !!c.boot.isCounter; S.settings = c.boot.settings || S.settings;
-  S.shift = localShift() || c.boot.shift; S.markdowns = c.boot.markdowns || []; S.expiryTodo = c.boot.expiryTodo || 0; S.promos = c.boot.promos || [];
+  S.shift = localShift() || c.boot.shift; S.markdowns = c.boot.markdowns || []; S.expiryTodo = c.boot.expiryTodo || 0; S.promos = c.boot.promos || []; S.slides = c.boot.slides || [];
   sstore('em_user', JSON.stringify(user));
   setCatalog(c.boot.products, c.boot.barcodes || [], c.boot.recipes || []);
   applyTheme();
@@ -767,7 +767,8 @@ function boot() {
   return api('bootstrap', S.token).then(function (d) {
     S.user = d.user; S.isCounter = d.isCounter; S.settings = d.settings; S.shift = d.shift || localShift();
     sstore('em_user', JSON.stringify(d.user));
-    S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0; S.promos = d.promos || [];
+    S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0; S.promos = d.promos || []; S.slides = d.slides || [];
+    setTimeout(syncSlides, 2500);
     if (outbox().length) setTimeout(function () { syncOutbox(); }, 1500);
     setCatalog(d.products, d.barcodes, d.recipes);
     saveCache(true);
@@ -804,7 +805,7 @@ function setCatalog(products, barcodes, recipes) {
 
 function reloadCatalog() {
   return api('bootstrap', S.token).then(function (d) {
-    setCatalog(d.products, d.barcodes, d.recipes); S.shift = d.shift || localShift(); S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0; S.promos = d.promos || [];
+    setCatalog(d.products, d.barcodes, d.recipes); S.shift = d.shift || localShift(); S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0; S.promos = d.promos || []; S.slides = d.slides || [];
     S.isCounter = d.isCounter; S.settings = d.settings || S.settings;
     saveCache(true);
   });
@@ -1075,7 +1076,8 @@ function cdPublish(mode, extra) {
     promoTitle: S.settings.customerPromoTitle, promoText: S.settings.customerPromoText, thanks: S.settings.receiptFooter,
     lines: S.cart.lines.map(function (l) { return { name: l.name + (l.multiplier > 1 ? ' (' + l.unitName + ')' : ''), qty: l.qty, total: round2(l.qty * l.unitPrice), discount: ldTotal(l) }; }),
     last: last ? { name: last.name, price: last.unitPrice } : null,
-    items: t.items, subtotal: t.subtotal, discount: t.discount, total: t.total
+    items: t.items, subtotal: t.subtotal, discount: t.discount, total: t.total,
+    slides: cdSlides(), slideSeconds: Math.max(3, Number(S.settings.slideSeconds) || 8), hint: S.settings.cdHints === '0' ? '' : promoHint()
   }, extra || {});
   CustomerDisplay.pos.publish(st);
 }
@@ -1234,7 +1236,8 @@ function renderCartOnly() {
   var t = cartTotals();
   var bar = $('#totalbar');
   var pt = (S.cart.promos || []).reduce(function (a, x) { return a + x.discount; }, 0);
-  if (bar) bar.innerHTML = '<div class="grow"><div class="muted">' + t.items + ' ชิ้น' + (pt ? ' · <span class="brand-text" title="' + esc((S.cart.promos || []).map(function (x) { return x.name + (x.times > 1 ? ' ×' + x.times : ''); }).join(', ')) + '">โปร ฿' + money(pt) + '</span>' : '') +
+  var hint = promoHint();
+  if (bar) bar.innerHTML = '<div class="grow">' + (hint ? '<div class="promo-hint" id="phint">💡 ' + esc(hint) + '</div>' : '') + '<div class="muted">' + t.items + ' ชิ้น' + (pt ? ' · <span class="brand-text" title="' + esc((S.cart.promos || []).map(function (x) { return x.name + (x.times > 1 ? ' ×' + x.times : ''); }).join(', ')) + '">โปร ฿' + money(pt) + '</span>' : '') +
     (round2(t.discount - pt) > 0 ? ' · ส่วนลด ฿' + money(round2(t.discount - pt)) : '') +
     '</div><div class="row" style="align-items:baseline"><b style="font-size:18px">ยอดรวม</b><span class="amt num">฿' + money(t.total) + '</span></div></div>' +
     (S.settings.promptPayId ? '<button class="btn qr-pay" data-act="payQr" ' + (S.cart.lines.length && S.shift ? '' : 'disabled') + '>QR พร้อมเพย์</button>' : '') +
@@ -2125,6 +2128,154 @@ function returnModal(rc) {
 /* =================================================================== */
 
 /* ---------------- Bulk price edit (owner) ---------------- */
+
+/* ---------------- Customer-display slides ---------------- */
+var SLIDE_CACHE = 'em-slides';
+function slideKey(id) { return location.origin + location.pathname.replace(/[^/]*$/, '') + '__slide/' + encodeURIComponent(id); }
+function slideLive(sl) {
+  var d = today();
+  return sl.active && (!sl.startDate || sl.startDate <= d) && (!sl.endDate || sl.endDate >= d);
+}
+/** Image of a slide as an object URL: from this device first, else download once and keep. */
+function slideUrl(id) {
+  var key = slideKey(id);
+  var viaApi = function () {
+    return api('slideImage', S.token, id).then(function (r) { return fetch(r.dataUrl).then(function (x) { return x.blob(); }); }).then(function (blob) {
+      if (window.caches) caches.open(SLIDE_CACHE).then(function (c) { c.put(key, new Response(blob, { headers: { 'Content-Type': blob.type || 'image/jpeg' } })); }).catch(function () {});
+      return URL.createObjectURL(blob);
+    });
+  };
+  if (!window.caches) return viaApi();
+  return caches.open(SLIDE_CACHE).then(function (c) { return c.match(key); }).then(function (hit) {
+    return hit ? hit.blob().then(function (b) { return URL.createObjectURL(b); }) : viaApi();
+  });
+}
+/** Counter keeps every slide image on the device (the customer display reads them from here, also offline). */
+function syncSlides() {
+  if (!S.isCounter || !window.caches || !S.token || S.offline) return;
+  var want = (S.slides || []).map(function (sl) { return slideKey(sl.slideId); });
+  caches.open(SLIDE_CACHE).then(function (c) {
+    return c.keys().then(function (keys) {
+      var have = keys.map(function (k) { return k.url; });
+      keys.forEach(function (k) { if (want.indexOf(k.url) < 0) c.delete(k); });
+      var todo = (S.slides || []).filter(function (sl) { return have.indexOf(slideKey(sl.slideId)) < 0; });
+      return todo.reduce(function (p, sl) { return p.then(function () { return slideUrl(sl.slideId).then(function (u) { URL.revokeObjectURL(u); }).catch(function () {}); }); }, Promise.resolve());
+    });
+  }).then(function () { cdPublish(); }).catch(function () {});
+}
+/** What the customer display cycles through while nobody is at the counter. */
+function cdSlides() {
+  var out = [];
+  (S.slides || []).filter(slideLive).forEach(function (sl) { out.push({ kind: 'img', id: sl.slideId, key: slideKey(sl.slideId), title: sl.title }); });
+  if (S.settings.slidesAuto !== '0') {
+    var w = promoNow();
+    (S.promos || []).filter(function (p) { return promoLive(p, w); }).forEach(function (p) {
+      var it = promoItems(p), first = S.idx.bySku[String(it[0] && it[0].sku !== undefined ? it[0].sku : it[0])];
+      var big = '', was = '';
+      if (p.type === 'single' && first) {
+        var pr = Number(first.price) || 0, v = Number(p.value) || 0;
+        big = '฿' + money(Math.max(0, p.discType === 'pct' ? pr * (1 - v / 100) : p.discType === 'baht' ? pr - v : v)); was = '฿' + money(pr);
+        if (it.length > 1) big = promoCut(p).replace('เหลือ ', '');
+      } else if (p.type === 'multi') { big = p.buyQty + ' ชิ้น ฿' + money(p.price); if (first) was = '฿' + money(first.price * p.buyQty); }
+      else if (p.type === 'bxgy') big = 'ซื้อ ' + p.buyQty + ' แถม ' + p.freeQty;
+      else if (p.type === 'combo') {
+        big = '฿' + money(p.price);
+        was = '฿' + money(it.reduce(function (a, c) { var x = S.idx.bySku[c.sku]; return a + (x ? x.price * c.qty : 0); }, 0));
+      }
+      var col = first ? (KEY_COLORS[first.color] || KEY_COLORS.gray) : KEY_COLORS.gray;
+      out.push({ kind: 'promo', title: p.name, sub: promoText(p), big: big, was: was, icon: first ? iconHtml(first) : '', bg: col[0], fg: col[1],
+        when: p.timeFrom && p.timeTo ? 'เฉพาะ ' + p.timeFrom + '–' + p.timeTo + ' น.' : p.endDate ? 'ถึง ' + thDate(p.endDate) : '' });
+    });
+  }
+  if (S.settings.customerPromoTitle) out.push({ kind: 'text', title: S.settings.customerPromoTitle, sub: S.settings.customerPromoText || '' });
+  return out;
+}
+/** "Add 1 more for the deal" — shown on the customer display (and to the cashier) while scanning. */
+function promoHint() {
+  if (!S.cart || !S.cart.lines.length) return '';
+  var w = promoNow(), cnt = {};
+  S.cart.lines.forEach(function (l) { if (l.multiplier === 1 && !l.md && !l.openPrice) cnt[l.sku] = (cnt[l.sku] || 0) + l.qty; });
+  var nameOf = function (k) { var x = S.idx.bySku[k]; return x ? x.name : k; };
+  var order = { combo: 0, multi: 1, bxgy: 2 };
+  var live = (S.promos || []).filter(function (p) { return order[p.type] !== undefined && promoLive(p, w); })
+    .sort(function (a, b) { return order[a.type] - order[b.type]; });
+  for (var i = 0; i < live.length; i++) {
+    var p = live[i], it = promoItems(p);
+    if (p.type === 'combo') {
+      var has = it.some(function (c) { return cnt[c.sku]; });
+      var miss = it.filter(function (c) { return (cnt[c.sku] || 0) < c.qty; });
+      if (has && miss.length) return 'เพิ่ม ' + miss.map(function (c) { return nameOf(c.sku) + (c.qty - (cnt[c.sku] || 0) > 1 ? ' ×' + (c.qty - (cnt[c.sku] || 0)) : ''); }).join(' + ') + ' รับเซ็ต ฿' + money(p.price);
+      continue;
+    }
+    var n = it.reduce(function (a, k) { return a + (cnt[String(k)] || 0); }, 0);
+    if (!n) continue;
+    if (p.type === 'multi' && n % p.buyQty) return 'เพิ่มอีก ' + (p.buyQty - n % p.buyQty) + ' ชิ้น รับโปร ' + p.name;
+    if (p.type === 'bxgy') {
+      var size = p.buyQty + p.freeQty, r = n % size;
+      if (r >= p.buyQty) return 'หยิบเพิ่มอีก ' + (size - r) + ' ชิ้น ฟรี! (' + p.name + ')';
+      if (r > 0) return 'ซื้ออีก ' + (p.buyQty - r) + ' ชิ้น แถมฟรี ' + p.freeQty + ' (' + p.name + ')';
+    }
+  }
+  return '';
+}
+
+/* ---------------- Slides manager (Settings, owner) ---------------- */
+function slidesCard() {
+  return '<div class="card pad col" style="gap:10px"><h2>สไลด์จอลูกค้า</h2>' +
+    '<div class="muted" style="font-size:13px">วนแสดงตอนไม่มีลูกค้า · โปรที่กำลังใช้ทำเป็นสไลด์ให้เอง · อัปรูปโปสเตอร์เพิ่มได้ (ย่อขนาดให้อัตโนมัติ)</div>' +
+    '<div class="row" style="flex-wrap:wrap;gap:8px"><label class="btn primary" for="sl-file" style="cursor:pointer">+ อัปโหลดรูป</label>' +
+    '<input id="sl-file" type="file" accept="image/*" data-change="slideFile" style="position:absolute;left:-9999px"></div>' +
+    '<div id="slidelist" class="slide-list"><div class="muted">กำลังโหลด…</div></div></div>';
+}
+function drawSlideList() {
+  var box = $('#slidelist');
+  if (!box) return;
+  var list = S.slides || [];
+  box.innerHTML = list.length ? list.map(function (sl, i) {
+    var live = slideLive(sl);
+    return '<div class="slide-row' + (live ? '' : ' off') + '"><img data-slimg="' + esc(sl.slideId) + '" alt=""><div class="col" style="gap:2px;min-width:0;flex:1">' +
+      '<b>' + esc(sl.title || 'ไม่มีชื่อ') + '</b><span class="muted" style="font-size:12px">' + (sl.startDate || sl.endDate ? (sl.startDate ? thDate(sl.startDate) : 'ตอนนี้') + ' – ' + (sl.endDate ? thDate(sl.endDate) : 'ไม่มีกำหนด') : 'แสดงตลอด') +
+      (sl.active ? (live ? '' : ' · ยังไม่ถึง/หมดเวลา') : ' · ปิดอยู่') + '</span></div>' +
+      '<div class="row" style="gap:4px;flex-wrap:wrap;justify-content:flex-end"><button class="btn sm" data-act="slideMove" data-id="' + esc(sl.slideId) + '" data-d="-1"' + (i ? '' : ' disabled') + ' aria-label="เลื่อนขึ้น">↑</button>' +
+      '<button class="btn sm" data-act="slideMove" data-id="' + esc(sl.slideId) + '" data-d="1"' + (i < list.length - 1 ? '' : ' disabled') + ' aria-label="เลื่อนลง">↓</button>' +
+      '<button class="btn sm" data-act="slideEdit" data-id="' + esc(sl.slideId) + '">แก้</button>' +
+      '<button class="btn sm" data-act="slideToggle" data-id="' + esc(sl.slideId) + '" data-on="' + (sl.active ? '0' : '1') + '">' + (sl.active ? 'ปิด' : 'เปิด') + '</button>' +
+      '<button class="btn sm ghost" data-act="slideDel" data-id="' + esc(sl.slideId) + '">ลบ</button></div></div>';
+  }).join('') : '<div class="muted">ยังไม่มีรูป — สไลด์จากโปรโมชั่นยังแสดงตามปกติ</div>';
+  $all('[data-slimg]', box).forEach(function (img) { slideUrl(img.getAttribute('data-slimg')).then(function (u) { img.src = u; }).catch(function () {}); });
+}
+function slidesChanged(list) { S.slides = list; saveCache(); drawSlideList(); syncSlides(); }
+/** Shrink a photo to at most 1280 px on the long side, JPEG ~80 %. */
+function shrinkImage(file) {
+  return new Promise(function (resolve, reject) {
+    var img = new Image(), url = URL.createObjectURL(file);
+    img.onload = function () {
+      var k = Math.min(1, 1280 / Math.max(img.width, img.height));
+      var c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('เปิดรูปนี้ไม่ได้')); };
+    img.src = url;
+  });
+}
+function slideModal(sl, dataUrl) {
+  var m = openModal('<header><h1>' + (sl ? 'แก้สไลด์' : 'เพิ่มสไลด์') + '</h1></header><div class="body" style="gap:10px">' +
+    (dataUrl ? '<img src="' + dataUrl + '" alt="" style="width:100%;max-height:260px;object-fit:contain;background:var(--surface-muted);border-radius:8px">' : '') +
+    '<div class="field"><label for="sl-title">ชื่อ (ไว้จำเอง)</label><input id="sl-title" value="' + esc(sl ? sl.title : '') + '" placeholder="เช่น โปรกาแฟเดือนนี้"></div>' +
+    '<div class="grid3"><div class="field"><label for="sl-sd">วันเริ่ม (ว่าง = ตอนนี้)</label><input id="sl-sd" type="date" value="' + esc(sl ? sl.startDate : '') + '"></div>' +
+    '<div class="field"><label for="sl-ed">วันสิ้นสุด (ว่าง = ไม่มีกำหนด)</label><input id="sl-ed" type="date" value="' + esc(sl ? sl.endDate : '') + '"></div></div></div>' +
+    '<footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">' + (sl ? 'บันทึก' : 'อัปโหลด') + '</button></footer>');
+  $('[data-x=no]', m).onclick = function () { closeModal(); };
+  $('[data-x=ok]', m).onclick = function () {
+    var v = { title: $('#sl-title', m).value, startDate: $('#sl-sd', m).value, endDate: $('#sl-ed', m).value };
+    var call = sl ? api('saveSlide', S.token, Object.assign({ slideId: sl.slideId }, v)) : api('uploadSlide', S.token, Object.assign({ dataUrl: dataUrl }, v)).then(function () { return api('listSlides', S.token); });
+    call.then(function (list) { closeModal(); toast(sl ? 'บันทึกแล้ว' : 'อัปโหลดแล้ว'); slidesChanged(list); }).catch(fail);
+  };
+}
+
 /* ---------------- Promotions (owner) ---------------- */
 var PROMO_TYPE_TH = { single: 'ลดราคาชิ้นเดียว', multi: 'ซื้อหลายชิ้นราคาพิเศษ', bxgy: 'ซื้อ X แถม Y', combo: 'เซ็ตคอมโบ' };
 var PROMO_DISC_TH = { pct: 'ลด %', baht: 'ลดเป็นบาท', price: 'ขายราคา' };
@@ -4095,7 +4246,10 @@ function renderSettings() {
     f('taxId', 'เลขผู้เสียภาษี', 'ถ้ามี') + f('promptPayId', 'พร้อมเพย์', 'เบอร์มือถือ / เลขบัตร 13 หลัก') + f('receiptFooter', 'ข้อความท้ายใบเสร็จ') +
     f('billPrefix', 'คำนำหน้าเลขบิล', 'เว้นว่างได้') +
     '<h2 style="margin:8px 0 0">จอลูกค้า</h2>' + f('customerWelcome', 'ข้อความต้อนรับ', 'ยินดีต้อนรับค่ะ') + f('shopHours', 'เวลาเปิด–ปิด', 'เช่น เปิดทุกวัน 06:00–22:00') +
-    f('customerPromoTitle', 'โปรโมชั่น (หัวข้อ)', 'เว้นว่าง = ไม่แสดง') + f('customerPromoText', 'โปรโมชั่น (รายละเอียด)', 'เช่น ซื้อ 2 ขวด 25 บาท') +
+    f('customerPromoTitle', 'ข้อความโปร (หัวข้อ · เป็นสไลด์ข้อความ)', 'เว้นว่าง = ไม่แสดง') + f('customerPromoText', 'ข้อความโปร (รายละเอียด)', 'เช่น ซื้อ 2 ขวด 25 บาท') +
+    '<div class="grid3">' + f('slideSeconds', 'วินาทีต่อสไลด์', '8', 'number') +
+    '<div class="field"><label for="s-slidesAuto">สไลด์จากโปรโมชั่น</label><select id="s-slidesAuto" data-skey="slidesAuto"><option value="1">แสดง</option><option value="0"' + (st.slidesAuto === '0' ? ' selected' : '') + '>ไม่แสดง</option></select></div>' +
+    '<div class="field"><label for="s-cdHints">บอกโปรตอนสแกน</label><select id="s-cdHints" data-skey="cdHints"><option value="1">เปิด</option><option value="0"' + (st.cdHints === '0' ? ' selected' : '') + '>ปิด</option></select></div></div>' +
     '<button class="btn primary" type="submit">บันทึก</button></form>' +
     '<form class="card pad col" data-form="settings" style="gap:10px"><h2>ธีม & LINE</h2>' +
     '<div class="field"><label for="s-theme">โหมดสี (ทั้งร้าน)</label><select id="s-theme" data-skey="theme">' + ['light', 'dark', 'system'].map(function (t) {
@@ -4119,12 +4273,12 @@ function renderSettings() {
     '<hr style="border:0;border-top:1px solid var(--line);width:100%">' +
     '<h2>สำรองข้อมูล</h2><div class="muted" style="font-size:13px">Backup อัตโนมัติทุกวันตั้งได้ด้วย installTriggers() (ดูคู่มือ)</div>' +
     '<button class="btn" data-act="backupNow">Backup ตอนนี้</button></div></div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1.4fr;gap:14px"><div class="card pad"><h2>พนักงาน & สิทธิ์</h2><div id="userlist" class="muted">กำลังโหลด…</div>' +
+    '<div class="set-grid2">' + slidesCard() + '<div class="card pad"><h2>พนักงาน & สิทธิ์</h2><div id="userlist" class="muted">กำลังโหลด…</div>' +
     '<form class="row" data-form="addUser" style="margin-top:10px;flex-wrap:wrap"><label class="sr" for="nu-name">ชื่อ</label><input id="nu-name" placeholder="ชื่อ" style="width:140px">' +
     '<label class="sr" for="nu-role">สิทธิ์</label><select id="nu-role"><option value="cashier">แคชเชียร์</option><option value="owner">เจ้าของ</option></select>' +
     '<label class="sr" for="nu-pin">PIN</label><input id="nu-pin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN 4–6 หลัก" style="width:120px">' +
-    '<button class="btn" type="submit">+ เพิ่ม</button></form></div>' +
-    '<div class="card pad" style="max-height:420px;overflow:auto"><h2>บันทึกการทำงาน (ล่าสุด 100)</h2><table class="table"><tbody id="auditrows"><tr><td class="muted">กำลังโหลด…</td></tr></tbody></table></div></div></div>';
+    '<button class="btn" type="submit">+ เพิ่ม</button></form></div></div>' +
+    '<div class="card pad" style="max-height:420px;overflow:auto"><h2>บันทึกการทำงาน (ล่าสุด 100)</h2><table class="table"><tbody id="auditrows"><tr><td class="muted">กำลังโหลด…</td></tr></tbody></table></div></div>';
 }
 
 function drawerSettings() {
@@ -4147,6 +4301,7 @@ function drawerSettings() {
 }
 
 function loadSettings() {
+  api('listSlides', S.token).then(function (list) { S.slides = list; drawSlideList(); }).catch(function () {});
   api('listUsers', S.token).then(function (us) {
     var box = $('#userlist');
     if (!box) return;
@@ -4325,6 +4480,14 @@ var ACTIONS = {
   repClear: function () { var rs = repState(); rs.f = { from: rs.f.from, to: rs.f.to, slowDays: rs.f.slowDays }; loadReport(); },
   selProduct: function (el) { selectProduct(el.getAttribute('data-sku')); },
   edClose: function () { selectProduct(null); },
+  slideMove: function (el) { api('saveSlide', S.token, { slideId: el.getAttribute('data-id'), move: Number(el.getAttribute('data-d')) }).then(slidesChanged).catch(fail); },
+  slideToggle: function (el) { api('saveSlide', S.token, { slideId: el.getAttribute('data-id'), active: el.getAttribute('data-on') === '1' }).then(slidesChanged).catch(fail); },
+  slideEdit: function (el) { slideModal((S.slides || []).filter(function (x) { return x.slideId === el.getAttribute('data-id'); })[0], ''); },
+  slideDel: function (el) {
+    confirm2('ลบสไลด์', 'ลบรูปนี้ออกจากจอลูกค้า?', 'ลบ', true).then(function (ok) {
+      if (ok) api('deleteSlide', S.token, el.getAttribute('data-id')).then(slidesChanged).catch(fail);
+    });
+  },
   mBulk: function () { S.bulk = { edits: {} }; go('products'); drawBulk(); },
   mPromo: function () { S.promoMode = true; S.bulk = null; go('products'); loadPromos(); },
   promoOpen: function () { S.promoMode = true; S.bulk = null; render(); loadPromos(); },
@@ -4459,6 +4622,10 @@ document.addEventListener('change', function (e) {
     if (fk === 'from' || fk === 'to') { rs.preset = ''; rs.f.gran = 'day'; if (!rs.f.to || rs.f.to < rs.f.from) rs.f.to = rs.f.from; render(); }
     if (fk === 'category') rs.f.sku = '';
     loadReport();
+  }
+  if (k === 'slideFile' && t.files && t.files[0]) {
+    var file = t.files[0]; t.value = '';
+    shrinkImage(file).then(function (u) { slideModal(null, u); }).catch(fail);
   }
   if (k === 'prodCat') { S.prodFilter.cat = t.value; renderProductRows(); }
   if (k === 'bulkCat') { S.prodFilter.cat = t.value; drawBulk(); }
