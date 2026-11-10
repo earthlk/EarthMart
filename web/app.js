@@ -4547,6 +4547,9 @@ function renderSettings() {
     '<form class="card pad col" data-form="settings" style="gap:10px"><h2>ร้าน</h2>' + f('shopName', 'ชื่อร้าน (บนใบเสร็จ)') + f('shopAddress', 'ที่อยู่') +
     f('taxId', 'เลขผู้เสียภาษี', 'ถ้ามี') + f('promptPayId', 'พร้อมเพย์', 'เบอร์มือถือ / เลขบัตร 13 หลัก') + f('receiptFooter', 'ข้อความท้ายใบเสร็จ') +
     f('billPrefix', 'คำนำหน้าเลขบิล', 'เว้นว่างได้') +
+    '<div class="field"><label for="s-autoLockMinutes">ล็อกหน้าจอเมื่อไม่มีใครใช้ (ต้องใส่ PIN ใหม่)</label><select id="s-autoLockMinutes" data-skey="autoLockMinutes">' +
+      [['0', 'ไม่ล็อก'], ['5', '5 นาที'], ['10', '10 นาที'], ['15', '15 นาที'], ['30', '30 นาที'], ['60', '1 ชั่วโมง'], ['120', '2 ชั่วโมง']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (String(st.autoLockMinutes === undefined ? '5' : st.autoLockMinutes) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
     '<h2 style="margin:8px 0 0">จอลูกค้า</h2>' + f('customerWelcome', 'ข้อความต้อนรับ', 'ยินดีต้อนรับค่ะ') + f('shopHours', 'เวลาเปิด–ปิด', 'เช่น เปิดทุกวัน 06:00–22:00') +
     f('customerPromoTitle', 'ข้อความโปร (หัวข้อ · เป็นสไลด์ข้อความ)', 'เว้นว่าง = ไม่แสดง') + f('customerPromoText', 'ข้อความโปร (รายละเอียด)', 'เช่น ซื้อ 2 ขวด 25 บาท') +
     '<div class="grid3">' + f('slideSeconds', 'วินาทีต่อสไลด์', '8', 'number') +
@@ -5030,7 +5033,8 @@ document.addEventListener('keydown', function (e) {
   }
 });
 
-/* Auto-lock when idle with an empty cart. */
+['pointerdown', 'touchstart', 'wheel'].forEach(function (ev) { document.addEventListener(ev, function () { S.lastActivity = Date.now(); }, { passive: true }); });
+/* Auto-lock when idle with an empty cart (Settings › ล็อกหน้าจอ; 0 = never). */
 setInterval(function () {
   if (!S.token || S.view === 'login') return;
   var mins = Number(S.settings.autoLockMinutes || 0);
