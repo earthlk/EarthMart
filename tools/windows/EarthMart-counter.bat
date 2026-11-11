@@ -1,16 +1,18 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions
 rem ==================================================================
 rem  EarthMart - shop counter launcher (Chrome kiosk)
 rem  Keep this file next to EarthMart.html (e.g. on the Desktop).
-rem  1 screen : sale screen in true kiosk mode, receipts print without a dialog
-rem  2 screens: customer display full screen on the RIGHT screen + sale screen
+rem  Sale screen in true kiosk mode on the main screen; receipts print without a dialog.
+rem  With a customer display: use the "2 screens" launcher (sets MODE=dual).
 rem  Runs in its own Chrome profile (%LocalAppData%\EarthMartKiosk): normal Chrome still works.
 rem  Switch to other programs: Alt+Tab or the Windows key.  Leave kiosk: Alt+F4.   Log: %TEMP%\earthmart-launch.log
 rem  This file is plain ASCII on purpose (cmd misreads UTF-8 text in .bat files).
 rem ==================================================================
+rem MODE: single = sale screen only (true kiosk) | dual = also the customer display on the right screen
+if not defined MODE set "MODE=single"
 set "LOG=%TEMP%\earthmart-launch.log"
-echo [%date% %time%] start %* > "%LOG%"
+echo [%date% %time%] start %* mode=%MODE% > "%LOG%"
 
 set "HTML=%~dp0EarthMart.html"
 echo HTML=%HTML% >> "%LOG%"
@@ -41,27 +43,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Pr
 echo KDIR=%KDIR% >> "%LOG%"
 timeout /t 1 /nobreak >nul
 
-:fresh
-rem How many screens, and how wide is the main one (the customer display goes to its right).
-set "SCREENS=1"
-set "PW=1920"
-for /f "tokens=1,2" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::AllScreens; Write-Output ([string]$s.Count + ' ' + [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width)" 2^>nul') do (
-  set "SCREENS=%%a"
-  set "PW=%%b"
-)
-echo SCREENS=!SCREENS! PW=!PW! >> "%LOG%"
-
 set "COMMON=--user-data-dir="%KDIR%" --no-first-run --no-default-browser-check --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch --kiosk-printing"
 
-if !SCREENS! GEQ 2 goto :two
+if /i "%MODE%"=="dual" goto :two
 echo launch kiosk >> "%LOG%"
 start "" "%CHROME%" %COMMON% --kiosk "%URL%"
 exit /b 0
 
 :two
-rem Customer display first (a fresh Chrome honours position + full screen), then the sale screen.
-echo launch two screens >> "%LOG%"
-start "" "%CHROME%" %COMMON% --app="%URL%?page=customer" --window-position=!PW!,0 --window-size=1024,768 --start-fullscreen
+rem Customer display (2nd screen, to the RIGHT of the main one): opened first so a fresh Chrome
+rem honours position + full screen, then the sale screen goes full screen on the first touch.
+set "PW=1920"
+for /f %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width" 2^>nul') do set "PW=%%a"
+echo launch two screens PW=%PW% >> "%LOG%"
+start "" "%CHROME%" %COMMON% --app="%URL%?page=customer" --window-position=%PW%,0 --window-size=1024,768 --start-fullscreen
 timeout /t 4 /nobreak >nul
 start "" "%CHROME%" --user-data-dir="%KDIR%" --app="%URL%?kiosk=1" --window-position=0,0 --start-fullscreen
 exit /b 0
