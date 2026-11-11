@@ -5,13 +5,17 @@ rem ==================================================================
 rem  EarthMart - shop counter launcher (Chrome kiosk)
 rem  Keep this file next to EarthMart.html (e.g. on the Desktop).
 rem  Sale screen in true kiosk mode on the main screen; receipts print without a dialog.
-rem  With a customer display: use the "2 screens" launcher (sets MODE=dual).
+rem  With a customer display: use a copy named "... 2 ..." (see MODE below).
 rem  Runs in its own Chrome profile (%LocalAppData%\EarthMartKiosk): normal Chrome still works.
 rem  Switch to other programs: Alt+Tab or the Windows key.  Leave kiosk: Alt+F4.   Log: %TEMP%\earthmart-launch.log
 rem  This file is plain ASCII on purpose (cmd misreads UTF-8 text in .bat files).
 rem ==================================================================
-rem MODE: single = sale screen only (true kiosk) | dual = also the customer display on the right screen
+rem MODE: single = sale screen only (true kiosk) | dual = also the customer display on the right screen.
+rem A copy of this file whose NAME contains " 2" (e.g. "EarthMart ... 2 ...bat") runs dual.
+rem (Decided from the file name with cmd itself: findstr/powershell cannot read Thai paths here.)
+set "SELF=%~n0"
 if not defined MODE set "MODE=single"
+if not "%SELF: 2=%"=="%SELF%" set "MODE=dual"
 set "LOG=%TEMP%\earthmart-launch.log"
 echo [%date% %time%] start %* mode=%MODE% > "%LOG%"
 
