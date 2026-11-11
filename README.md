@@ -230,6 +230,7 @@ host อื่นก็ได้ (Netlify, Cloudflare Pages, Firebase Hosting…
 - **ติดตั้งบนคอม Windows (แนะนำ):** ดาวน์โหลด `EarthMart-Setup.zip` (ตั้งค่า → ไฟล์เปิดในเครื่อง หรือ https://earthlk.github.io/EarthMart/EarthMart-Setup.zip) → แตกไฟล์ → รัน `Install-EarthMart.bat`
   - ถาม: 1 จอ / 2 จอ · จอลูกค้าอยู่ซ้ายหรือขวา · เปิดเองตอนเปิดเครื่อง · วางลิงก์ตั้งค่าเครื่อง (ไม่บังคับ)
   - ติดตั้งที่ `%LocalAppData%\EarthMart` (ที่อยู่ภาษาอังกฤษ ไม่ต้องใช้สิทธิ์ admin) · ไอคอนบน Desktop: **EarthMart Counter** / **EarthMart Back Office** · Startup shortcut ถ้าเลือก
+  - ค่าที่ตอบเก็บใน `EarthMart-Settings.txt` (SCREENS, SIDE) — ไอคอน/ไฟล์ EarthMart Counter อ่านค่านี้ทุกครั้ง
   - อัปเดต / เปลี่ยนจำนวนจอ: รันตัวติดตั้งใหม่ (ข้อมูลไม่หาย) · สร้างชุดเองได้ด้วย `node tools/build-setup.js`
 - **Counter (kiosk):** Chrome โปรไฟล์แยก (`%LocalAppData%\EarthMartKiosk`) — Chrome ปกติใช้พร้อมกันได้ · ใบเสร็จพิมพ์ออกเครื่องพิมพ์หลักทันที (`--kiosk-printing`) · 2 จอ: จอลูกค้าเต็มจอที่จอซ้ายหรือขวา (ตามที่ตอบตอนติดตั้ง หาตำแหน่งจอจริงเอง) + หน้าขายเต็มจอเมื่อแตะครั้งแรก · Alt+Tab สลับโปรแกรม · Alt+F4 ออก
 - **Back Office:** หน้าต่าง Chrome ปกติ ใช้พิมพ์ป้าย A4 (โหมด kiosk พิมพ์ทุกอย่างออกเครื่องพิมพ์หลักโดยไม่ถาม)
