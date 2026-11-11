@@ -5,7 +5,8 @@ rem  EarthMart - shop counter launcher (Chrome kiosk)
 rem  Keep this file next to EarthMart.html (e.g. on the Desktop).
 rem  1 screen : sale screen in true kiosk mode, receipts print without a dialog
 rem  2 screens: customer display full screen on the RIGHT screen + sale screen
-rem  Leave kiosk: Alt+F4.   Log: %TEMP%\earthmart-launch.log
+rem  Runs in its own Chrome profile (%LocalAppData%\EarthMartKiosk): normal Chrome still works.
+rem  Switch to other programs: Alt+Tab or the Windows key.  Leave kiosk: Alt+F4.   Log: %TEMP%\earthmart-launch.log
 rem  This file is plain ASCII on purpose (cmd misreads UTF-8 text in .bat files).
 rem ==================================================================
 set "LOG=%TEMP%\earthmart-launch.log"
@@ -33,20 +34,12 @@ if not defined CHROME (
   exit /b 1
 )
 
-rem Kiosk options only work when Chrome starts fresh, so Chrome must be closed first.
-tasklist /fi "imagename eq chrome.exe" 2>nul | find /i "chrome.exe" >nul
-if errorlevel 1 goto :fresh
-echo chrome already running >> "%LOG%"
-if /i "%~1"=="/startup" goto :kill
-echo.
-echo  Chrome is open. It has to be closed to start the shop screen.
-echo  (Tabs come back next time you open Chrome normally.)
-echo.
-choice /c YN /m " Close Chrome and start the shop screen now"
-if errorlevel 2 exit /b 0
-:kill
-taskkill /im chrome.exe /f >nul 2>&1
-timeout /t 2 /nobreak >nul
+rem The shop screen runs in its OWN Chrome profile (a separate Chrome), so normal Chrome
+rem keeps working next to it. Only an old shop-screen Chrome is closed before starting.
+set "KDIR=%LocalAppData%\EarthMartKiosk"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" | Where-Object { $_.CommandLine -like '*EarthMartKiosk*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+echo KDIR=%KDIR% >> "%LOG%"
+timeout /t 1 /nobreak >nul
 
 :fresh
 rem How many screens, and how wide is the main one (the customer display goes to its right).
@@ -58,7 +51,7 @@ for /f "tokens=1,2" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -Comm
 )
 echo SCREENS=!SCREENS! PW=!PW! >> "%LOG%"
 
-set "COMMON=--no-first-run --no-default-browser-check --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch --kiosk-printing"
+set "COMMON=--user-data-dir="%KDIR%" --no-first-run --no-default-browser-check --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch --kiosk-printing"
 
 if !SCREENS! GEQ 2 goto :two
 echo launch kiosk >> "%LOG%"
@@ -70,5 +63,5 @@ rem Customer display first (a fresh Chrome honours position + full screen), then
 echo launch two screens >> "%LOG%"
 start "" "%CHROME%" %COMMON% --app="%URL%?page=customer" --window-position=!PW!,0 --window-size=1024,768 --start-fullscreen
 timeout /t 4 /nobreak >nul
-start "" "%CHROME%" --app="%URL%?kiosk=1" --window-position=0,0 --start-fullscreen
+start "" "%CHROME%" --user-data-dir="%KDIR%" --app="%URL%?kiosk=1" --window-position=0,0 --start-fullscreen
 exit /b 0

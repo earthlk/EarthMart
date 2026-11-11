@@ -3,7 +3,8 @@ setlocal EnableExtensions
 rem ==================================================================
 rem  EarthMart - back office (normal Chrome window)
 rem  For printing labels on A4, editing products, reports.
-rem  If the counter (kiosk) is running, press Alt+F4 there first.
+rem  Opens in your normal Chrome (separate from the shop screen), so both can be open.
+rem  First time here: paste the setup link once (it is a separate browser profile).
 rem  Plain ASCII on purpose (cmd misreads UTF-8 text in .bat files).
 rem ==================================================================
 set "HTML=%~dp0EarthMart.html"
