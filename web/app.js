@@ -4672,10 +4672,10 @@ function renderSettings() {
     '<div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="copyConnect">คัดลอกลิงก์ตั้งค่าเครื่องอื่น</button><button class="btn sm ghost" data-act="connect">เปลี่ยน</button></div>' +
     '<div class="muted" style="font-size:12px">ลิงก์นี้มี API key — ส่งให้เฉพาะเครื่องของร้าน</div>' +
     '<hr style="border:0;border-top:1px solid var(--line);width:100%"><h2>ไฟล์เปิดในเครื่อง</h2>' +
-    (window.EM_LOCAL ? '<div class="muted" style="font-size:13px">เครื่องนี้เปิดจากไฟล์ในคอม · เวอร์ชัน ' + esc(window.EM_BUILD || '') + ' (UTC)<br>ไฟล์ไม่อัปเดตเอง — ถ้าหน้าเว็บมีฟีเจอร์ใหม่ ดาวน์โหลดไฟล์ใหม่มาทับ</div>' +
-      '<a class="btn sm" href="https://earthlk.github.io/EarthMart/EarthMart-local.html" download="EarthMart.html" target="_blank" rel="noopener">ดาวน์โหลดเวอร์ชันล่าสุด</a>'
-      : '<div class="muted" style="font-size:13px">ไฟล์เดียว เปิดจากหน้า Desktop ได้เลย (ยังเชื่อมกับ Google Sheet ของร้าน) · เปิดครั้งแรกให้วาง "ลิงก์ตั้งค่าเครื่อง" แล้วลงทะเบียนเครื่องใหม่</div>' +
-      '<a class="btn sm" href="EarthMart-local.html" download="EarthMart.html">ดาวน์โหลดไฟล์</a>') +
+    (window.EM_LOCAL ? '<div class="muted" style="font-size:13px">เครื่องนี้เปิดจากไฟล์ในคอม · เวอร์ชัน ' + esc(window.EM_BUILD || '') + ' (UTC)<br>ไฟล์ไม่อัปเดตเอง — มีฟีเจอร์ใหม่ให้ดาวน์โหลดชุดติดตั้งแล้วรัน Install-EarthMart.bat อีกครั้ง</div>' +
+      '<a class="btn sm" href="https://earthlk.github.io/EarthMart/EarthMart-Setup.zip" target="_blank" rel="noopener">ดาวน์โหลดชุดติดตั้งล่าสุด</a>'
+      : '<div class="muted" style="font-size:13px">ติดตั้งบนคอมเครื่องอื่น: แตก ZIP แล้วรัน Install-EarthMart.bat → ได้ไอคอนหน้าร้าน (kiosk) / หลังร้าน และเปิดเองตอนเปิดเครื่อง · ยังเชื่อมกับ Google Sheet ของร้าน</div>' +
+      '<div class="row" style="gap:6px;flex-wrap:wrap"><a class="btn sm" href="EarthMart-Setup.zip" download>ชุดติดตั้ง Windows (.zip)</a><a class="btn sm ghost" href="EarthMart-local.html" download="EarthMart.html">เฉพาะไฟล์ .html</a></div>') +
     '<hr style="border:0;border-top:1px solid var(--line);width:100%">' +
     '<h2>สำรองข้อมูล</h2><div class="muted" style="font-size:13px">Backup อัตโนมัติทุกวันตั้งได้ด้วย installTriggers() (ดูคู่มือ)</div>' +
     '<button class="btn" data-act="backupNow">Backup ตอนนี้</button></div></div>' +

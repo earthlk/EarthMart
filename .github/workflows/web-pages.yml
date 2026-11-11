@@ -27,8 +27,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       # Cache-busting: every deploy gets ?v=<commit> on our own files so browsers never mix an old app.js with a new API.
-      - name: Single-file build for opening from the computer
-        run: node tools/build-local.js web/EarthMart-local.html
+      - name: Single-file build + Windows setup package
+        run: |
+          node tools/build-local.js web/EarthMart-local.html
+          node tools/build-setup.js /tmp/EarthMart-Setup
+          (cd /tmp && zip -qr "$GITHUB_WORKSPACE/web/EarthMart-Setup.zip" EarthMart-Setup)
       - name: Version asset URLs
         run: |
           v="${GITHUB_SHA::8}"

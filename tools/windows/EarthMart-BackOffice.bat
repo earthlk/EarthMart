@@ -3,9 +3,9 @@ setlocal EnableExtensions
 rem ==================================================================
 rem  EarthMart - back office (normal Chrome window)
 rem  For printing labels on A4, editing products, reports.
-rem  Opens in your normal Chrome (separate from the shop screen), so both can be open.
-rem  First time here: paste the setup link once (it is a separate browser profile).
-rem  Plain ASCII on purpose (cmd misreads UTF-8 text in .bat files).
+rem  Opens in your normal Chrome, so it can run next to the shop screen.
+rem  First time here: paste the setup link once (separate from the shop screen).
+rem  Plain ASCII on purpose.
 rem ==================================================================
 set "HTML=%~dp0EarthMart.html"
 if not exist "%HTML%" (
@@ -13,10 +13,9 @@ if not exist "%HTML%" (
   pause
   exit /b 1
 )
-rem Same plain-English copy as the counter launcher uses (Thai folder names can stop Chrome).
 set "RUNDIR=%LocalAppData%\EarthMart"
 if not exist "%RUNDIR%" mkdir "%RUNDIR%"
-copy /y "%HTML%" "%RUNDIR%\EarthMart.html" >nul
+if /i not "%~dp0"=="%RUNDIR%\" copy /y "%HTML%" "%RUNDIR%\EarthMart.html" >nul
 set "URL=file:///%RUNDIR:\=/%/EarthMart.html"
 set "CHROME="
 for %%P in ("%ProgramFiles%\Google\Chrome\Application\chrome.exe" "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" "%LocalAppData%\Google\Chrome\Application\chrome.exe") do (
