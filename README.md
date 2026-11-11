@@ -231,7 +231,8 @@ host อื่นก็ได้ (Netlify, Cloudflare Pages, Firebase Hosting…
   - จอเดียว: เต็มจอแบบ kiosk · ใบเสร็จพิมพ์ออกเครื่องพิมพ์หลักทันทีไม่ถาม (`--kiosk-printing`)
   - 2 จอ: จอลูกค้าเต็มจอที่ **จอขวา** + หน้าขายเต็มจอ (เต็มจอเมื่อแตะ/สแกนครั้งแรก)
   - Chrome เปิดอยู่จะถามก่อนปิด · ออกจาก kiosk: Alt+F4
-  - เปิดเองตอนเปิดเครื่อง: วาง EarthMart-startup.bat ใน `shell:startup`
+  - เปิดเองตอนเปิดเครื่อง: วาง `tools/windows/EarthMart-startup.bat` ใน `shell:startup` (หา EarthMart.html บน Desktop เอง)
+  - ไฟล์ .bat เป็นภาษาอังกฤษล้วนโดยตั้งใจ (cmd อ่านภาษาไทย UTF-8 ใน .bat ผิด) · log อยู่ที่ `%TEMP%\earthmart-launch.log`
 - **หลังร้าน:** `tools/windows/EarthMart-backoffice.bat` เปิดหน้าต่างปกติ ใช้พิมพ์ป้าย A4 (โหมด kiosk พิมพ์ทุกอย่างออกเครื่องพิมพ์หลักโดยไม่ถาม)
 
 ## 8) คีย์ลัด หน้าขาย
