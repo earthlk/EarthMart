@@ -5,7 +5,8 @@ rem ==================================================================
 rem  EarthMart - shop counter launcher (Chrome kiosk)
 rem  Keep this file next to EarthMart.html.
 rem  Sale screen in true kiosk mode on the main screen; receipts print without a dialog.
-rem  A copy named "EarthMart-Counter-2Screens.bat" also opens the customer display on the RIGHT screen.
+rem  A copy named "EarthMart-Counter-2Screens.bat" also opens the customer display on the RIGHT screen,
+rem  "EarthMart-Counter-2Screens-Left.bat" on the LEFT screen.
 rem  Runs in its own Chrome profile (%LocalAppData%\EarthMartKiosk): normal Chrome still works.
 rem  Switch to other programs: Alt+Tab or the Windows key.  Leave kiosk: Alt+F4.
 rem  Log: %TEMP%\earthmart-launch.log
@@ -14,8 +15,10 @@ rem ==================================================================
 set "SELF=%~n0"
 if not defined MODE set "MODE=single"
 if /i not "%SELF:2Screens=%"=="%SELF%" set "MODE=dual"
+set "SIDE=right"
+if /i not "%SELF:Left=%"=="%SELF%" set "SIDE=left"
 set "LOG=%TEMP%\earthmart-launch.log"
-echo [%date% %time%] start %* mode=%MODE% > "%LOG%"
+echo [%date% %time%] start %* mode=%MODE% side=%SIDE% > "%LOG%"
 
 set "HTML=%~dp0EarthMart.html"
 if not exist "%HTML%" (
@@ -69,18 +72,22 @@ timeout /t 1 /nobreak >nul
 set "COMMON=--user-data-dir="%KDIR%" --no-first-run --no-default-browser-check --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch --kiosk-printing"
 
 if /i "%MODE%"=="dual" goto :two
-echo launch kiosk >> "%LOG%"
-start "" "%CHROME%" %COMMON% --kiosk "%URL%!HP!"
-call :trace
-exit /b 0
-
-:two
 rem Customer display first (a fresh Chrome honours position + full screen), then the sale screen,
-rem which goes full screen on the first touch / key.
-set "PW=1920"
-for /f %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width" 2^>nul') do set "PW=%%a"
-echo launch two screens PW=%PW% >> "%LOG%"
-start "" "%CHROME%" %COMMON% --app="%URL%?page=customer" --window-position=%PW%,0 --window-size=1024,768 --start-fullscreen
+rem which goes full screen on the first touch / key. The display goes on the screen to the
+rem LEFT or RIGHT of the main one (by this file's name); if there is none on that side, any other screen.
+set "CX=1920"
+set "CY=0"
+set "CW=1024"
+set "CH=768"
+set "EM_SIDE=%SIDE%"
+for /f "usebackq tokens=1-4" %%a in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; $p=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $o=@([System.Windows.Forms.Screen]::AllScreens | Where-Object { -not $_.Primary } | ForEach-Object { $_.Bounds }); if ($env:EM_SIDE -eq 'left') { $s=$o | Where-Object { $_.X -lt $p.X } | Sort-Object X -Descending | Select-Object -First 1 } else { $s=$o | Where-Object { $_.X -ge $p.Right } | Sort-Object X | Select-Object -First 1 }; if (-not $s) { $s=$o | Select-Object -First 1 }; if ($s) { '{0} {1} {2} {3}' -f $s.X,$s.Y,$s.Width,$s.Height } else { '{0} 0 1024 768' -f $p.Width }" 2^>nul`) do (
+  set "CX=%%a"
+  set "CY=%%b"
+  set "CW=%%c"
+  set "CH=%%d"
+)
+echo launch two screens side=%SIDE% display=%CX%,%CY% %CW%x%CH% >> "%LOG%"
+start "" "%CHROME%" %COMMON% --app="%URL%?page=customer" --window-position=%CX%,%CY% --window-size=%CW%,%CH% --start-fullscreen
 timeout /t 4 /nobreak >nul
 start "" "%CHROME%" --user-data-dir="%KDIR%" --app="%URL%?kiosk=1!HP!" --window-position=0,0 --start-fullscreen
 call :trace

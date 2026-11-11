@@ -23,10 +23,17 @@ echo  ==========================================
 echo.
 echo  Screens:
 echo    1 = sale screen only
-echo    2 = sale screen + customer display on the RIGHT screen
+echo    2 = sale screen + customer display (2nd screen)
 choice /c 12 /n /m "  Choose 1 or 2: "
 set "SCREENS=%errorlevel%"
 echo.
+set "SIDE=R"
+if "%SCREENS%"=="2" (
+  echo  Where is the customer display, next to the main screen?
+  choice /c LR /n /m "  L = left, R = right: "
+  if errorlevel 2 (set "SIDE=R") else (set "SIDE=L")
+  echo.
+)
 choice /c YN /m "  Open the shop screen automatically when Windows starts"
 set "AUTO=%errorlevel%"
 echo.
@@ -42,13 +49,12 @@ copy /y "%SRC%EarthMart.html" "%DEST%\EarthMart.html" >nul || goto :copyfail
 copy /y "%SRC%EarthMart-Counter.bat" "%DEST%\EarthMart-Counter.bat" >nul || goto :copyfail
 copy /y "%SRC%EarthMart-BackOffice.bat" "%DEST%\EarthMart-BackOffice.bat" >nul || goto :copyfail
 copy /y "%SRC%Make-Shortcuts.ps1" "%DEST%\Make-Shortcuts.ps1" >nul || goto :copyfail
-if "%SCREENS%"=="2" (
-  copy /y "%SRC%EarthMart-Counter.bat" "%DEST%\EarthMart-Counter-2Screens.bat" >nul || goto :copyfail
-  set "COUNTER=%DEST%\EarthMart-Counter-2Screens.bat"
-) else (
-  if exist "%DEST%\EarthMart-Counter-2Screens.bat" del "%DEST%\EarthMart-Counter-2Screens.bat"
-  set "COUNTER=%DEST%\EarthMart-Counter.bat"
-)
+if exist "%DEST%\EarthMart-Counter-2Screens.bat" del "%DEST%\EarthMart-Counter-2Screens.bat"
+if exist "%DEST%\EarthMart-Counter-2Screens-Left.bat" del "%DEST%\EarthMart-Counter-2Screens-Left.bat"
+set "COUNTER=%DEST%\EarthMart-Counter.bat"
+if "%SCREENS%"=="2" if "%SIDE%"=="R" set "COUNTER=%DEST%\EarthMart-Counter-2Screens.bat"
+if "%SCREENS%"=="2" if "%SIDE%"=="L" set "COUNTER=%DEST%\EarthMart-Counter-2Screens-Left.bat"
+if /i not "%COUNTER%"=="%DEST%\EarthMart-Counter.bat" copy /y "%SRC%EarthMart-Counter.bat" "%COUNTER%" >nul || goto :copyfail
 if defined LINK (
   echo !LINK!> "%DEST%\connect.txt"
 )
@@ -64,6 +70,7 @@ if errorlevel 1 echo  (Could not make the shortcuts - open %DEST% and use the .b
 echo  Done.
 echo    Installed in : %DEST%
 echo    Desktop      : "EarthMart Counter" and "EarthMart Back Office"
+if "%SCREENS%"=="2" (if "%SIDE%"=="L" (echo    Screens      : customer display on the LEFT) else (echo    Screens      : customer display on the RIGHT)) else (echo    Screens      : sale screen only)
 if "%AUTO%"=="1" (echo    Windows start: opens the shop screen) else (echo    Windows start: off)
 echo.
 echo  First time on the shop screen: paste the setup link (if not given above),
