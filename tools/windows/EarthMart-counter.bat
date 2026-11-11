@@ -28,7 +28,20 @@ if not exist "%HTML%" (
   pause
   exit /b 1
 )
-set "URL=file:///%HTML:\=/%"
+rem Chrome is given a plain-English path: the file is copied to %LocalAppData%\EarthMart first.
+rem (A Thai folder name such as the Thai "Desktop" in the address can stop Chrome opening the page,
+rem  and a fixed path keeps the shop's saved settings even if the Desktop file is moved.)
+set "RUNDIR=%LocalAppData%\EarthMart"
+if not exist "%RUNDIR%" mkdir "%RUNDIR%"
+copy /y "%HTML%" "%RUNDIR%\EarthMart.html" >nul
+if errorlevel 1 (
+  echo Could not copy EarthMart.html to %RUNDIR%
+  echo copy failed >> "%LOG%"
+  pause
+  exit /b 1
+)
+set "URL=file:///%RUNDIR:\=/%/EarthMart.html"
+echo URL=%URL% >> "%LOG%"
 
 set "CHROME="
 for %%P in ("%ProgramFiles%\Google\Chrome\Application\chrome.exe" "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" "%LocalAppData%\Google\Chrome\Application\chrome.exe") do (
@@ -53,6 +66,7 @@ set "COMMON=--user-data-dir="%KDIR%" --no-first-run --no-default-browser-check -
 if /i "%MODE%"=="dual" goto :two
 echo launch kiosk >> "%LOG%"
 start "" "%CHROME%" %COMMON% --kiosk "%URL%"
+call :trace
 exit /b 0
 
 :two
@@ -64,4 +78,11 @@ echo launch two screens PW=%PW% >> "%LOG%"
 start "" "%CHROME%" %COMMON% --app="%URL%?page=customer" --window-position=%PW%,0 --window-size=1024,768 --start-fullscreen
 timeout /t 4 /nobreak >nul
 start "" "%CHROME%" --user-data-dir="%KDIR%" --app="%URL%?kiosk=1" --window-position=0,0 --start-fullscreen
+call :trace
+exit /b 0
+
+:trace
+rem Write the shop-screen Chrome command lines to the log (for troubleshooting).
+timeout /t 5 /nobreak >nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" | Where-Object { $_.CommandLine -like '*EarthMartKiosk*' -and $_.CommandLine -notlike '*--type=*' } | ForEach-Object { 'CHROME-CMD: ' + $_.CommandLine } | Out-File -Append -Encoding ascii $env:TEMP\earthmart-launch.log" >nul 2>&1
 exit /b 0

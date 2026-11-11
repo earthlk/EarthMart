@@ -13,7 +13,11 @@ if not exist "%HTML%" (
   pause
   exit /b 1
 )
-set "URL=file:///%HTML:\=/%"
+rem Same plain-English copy as the counter launcher uses (Thai folder names can stop Chrome).
+set "RUNDIR=%LocalAppData%\EarthMart"
+if not exist "%RUNDIR%" mkdir "%RUNDIR%"
+copy /y "%HTML%" "%RUNDIR%\EarthMart.html" >nul
+set "URL=file:///%RUNDIR:\=/%/EarthMart.html"
 set "CHROME="
 for %%P in ("%ProgramFiles%\Google\Chrome\Application\chrome.exe" "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" "%LocalAppData%\Google\Chrome\Application\chrome.exe") do (
   if not defined CHROME if exist "%%~P" set "CHROME=%%~P"
