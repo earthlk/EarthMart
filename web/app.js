@@ -2603,7 +2603,9 @@ function shrinkImage(file, max) {
       var k = Math.min(1, (max || 1280) / Math.max(img.width, img.height));
       var c = document.createElement('canvas');
       c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      var cx = c.getContext('2d');
+      cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height);   // JPEG has no transparency: see-through PNG parts become white, not black
+      cx.drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url);
       resolve(c.toDataURL('image/jpeg', 0.82));
     };
