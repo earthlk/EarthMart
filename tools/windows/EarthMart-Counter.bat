@@ -105,6 +105,8 @@ echo launch two screens side=%SIDE% display=%CX%,%CY% %CW%x%CH% >> "%LOG%"
 start "" "%CHROME%" %COMMON% --app="%URL%?page=customer" --window-position=%CX%,%CY% --window-size=%CW%,%CH% --start-fullscreen
 timeout /t 4 /nobreak >nul
 start "" "%CHROME%" --user-data-dir="%KDIR%" --app="%URL%?kiosk=1!HP!" --window-position=0,0 --start-fullscreen
+rem Chrome puts this 2nd window on the customer display's screen: move it to the main screen.
+if exist "%HELPER%" powershell -NoProfile -ExecutionPolicy Bypass -File "%HELPER%" -Action main -Log "%LOG%" >nul 2>&1
 call :trace
 exit /b 0
 
