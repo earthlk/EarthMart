@@ -2596,6 +2596,10 @@ function drawSlideList() {
 }
 function slidesChanged(list) { S.slides = list; saveCache(); drawSlideList(); syncSlides(); }
 /** Shrink a photo to at most 1280 px on the long side, JPEG ~80 %. */
+/**
+ * Shrink a photo to at most max px on the long side. WebP (smaller, keeps transparency);
+ * browsers that cannot write WebP (older Safari) get JPEG on a white background instead.
+ */
 function shrinkImage(file, max) {
   return new Promise(function (resolve, reject) {
     var img = new Image(), url = URL.createObjectURL(file);
@@ -2604,10 +2608,15 @@ function shrinkImage(file, max) {
       var c = document.createElement('canvas');
       c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
       var cx = c.getContext('2d');
-      cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height);   // JPEG has no transparency: see-through PNG parts become white, not black
       cx.drawImage(img, 0, 0, c.width, c.height);
+      var out = c.toDataURL('image/webp', 0.8);
+      if (out.indexOf('data:image/webp') !== 0) {
+        cx.globalCompositeOperation = 'destination-over';   // JPEG has no transparency: put white behind see-through parts
+        cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height);
+        out = c.toDataURL('image/jpeg', 0.82);
+      }
       URL.revokeObjectURL(url);
-      resolve(c.toDataURL('image/jpeg', 0.82));
+      resolve(out);
     };
     img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('เปิดรูปนี้ไม่ได้')); };
     img.src = url;
