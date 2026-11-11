@@ -586,6 +586,7 @@ function applyTheme() {
 /* =================================================================== */
 
 function start() {
+  if (/[?&]kiosk=1\b/.test(location.search)) kioskFullscreen();
   if (window.CustomerDisplay && CustomerDisplay.isDisplay) return CustomerDisplay.startDisplay();
   S.deviceId = deviceId();
   readConnectLink();
@@ -622,6 +623,19 @@ function start() {
     $('#app').innerHTML = '<div class="center"><div class="card pad col" style="max-width:520px;gap:10px"><h2>ยังใช้งานไม่ได้</h2><p>' + esc(e.message) +
       '</p><div class="row"><button class="btn primary" data-act="reload">ลองใหม่</button><button class="btn" data-act="connect">ตั้งค่าการเชื่อมต่อ</button></div></div></div>';
   });
+}
+
+/**
+ * Opened by the shop launcher with ?kiosk=1 (a window Chrome could not start in true kiosk mode):
+ * go full screen on the first touch / key (browsers only allow it after one), and block the right-click menu.
+ */
+function kioskFullscreen() {
+  var go = function () {
+    var el = document.documentElement;
+    if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen().catch(function () {});
+  };
+  ['pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, go, true); });
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 }
 
 /** Apps Script schema version this page needs (api_status.apiVersion). */
