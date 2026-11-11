@@ -50,12 +50,15 @@ copy /y "%SRC%EarthMart-Counter.bat" "%DEST%\EarthMart-Counter.bat" >nul || goto
 copy /y "%SRC%EarthMart-BackOffice.bat" "%DEST%\EarthMart-BackOffice.bat" >nul || goto :copyfail
 copy /y "%SRC%Make-Shortcuts.ps1" "%DEST%\Make-Shortcuts.ps1" >nul || goto :copyfail
 copy /y "%SRC%EarthMart-Helper.ps1" "%DEST%\EarthMart-Helper.ps1" >nul || goto :copyfail
+rem Old per-mode launcher copies from earlier versions: one launcher now reads the settings file.
 if exist "%DEST%\EarthMart-Counter-2Screens.bat" del "%DEST%\EarthMart-Counter-2Screens.bat"
 if exist "%DEST%\EarthMart-Counter-2Screens-Left.bat" del "%DEST%\EarthMart-Counter-2Screens-Left.bat"
 set "COUNTER=%DEST%\EarthMart-Counter.bat"
-if "%SCREENS%"=="2" if "%SIDE%"=="R" set "COUNTER=%DEST%\EarthMart-Counter-2Screens.bat"
-if "%SCREENS%"=="2" if "%SIDE%"=="L" set "COUNTER=%DEST%\EarthMart-Counter-2Screens-Left.bat"
-if /i not "%COUNTER%"=="%DEST%\EarthMart-Counter.bat" copy /y "%SRC%EarthMart-Counter.bat" "%COUNTER%" >nul || goto :copyfail
+if "%SIDE%"=="L" (set "SIDEWORD=left") else (set "SIDEWORD=right")
+> "%DEST%\EarthMart-Settings.txt" (
+  echo SCREENS=%SCREENS%
+  echo SIDE=%SIDEWORD%
+)
 if defined LINK (
   echo !LINK!> "%DEST%\connect.txt"
 )

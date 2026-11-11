@@ -5,18 +5,23 @@ rem ==================================================================
 rem  EarthMart - shop counter launcher (Chrome kiosk)
 rem  Keep this file next to EarthMart.html.
 rem  Sale screen in true kiosk mode on the main screen; receipts print without a dialog.
-rem  A copy named "EarthMart-Counter-2Screens.bat" also opens the customer display on the RIGHT screen,
-rem  "EarthMart-Counter-2Screens-Left.bat" on the LEFT screen.
+rem  With SCREENS=2 in EarthMart-Settings.txt it also opens the customer display on the LEFT/RIGHT screen.
 rem  Runs in its own Chrome profile (%LocalAppData%\EarthMartKiosk): normal Chrome still works.
 rem  Switch to other programs: Alt+Tab or the Windows key.  Leave kiosk: Alt+F4.
 rem  Log: %TEMP%\earthmart-launch.log
 rem  Plain ASCII on purpose (cmd misreads UTF-8 text in .bat files).
 rem ==================================================================
-set "SELF=%~n0"
-if not defined MODE set "MODE=single"
-if /i not "%SELF:2Screens=%"=="%SELF%" set "MODE=dual"
+rem Screens come from EarthMart-Settings.txt next to this file (written by Install-EarthMart.bat):
+rem   SCREENS=1 or 2      SIDE=left or right (where the customer display is, next to the main screen)
+set "MODE=single"
 set "SIDE=right"
-if /i not "%SELF:Left=%"=="%SELF%" set "SIDE=left"
+set "CFG_SCREENS="
+set "CFG_SIDE="
+if exist "%~dp0EarthMart-Settings.txt" (
+  for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0EarthMart-Settings.txt") do set "CFG_%%a=%%b"
+)
+if "%CFG_SCREENS%"=="2" set "MODE=dual"
+if /i "%CFG_SIDE%"=="left" set "SIDE=left"
 set "LOG=%TEMP%\earthmart-launch.log"
 echo [%date% %time%] start %* mode=%MODE% side=%SIDE% > "%LOG%"
 
@@ -83,7 +88,7 @@ exit /b 0
 :two
 rem Customer display first (a fresh Chrome honours position + full screen), then the sale screen,
 rem which goes full screen on the first touch / key. The display goes on the screen to the
-rem LEFT or RIGHT of the main one (by this file's name); if there is none on that side, any other screen.
+rem LEFT or RIGHT of the main one (from the settings file); if there is none on that side, any other screen.
 set "CX=1920"
 set "CY=0"
 set "CW=1024"
