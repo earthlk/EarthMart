@@ -9,7 +9,7 @@ rem  Plain ASCII on purpose.
 rem ==================================================================
 set "SRC=%~dp0"
 set "DEST=%LocalAppData%\EarthMart"
-for %%F in (EarthMart.html EarthMart-Counter.bat EarthMart-BackOffice.bat Make-Shortcuts.ps1) do (
+for %%F in (EarthMart.html EarthMart-Counter.bat EarthMart-BackOffice.bat EarthMart-Helper.ps1 Make-Shortcuts.ps1) do (
   if not exist "%SRC%%%F" (
     echo Missing %%F - keep all setup files together in one folder.
     pause
@@ -49,6 +49,7 @@ copy /y "%SRC%EarthMart.html" "%DEST%\EarthMart.html" >nul || goto :copyfail
 copy /y "%SRC%EarthMart-Counter.bat" "%DEST%\EarthMart-Counter.bat" >nul || goto :copyfail
 copy /y "%SRC%EarthMart-BackOffice.bat" "%DEST%\EarthMart-BackOffice.bat" >nul || goto :copyfail
 copy /y "%SRC%Make-Shortcuts.ps1" "%DEST%\Make-Shortcuts.ps1" >nul || goto :copyfail
+copy /y "%SRC%EarthMart-Helper.ps1" "%DEST%\EarthMart-Helper.ps1" >nul || goto :copyfail
 if exist "%DEST%\EarthMart-Counter-2Screens.bat" del "%DEST%\EarthMart-Counter-2Screens.bat"
 if exist "%DEST%\EarthMart-Counter-2Screens-Left.bat" del "%DEST%\EarthMart-Counter-2Screens-Left.bat"
 set "COUNTER=%DEST%\EarthMart-Counter.bat"
@@ -77,7 +78,7 @@ echo  First time on the shop screen: paste the setup link (if not given above),
 echo  sign in, then Settings ^> "register as counter".
 echo.
 choice /c YN /m "  Open the shop screen now"
-if "%errorlevel%"=="1" start "" /min cmd /c ""%COUNTER%""
+if "%errorlevel%"=="1" start "" cmd /c ""%COUNTER%""
 exit /b 0
 
 :copyfail

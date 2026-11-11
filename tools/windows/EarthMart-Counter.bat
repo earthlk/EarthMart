@@ -66,12 +66,21 @@ if not defined CHROME (
 
 rem Close an old shop-screen Chrome only (normal Chrome is left alone).
 set "KDIR=%LocalAppData%\EarthMartKiosk"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" | Where-Object { $_.CommandLine -like '*EarthMartKiosk*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+set "HELPER=%~dp0EarthMart-Helper.ps1"
+if exist "%HELPER%" powershell -NoProfile -ExecutionPolicy Bypass -File "%HELPER%" -Action kill >nul 2>&1
+echo old shop screen closed >> "%LOG%"
 timeout /t 1 /nobreak >nul
 
+echo starting Chrome >> "%LOG%"
 set "COMMON=--user-data-dir="%KDIR%" --no-first-run --no-default-browser-check --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch --kiosk-printing"
 
 if /i "%MODE%"=="dual" goto :two
+echo launch kiosk >> "%LOG%"
+start "" "%CHROME%" %COMMON% --kiosk "%URL%!HP!"
+call :trace
+exit /b 0
+
+:two
 rem Customer display first (a fresh Chrome honours position + full screen), then the sale screen,
 rem which goes full screen on the first touch / key. The display goes on the screen to the
 rem LEFT or RIGHT of the main one (by this file's name); if there is none on that side, any other screen.
@@ -79,12 +88,18 @@ set "CX=1920"
 set "CY=0"
 set "CW=1024"
 set "CH=768"
-set "EM_SIDE=%SIDE%"
-for /f "usebackq tokens=1-4" %%a in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; $p=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $o=@([System.Windows.Forms.Screen]::AllScreens | Where-Object { -not $_.Primary } | ForEach-Object { $_.Bounds }); if ($env:EM_SIDE -eq 'left') { $s=$o | Where-Object { $_.X -lt $p.X } | Sort-Object X -Descending | Select-Object -First 1 } else { $s=$o | Where-Object { $_.X -ge $p.Right } | Sort-Object X | Select-Object -First 1 }; if (-not $s) { $s=$o | Select-Object -First 1 }; if ($s) { '{0} {1} {2} {3}' -f $s.X,$s.Y,$s.Width,$s.Height } else { '{0} 0 1024 768' -f $p.Width }" 2^>nul`) do (
-  set "CX=%%a"
-  set "CY=%%b"
-  set "CW=%%c"
-  set "CH=%%d"
+echo finding the customer display screen >> "%LOG%"
+if exist "%HELPER%" powershell -NoProfile -ExecutionPolicy Bypass -File "%HELPER%" -Action screen -Side %SIDE% > "%TEMP%\earthmart-screen.txt" 2>nul
+set "SCR="
+if exist "%TEMP%\earthmart-screen.txt" set /p SCR=<"%TEMP%\earthmart-screen.txt"
+echo screen=!SCR! >> "%LOG%"
+for /f "tokens=1-4" %%a in ("!SCR!") do (
+  if not "%%d"=="" (
+    set "CX=%%a"
+    set "CY=%%b"
+    set "CW=%%c"
+    set "CH=%%d"
+  )
 )
 echo launch two screens side=%SIDE% display=%CX%,%CY% %CW%x%CH% >> "%LOG%"
 start "" "%CHROME%" %COMMON% --app="%URL%?page=customer" --window-position=%CX%,%CY% --window-size=%CW%,%CH% --start-fullscreen
@@ -95,5 +110,6 @@ exit /b 0
 
 :trace
 timeout /t 5 /nobreak >nul
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" | Where-Object { $_.CommandLine -like '*EarthMartKiosk*' -and $_.CommandLine -notlike '*--type=*' } | ForEach-Object { 'CHROME-CMD: ' + ($_.CommandLine -replace '#connect=\S+', '#connect=...') } | Out-File -Append -Encoding ascii $env:TEMP\earthmart-launch.log" >nul 2>&1
+if exist "%HELPER%" powershell -NoProfile -ExecutionPolicy Bypass -File "%HELPER%" -Action trace -Log "%LOG%" >nul 2>&1
+echo done >> "%LOG%"
 exit /b 0

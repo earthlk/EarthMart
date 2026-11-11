@@ -8,7 +8,7 @@ const out = process.argv[2] || path.join(__dirname, '..', 'dist', 'EarthMart-Set
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 execFileSync('node', [path.join(__dirname, 'build-local.js'), path.join(out, 'EarthMart.html')], { stdio: 'inherit' });
-for (const f of ['Install-EarthMart.bat', 'EarthMart-Counter.bat', 'EarthMart-BackOffice.bat', 'Make-Shortcuts.ps1', 'README-TH.txt']) {
+for (const f of ['Install-EarthMart.bat', 'EarthMart-Counter.bat', 'EarthMart-BackOffice.bat', 'EarthMart-Helper.ps1', 'Make-Shortcuts.ps1', 'README-TH.txt']) {
   fs.copyFileSync(path.join(__dirname, 'windows', f), path.join(out, f));
 }
 console.log('setup package in', out);
