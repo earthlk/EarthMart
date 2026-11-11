@@ -229,11 +229,11 @@ host อื่นก็ได้ (Netlify, Cloudflare Pages, Firebase Hosting…
 - จอลูกค้า ลิ้นชัก พิมพ์ใบเสร็จ ใช้ได้เหมือนเดิม · โหมดออฟไลน์: ขายต่อได้ตอนเน็ตหลุด (ไฟล์อยู่ในเครื่องอยู่แล้ว)
 - **โหมดหน้าร้าน (kiosk, Chrome):** `tools/windows/EarthMart-counter.bat` (ตั้งชื่อ "EarthMart หน้าร้าน.bat" วางข้าง EarthMart.html)
   - เปิดหน้าขายแบบ kiosk ที่จอหลักเสมอ · ใบเสร็จพิมพ์ออกเครื่องพิมพ์หลักทันทีไม่ถาม (`--kiosk-printing`)
-  - มีจอลูกค้า: ใช้ `EarthMart-counter-2screens.bat` (วางข้างกัน) → จอลูกค้าเต็มจอที่ **จอขวา** + หน้าขายเต็มจอ (เต็มจอเมื่อแตะ/สแกนครั้งแรก) · ไม่ตรวจจับจอเอง เพราะบางเครื่องมีจอเสมือน
+  - มีจอลูกค้า: ใช้ `EarthMart-counter-2screens.bat` (ตั้งชื่อ "EarthMart หน้าร้าน 2 จอ.bat" วางข้างกัน) → จอลูกค้าเต็มจอที่ **จอขวา** + หน้าขายเต็มจอ (เต็มจอเมื่อแตะ/สแกนครั้งแรก) · ไม่ตรวจจับจอเอง เพราะบางเครื่องมีจอเสมือน
   - การดับเบิลคลิก EarthMart.html ตรง ๆ จะเปิดเป็นหน้าต่างปกติเสมอ (kiosk ต้องเปิดผ่าน .bat / shortcut)
   - ใช้ Chrome **โปรไฟล์แยก** (`%LocalAppData%\EarthMartKiosk`) — เปิด Chrome ปกติพร้อมกันได้ ไม่ต้องปิดก่อน · สลับไปโปรแกรมอื่น: Alt+Tab / ปุ่ม Windows · ออกจาก kiosk: Alt+F4
   - โปรไฟล์แยก = เบราว์เซอร์ใหม่ เปิดครั้งแรกต้องวางลิงก์ตั้งค่าเครื่อง + ลงทะเบียนเครื่องหน้าร้านในหน้าต่าง kiosk 1 ครั้ง
-  - เปิดเองตอนเปิดเครื่อง: วาง `tools/windows/EarthMart-startup.bat` ใน `shell:startup` (หา EarthMart.html บน Desktop เอง)
+  - เปิดเองตอนเปิดเครื่อง: วาง `tools/windows/EarthMart-startup.bat` ใน `shell:startup` (หา EarthMart.html บน Desktop เอง · ถ้ามีไฟล์ 2 จอบน Desktop จะใช้แบบ 2 จอ ไม่มีก็ใช้จอเดียว)
   - ไฟล์ .bat เป็นภาษาอังกฤษล้วนโดยตั้งใจ (cmd อ่านภาษาไทย UTF-8 ใน .bat ผิด) · log อยู่ที่ `%TEMP%\earthmart-launch.log`
 - **หลังร้าน:** `tools/windows/EarthMart-backoffice.bat` เปิดหน้าต่างปกติ ใช้พิมพ์ป้าย A4 (โหมด kiosk พิมพ์ทุกอย่างออกเครื่องพิมพ์หลักโดยไม่ถาม)
 

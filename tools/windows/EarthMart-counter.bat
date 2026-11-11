@@ -1,4 +1,5 @@
 @echo off
+rem [EM-LAUNCHER-SINGLE]
 setlocal EnableExtensions
 rem ==================================================================
 rem  EarthMart - shop counter launcher (Chrome kiosk)
