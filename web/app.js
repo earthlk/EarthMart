@@ -630,19 +630,11 @@ function start() {
  * go full screen on the first touch / key (browsers only allow it after one), and block the right-click menu.
  */
 function kioskFullscreen() {
-  var busy = false;
+  // Full screen on the screen the window is on. (The launcher moves the sale window to the main screen
+  // itself: pages opened from a file cannot keep the "manage windows" permission, Chrome asks every time.)
   var go = function () {
-    if (document.fullscreenElement || busy) return;
     var el = document.documentElement;
-    var plain = function () { if (el.requestFullscreen) return el.requestFullscreen().catch(function () {}); };
-    // Two screens: Chrome may open this window on the customer display's screen. With the
-    // "manage windows" permission (asked once), go full screen on the MAIN (primary) screen instead.
-    if (!window.getScreenDetails) return plain();
-    busy = true;
-    window.getScreenDetails().then(function (d) {
-      var main = (d.screens || []).filter(function (x) { return x.isPrimary; })[0];
-      return main && main !== d.currentScreen ? el.requestFullscreen({ screen: main }) : el.requestFullscreen();
-    }).catch(function () { return plain(); }).then(function () { busy = false; }, function () { busy = false; });
+    if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen().catch(function () {});
   };
   ['pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, go, true); });
   document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
