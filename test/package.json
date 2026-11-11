@@ -2,7 +2,7 @@
   "name": "earthmart-pos-tests",
   "private": true,
   "scripts": {
-    "test": "node server.test.js && node ui.test.js && node offline.test.js && node mobile.test.js",
+    "test": "node server.test.js && node ui.test.js && node offline.test.js && node mobile.test.js && node local.test.js",
     "test:server": "node server.test.js"
   },
   "devDependencies": {

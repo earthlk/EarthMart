@@ -627,6 +627,13 @@ function start() {
 /** Apps Script schema version this page needs (api_status.apiVersion). */
 var API_NEEDED = 5;
 
+/** Pull { url, key } out of a pasted setup link (or just its #connect=… part). */
+function parseConnectLink(text) {
+  var m = /#?connect=([^&\s]+)/.exec(String(text || ''));
+  if (!m) return null;
+  try { var c = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1]))))); return c.url && c.key ? c : null; } catch (e) { return null; }
+}
+
 /** A setup link looks like  https://<site>/#connect=<base64 of {"url":"...","key":"..."}>  */
 function readConnectLink() {
   var m = /#connect=([^&]+)/.exec(location.hash || '');
@@ -651,6 +658,8 @@ function showConnect(msg) {
     '<h2>เชื่อมต่อกับร้าน</h2><div class="muted" style="font-size:14px">ตั้งครั้งเดียวต่อเครื่อง · ค่าทั้งสองได้จากขั้นตอน Deploy ในคู่มือ ' +
     'หรือเปิด "ลิงก์ตั้งค่าเครื่อง" จากหน้าตั้งค่าของเครื่องที่ใช้งานอยู่แล้ว</div>' +
     (msg ? '<div class="banner" style="border-radius:8px">' + esc(msg) + '</div>' : '') +
+    '<div class="field"><label for="c-link">วาง "ลิงก์ตั้งค่าเครื่อง" (ง่ายสุด)</label><input id="c-link" data-input="connectLink" placeholder="https://…#connect=…" autocomplete="off"></div>' +
+    '<div class="muted" style="font-size:12px;text-align:center">— หรือใส่เอง —</div>' +
     '<div class="field"><label for="c-url">Web app URL (ลงท้าย /exec)</label><input id="c-url" value="' + esc(c.url) + '" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></div>' +
     '<div class="field"><label for="c-key">API key</label><input id="c-key" value="' + esc(c.key) + '" autocomplete="off"></div>' +
     '<button class="btn primary lg" type="submit">ทดสอบและบันทึก</button></form></div>';
@@ -4648,6 +4657,11 @@ function renderSettings() {
     '<h2>การเชื่อมต่อ</h2><div class="muted" style="font-size:13px;word-break:break-all">' + esc(conn().url.replace(/(macros\/s\/.{6}).*(.{6}\/exec)/, '$1…$2')) + '</div>' +
     '<div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="copyConnect">คัดลอกลิงก์ตั้งค่าเครื่องอื่น</button><button class="btn sm ghost" data-act="connect">เปลี่ยน</button></div>' +
     '<div class="muted" style="font-size:12px">ลิงก์นี้มี API key — ส่งให้เฉพาะเครื่องของร้าน</div>' +
+    '<hr style="border:0;border-top:1px solid var(--line);width:100%"><h2>ไฟล์เปิดในเครื่อง</h2>' +
+    (window.EM_LOCAL ? '<div class="muted" style="font-size:13px">เครื่องนี้เปิดจากไฟล์ในคอม · เวอร์ชัน ' + esc(window.EM_BUILD || '') + ' (UTC)<br>ไฟล์ไม่อัปเดตเอง — ถ้าหน้าเว็บมีฟีเจอร์ใหม่ ดาวน์โหลดไฟล์ใหม่มาทับ</div>' +
+      '<a class="btn sm" href="https://earthlk.github.io/EarthMart/EarthMart-local.html" download="EarthMart.html" target="_blank" rel="noopener">ดาวน์โหลดเวอร์ชันล่าสุด</a>'
+      : '<div class="muted" style="font-size:13px">ไฟล์เดียว เปิดจากหน้า Desktop ได้เลย (ยังเชื่อมกับ Google Sheet ของร้าน) · เปิดครั้งแรกให้วาง "ลิงก์ตั้งค่าเครื่อง" แล้วลงทะเบียนเครื่องใหม่</div>' +
+      '<a class="btn sm" href="EarthMart-local.html" download="EarthMart.html">ดาวน์โหลดไฟล์</a>') +
     '<hr style="border:0;border-top:1px solid var(--line);width:100%">' +
     '<h2>สำรองข้อมูล</h2><div class="muted" style="font-size:13px">Backup อัตโนมัติทุกวันตั้งได้ด้วย installTriggers() (ดูคู่มือ)</div>' +
     '<button class="btn" data-act="backupNow">Backup ตอนนี้</button></div></div>' +
@@ -4983,6 +4997,11 @@ document.addEventListener('click', function (e) {
 
 document.addEventListener('input', function (e) {
   if (e.target.id === 'lab-q') return labSug(e.target.value);
+  if (e.target.id === 'c-link') {
+    var cl = parseConnectLink(e.target.value);
+    if (cl) { $('#c-url').value = cl.url; $('#c-key').value = cl.key; toast('อ่านลิงก์แล้ว — กด "ทดสอบและบันทึก"'); }
+    return;
+  }
   S.lastActivity = Date.now();
   var t = e.target;
   if (t.hasAttribute('data-den')) {
