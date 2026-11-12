@@ -1551,7 +1551,7 @@ function openPay(initial) {
     '<div class="row" style="gap:14px;align-items:center"><div class="grow"><div id="sp-lab" class="muted">เงินทอน</div><div id="sp-res" class="num brand-text" style="font-size:34px;font-weight:700">฿0.00</div>' +
     '<div class="muted" style="font-size:12px;margin-top:4px" id="sp-qrnote"></div></div>' +
     '<div id="sp-qrwrap" class="hidden"><div class="qr" id="spqr" style="width:128px;height:128px"></div></div></div></div>' +
-    '<label class="row" style="color:var(--ink);font-size:15px"><input type="checkbox" id="autoprint" ' + (store('em_autoprint') === '0' ? '' : 'checked') + '> พิมพ์ใบเสร็จ</label></div>' +
+    '<label class="row" style="color:var(--ink);font-size:15px"><input type="checkbox" id="autoprint" ' + (S.settings.autoPrint === '0' ? '' : 'checked') + '> พิมพ์ใบเสร็จ</label></div>' +
     // keypad
     '<div class="keypad" id="kp">' + ['7', '8', '9', 'del', '4', '5', '6', 'clr', '1', '2', '3', '00', '0', '.'].map(function (k) {
       return '<button type="button" data-k="' + k + '"' + (k === '0' ? ' class="wide"' : '') + ' aria-label="' + (k === 'del' ? 'ลบ' : k === 'clr' ? 'ล้าง' : k) + '">' +
@@ -1684,7 +1684,6 @@ function openPay(initial) {
       received = p.cashGiven;
     }
     submitting = true;
-    store('em_autoprint', $('#autoprint', m).checked ? '1' : '0');
     var sale = {
       saleUid: S.cart.saleUid, payMethod: method, received: received, payments: payments, billDiscount: S.cart.billDiscount,
       approvalId: S.cart.approvalId,
@@ -4020,11 +4019,12 @@ function stockHist(sku) {
 /* =================================================================== */
 
 var DENOMS = [1000, 500, 100, 50, 20];
+var COINS = [10, 5, 2, 1, 0.5, 0.25];
 
 function renderShift() {
   if (!S.isCounter) return '<div class="page"><div class="card pad" style="max-width:560px">เปิด/ปิดกะได้เฉพาะเครื่องหน้าร้านที่ลงทะเบียนแล้ว</div></div>';
   if (!S.shift) {
-    return '<div class="page" style="justify-content:center;align-items:flex-start"><form class="card pad col" style="width:520px;gap:12px" data-form="openShift">' +
+    return '<div class="page" style="justify-content:center;align-items:flex-start"><form class="card pad col" style="width:min(900px,100%);gap:12px" data-form="openShift">' +
       '<h2>เปิดกะ</h2><div class="muted">นับเงินทอนในลิ้นชักก่อนเริ่มขาย</div>' + denomTable('o') +
       '<div class="row" style="justify-content:space-between;align-items:baseline"><b>เงินทอนตั้งต้น</b><span id="o-total" class="num" style="font-size:30px;font-weight:700">฿0.00</span></div>' +
       '<button class="btn lg primary" type="submit">เปิดกะ · เริ่มขาย</button></form></div>';
@@ -4042,12 +4042,49 @@ function renderShift() {
     '<button class="btn" type="submit">บันทึก</button></form></section></div>';
 }
 
+/** Count the drawer: notes and coins by count, an "other" amount for odd change, and an on-screen keypad. */
 function denomTable(prefix) {
-  return '<table class="table"><tbody>' + DENOMS.map(function (d) {
-    return '<tr><td><label for="' + prefix + d + '" style="color:var(--ink);font-size:15px">แบงก์ ' + d.toLocaleString() + '</label></td><td class="r"><input id="' + prefix + d +
-      '" data-den="' + d + '" data-p="' + prefix + '" type="number" min="0" inputmode="numeric" style="width:110px;text-align:center"></td></tr>';
-  }).join('') + '<tr><td><label for="' + prefix + 'coin" style="color:var(--ink);font-size:15px">เหรียญรวม (บาท)</label></td><td class="r"><input id="' + prefix +
-    'coin" data-den="1" data-p="' + prefix + '" type="number" min="0" step="0.25" style="width:110px;text-align:center"></td></tr></tbody></table>';
+  var row = function (id, d, label) {
+    return '<label class="den-row" for="' + id + '"><span>' + label + '</span><input id="' + id + '" data-den="' + d + '" data-p="' + prefix +
+      '" inputmode="none" autocomplete="off" placeholder="0"><span class="den-sub num" data-sub="' + id + '"></span></label>';
+  };
+  var keys = ['7', '8', '9', 'del', '4', '5', '6', 'clr', '1', '2', '3', 'next', '0', '.'].map(function (k) {
+    var t = { del: '⌫', clr: 'C', next: 'ถัดไป ↓' }[k] || k;
+    return '<button type="button" data-dk="' + k + '" data-p="' + prefix + '"' + (k === '0' ? ' class="wide"' : '') + ' aria-label="' + ({ del: 'ลบ', clr: 'ล้าง', next: 'ช่องถัดไป' }[k] || k) + '">' + t + '</button>';
+  }).join('');
+  return '<div class="denom"><div class="den-col"><h3>ธนบัตร <span class="muted">(ใบ)</span></h3>' +
+    DENOMS.map(function (d) { return row(prefix + d, d, d.toLocaleString()); }).join('') + '</div>' +
+    '<div class="den-col"><h3>เหรียญ <span class="muted">(เหรียญ)</span></h3>' +
+    COINS.map(function (d) { return row(prefix + 'c' + String(d).replace('.', '_'), d, d >= 1 ? String(d) : (d * 100) + ' สต.'); }).join('') +
+    row(prefix + 'coin', 1, 'อื่น ๆ <span class="muted">(บาท)</span>') + '</div>' +
+    '<div class="den-kp keypad">' + keys + '</div></div>';
+}
+
+/** Show each row's value and the total. */
+function denomRefresh(prefix) {
+  $all('[data-den][data-p="' + prefix + '"]').forEach(function (i) {
+    var n = Number(i.value || 0) * Number(i.getAttribute('data-den')), sub = $('[data-sub="' + i.id + '"]');
+    if (sub) sub.textContent = i.value && n ? money(n) : '';
+  });
+  var out = $('#' + prefix + '-total');
+  if (out) out.textContent = '฿' + money(denomSum(prefix));
+}
+
+/** On-screen keypad for the drawer count: types into the focused box. */
+function denomKey(btn) {
+  var p = btn.getAttribute('data-p'), k = btn.getAttribute('data-dk');
+  var boxes = $all('[data-den][data-p="' + p + '"]');
+  var cur = document.activeElement && boxes.indexOf(document.activeElement) >= 0 ? document.activeElement : (S.denFocus && boxes.indexOf(S.denFocus) >= 0 ? S.denFocus : boxes[0]);
+  if (!cur) return;
+  var v = cur.value || '', other = cur.id === p + 'coin';
+  if (k === 'next') { var nx = boxes[(boxes.indexOf(cur) + 1) % boxes.length]; nx.focus(); nx.select(); return; }
+  if (k === 'del') v = v.slice(0, -1);
+  else if (k === 'clr') v = '';
+  else if (k === '.') { if (other && v.indexOf('.') < 0) v = (v || '0') + '.'; }
+  else if (!(other && /\.\d\d$/.test(v)) && v.replace('.', '').length < 7) v = (v === '0' ? '' : v) + k;
+  cur.value = v;
+  cur.focus();
+  denomRefresh(p);
 }
 
 function denomSum(prefix) {
@@ -4645,6 +4682,8 @@ function renderSettings() {
     '<form class="card pad col" data-form="settings" style="gap:10px"><h2>ร้าน</h2>' + f('shopName', 'ชื่อร้าน (บนใบเสร็จ)') + f('shopAddress', 'ที่อยู่') +
     f('taxId', 'เลขผู้เสียภาษี', 'ถ้ามี') + f('promptPayId', 'พร้อมเพย์', 'เบอร์มือถือ / เลขบัตร 13 หลัก') + f('receiptFooter', 'ข้อความท้ายใบเสร็จ') +
     f('billPrefix', 'คำนำหน้าเลขบิล', 'เว้นว่างได้') +
+    '<div class="field"><label for="s-autoPrint">พิมพ์ใบเสร็จอัตโนมัติหลังรับเงิน</label><select id="s-autoPrint" data-skey="autoPrint">' +
+      '<option value="1">พิมพ์ทุกบิล (ยกเลิกได้ในหน้าชำระเงิน)</option><option value="0"' + (st.autoPrint === '0' ? ' selected' : '') + '>ไม่พิมพ์ (ติ๊กพิมพ์เองเฉพาะบิลที่ลูกค้าขอ)</option></select></div>' +
     '<div class="field"><label for="s-autoLockMinutes">ล็อกหน้าจอเมื่อไม่มีใครใช้ (ต้องใส่ PIN ใหม่)</label><select id="s-autoLockMinutes" data-skey="autoLockMinutes">' +
       [['0', 'ไม่ล็อก'], ['5', '5 นาที'], ['10', '10 นาที'], ['15', '15 นาที'], ['30', '30 นาที'], ['60', '1 ชั่วโมง'], ['120', '2 ชั่วโมง']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.autoLockMinutes === undefined ? '5' : st.autoLockMinutes) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
@@ -4967,8 +5006,12 @@ var ACTIONS = {
   }
 };
 
+document.addEventListener('mousedown', function (e) { if (e.target.closest('[data-dk]')) e.preventDefault(); });
+document.addEventListener('focusin', function (e) { if (e.target.hasAttribute && e.target.hasAttribute('data-den')) S.denFocus = e.target; });
 document.addEventListener('click', function (e) {
   S.lastActivity = Date.now();
+  var dk = e.target.closest('[data-dk]');
+  if (dk) { denomKey(dk); return; }
   var el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;
   if (topModal() && !topModal().contains(el)) return;
@@ -5021,9 +5064,8 @@ document.addEventListener('input', function (e) {
   S.lastActivity = Date.now();
   var t = e.target;
   if (t.hasAttribute('data-den')) {
-    var p = t.getAttribute('data-p');
-    var out = $('#' + p + '-total');
-    if (out) out.textContent = '฿' + money(denomSum(p));
+    if (!/^\d*\.?\d*$/.test(t.value)) t.value = t.value.replace(/[^\d.]/g, '');
+    denomRefresh(t.getAttribute('data-p'));
   }
   if (t.hasAttribute('data-ef') || t.hasAttribute('data-ec') || t.hasAttribute('data-ecc') || t.id === 'e-comp') edInput(t);
   if (t.hasAttribute('data-rc') || t.hasAttribute('data-rch')) rcInput(t);

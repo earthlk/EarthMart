@@ -95,8 +95,11 @@ call('importProducts', T, [
 
   // 3. Counter + no shift -> open shift screen
   await page.waitForSelector('[data-form=openShift]');
-  await page.fill('#o500', '1');
-  await page.fill('#ocoin', '20');
+  // on-screen keypad: 1 x 500 note, 2 x 10-baht coins
+  await page.click('#o500'); await page.click('[data-dk="1"][data-p=o]');
+  await page.click('#oc10'); await page.click('[data-dk="2"][data-p=o]');
+  assert.strictEqual(await page.textContent('[data-sub=oc10]'), '20.00', 'row shows its value');
+  await shot('03-open-shift');
   assert.match(await page.textContent('#o-total'), /520/);
   await page.click('[data-form=openShift] button[type=submit]');
 
@@ -731,6 +734,20 @@ call('importProducts', T, [
   assert.strictEqual(call('listSlides', T).length, 1, 'slide saved on the server');
   await cd2.waitForFunction(() => document.querySelectorAll('#cddots span').length === 3, null, { timeout: 20000 });   // 2 promotions + the poster
   await cd2.close();
+
+  // 9zzzz. Auto-print off: the pay dialog starts with "print receipt" unticked (can still tick it)
+  await page.click('nav button[data-v=settings]');
+  await page.selectOption('#s-autoPrint', '0');
+  await page.click('#s-autoPrint >> xpath=ancestor::form >> button[type=submit]');
+  await page.waitForSelector('.toast:has-text("บันทึกแล้ว")');
+  await page.click('nav button[data-v=sale]');
+  await page.fill('#scan', '8851234567890'); await page.keyboard.press('Enter');
+  await page.keyboard.press('F12');
+  await page.waitForSelector('#autoprint');
+  assert.strictEqual(await page.isChecked('#autoprint'), false, 'auto print off by setting');
+  await page.keyboard.press('Escape');
+  await page.click('[data-act=clearCart]');
+  if (await page.$('.modal [data-x=yes]')) await page.click('.modal [data-x=yes]');
 
   // 10. Close shift
   await page.click('nav button[data-v=shift]');

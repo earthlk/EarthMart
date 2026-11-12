@@ -55,6 +55,7 @@ var DEFAULT_SETTINGS = {
   taxId: '',
   promptPayId: '',
   receiptFooter: 'ขอบคุณที่อุดหนุนค่ะ',
+  autoPrint: '1',
   billPrefix: '',
   lineChannelToken: '',
   lineTargetId: '',

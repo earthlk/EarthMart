@@ -609,3 +609,16 @@ a{color:var(--brand-text)}
 .ic.has-img{background:transparent !important;padding:0;overflow:hidden}
 .ic .kimg{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
 .key .ic.has-img{width:100%;height:76px;border-radius:8px}
+
+/* ===== Drawer count (open / close shift) ===== */
+.denom{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 260px;gap:14px;align-items:start}
+.den-col{display:flex;flex-direction:column;gap:4px}
+.den-col h3{margin:0 0 4px;font-size:15px}
+.den-row{display:grid;grid-template-columns:76px 84px minmax(0,1fr);align-items:center;gap:8px;font-size:15px;color:var(--ink);cursor:pointer}
+.den-row input{height:42px;width:84px;text-align:center;font-size:17px;padding:0 4px}
+.den-row input:focus{outline:2px solid var(--brand);border-color:var(--brand)}
+.den-sub{color:var(--muted);font-size:13px;text-align:right}
+.den-kp button{height:54px;font-size:22px}
+.den-kp button[data-dk=next]{font-size:15px;background:var(--brand-soft);color:var(--brand-text)}
+.den-kp button[data-dk=del],.den-kp button[data-dk=clr]{background:var(--surface-muted);font-size:20px}
+@media (max-width:1100px){ .denom{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} .den-kp{grid-column:1/-1} }
