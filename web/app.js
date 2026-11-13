@@ -4942,6 +4942,7 @@ var ACTIONS = {
     var save = function () {
       cashMove(type, $('#cm-amt', m).value, $('#cm-why', m).value).then(function (sum) {
         closeModal(); toast((type === 'IN' ? 'บันทึกเงินเข้าแล้ว' : 'บันทึกเงินออกแล้ว') + (sum ? '' : ' (รอส่ง)')); openDrawer(true);
+        if (S.view === 'shift' && sum && sum.expectedCash !== undefined) drawShiftSum(sum);
       }).catch(fail);
     };
     $('[data-x=ok]', m).onclick = save;
