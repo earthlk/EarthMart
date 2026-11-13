@@ -754,6 +754,8 @@ call('importProducts', T, [
   await page.waitForSelector('#shiftsum h2');
   await page.fill('#c1000', '0'); await page.fill('#c500', '1'); await page.fill('#c100', '1'); await page.fill('#ccoin', '112.80');
   await shot('10-close-shift');
+  if (process.env.SIZES) for (const [w, h] of [[1920, 1080], [1280, 1024], [1024, 768]]) { await page.setViewportSize({ width: w, height: h }); await shot('sz-' + w); }
+  await page.setViewportSize({ width: 1366, height: 800 });
   await page.click('[data-act=closeShift]');
   await page.click('[data-x=yes]');
   await page.waitForSelector('.modal h1:has-text("ปิดกะแล้ว")');

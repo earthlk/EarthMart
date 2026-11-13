@@ -4023,45 +4023,47 @@ var COINS = [10, 5, 2, 1, 0.5, 0.25];
 
 function renderShift() {
   if (!S.isCounter) return '<div class="page"><div class="card pad" style="max-width:560px">เปิด/ปิดกะได้เฉพาะเครื่องหน้าร้านที่ลงทะเบียนแล้ว</div></div>';
-  var total = function (id, label) {
-    return '<div class="shift-total"><span>' + label + '</span><b id="' + id + '" class="num">฿0.00</b></div>';
-  };
-  if (!S.shift) {
-    return '<form class="page shift-page" data-form="openShift"><section class="card pad shift-count">' +
-      '<div class="shift-head"><h2>เปิดกะ</h2><span class="muted">นับเงินทอนในลิ้นชักก่อนเริ่มขาย</span></div>' + denomTable('o') + '</section>' +
-      '<aside class="shift-side"><div class="card pad col" style="gap:14px">' + total('o-total', 'เงินทอนตั้งต้น') +
-      '<button class="btn primary shift-go" type="submit">เปิดกะ · เริ่มขาย</button></div></aside></form>';
-  }
-  return '<div class="page shift-page"><section class="card pad shift-count">' +
-    '<div class="shift-head"><h2>นับเงินในลิ้นชัก · ปิดกะ</h2><span class="muted">นับธนบัตรและเหรียญเป็นจำนวน · แตะช่องแล้วกดแป้นตัวเลข</span></div>' + denomTable('c') + '</section>' +
-    '<aside class="shift-side"><div class="card pad col" style="gap:12px">' + total('c-total', 'นับได้จริง') +
-    '<div class="field"><label for="cnote">หมายเหตุ</label><input id="cnote" placeholder="เช่น ทอนเกิน"></div>' +
-    '<button class="btn" type="button" data-act="noSale">เปิดลิ้นชักเพื่อนับเงิน</button>' +
-    '<button class="btn primary shift-go" data-act="closeShift">ปิดกะ' + (S.settings.lineEnabled ? ' · ส่ง LINE' : '') + '</button></div>' +
-    '<div class="card pad" id="shiftsum"><span class="muted">กำลังโหลด…</span></div>' +
+  var open = !S.shift, p = open ? 'o' : 'c';
+  var count = '<section class="card pad shift-count"><div class="shift-head"><h2>' + (open ? 'เปิดกะ · นับเงินทอน' : 'ปิดกะ · นับเงินในลิ้นชัก') +
+    '</h2><span class="muted">แตะช่องแล้วกดแป้นตัวเลข · ใส่เป็นจำนวนใบ / เหรียญ</span></div>' + denomTable(p) + '</section>';
+  var pad = '<section class="card pad shift-pad"><div class="shift-total"><span>' + (open ? 'เงินทอนตั้งต้น' : 'นับได้จริง') +
+    '</span><b id="' + p + '-total" class="num">฿0.00</b></div>' + denomPad(p) +
+    (open ? '<button class="btn primary shift-go" type="submit">เปิดกะ · เริ่มขาย</button>'
+      : '<div class="shift-acts"><div class="field"><label for="cnote">หมายเหตุ</label><input id="cnote" placeholder="เช่น ทอนเกิน"></div>' +
+        '<button class="btn" type="button" data-act="noSale">เปิดลิ้นชักเพื่อนับเงิน</button>' +
+        '<button class="btn primary shift-go" type="button" data-act="closeShift">ปิดกะ' + (S.settings.lineEnabled ? ' · ส่ง LINE' : '') + '</button></div>') + '</section>';
+  if (open) return '<form class="page shift-page open" data-form="openShift">' + count + pad + '</form>';
+  return '<div class="page shift-page">' + count + pad +
+    '<aside class="shift-side"><div class="card pad" id="shiftsum"><span class="muted">กำลังโหลด…</span></div>' +
     '<form class="card pad col" data-form="cashMove" style="gap:10px"><h2 style="margin:0">เงินเข้า / ออกลิ้นชัก</h2>' +
     '<div class="seg"><button type="button" data-mv="OUT" class="on">เงินออก</button><button type="button" data-mv="IN">เงินเข้า</button></div>' +
-    '<div class="row"><label class="sr" for="mvamt">จำนวน</label><input id="mvamt" type="number" step="0.25" placeholder="จำนวนเงิน" style="width:120px">' +
-    '<label class="sr" for="mvwhy">เหตุผล</label><input id="mvwhy" placeholder="เหตุผล เช่น ค่าน้ำแข็ง" class="grow"></div>' +
+    '<div class="row"><label class="sr" for="mvamt">จำนวน</label><input id="mvamt" type="number" step="0.25" placeholder="จำนวนเงิน" style="width:110px">' +
+    '<label class="sr" for="mvwhy">เหตุผล</label><input id="mvwhy" placeholder="เหตุผล" class="grow"></div>' +
     '<button class="btn" type="submit">บันทึก</button></form></aside></div>';
 }
 
-/** Count the drawer: notes and coins by count, an "other" amount for odd change, and an on-screen keypad. */
+/** Count the drawer: one tile per note / coin (count of pieces), plus "other" in baht for odd change. */
 function denomTable(prefix) {
-  var row = function (id, d, label) {
-    return '<label class="den-row" for="' + id + '"><span>' + label + '</span><input id="' + id + '" data-den="' + d + '" data-p="' + prefix +
-      '" inputmode="none" autocomplete="off" placeholder="0"><span class="den-sub num" data-sub="' + id + '"></span></label>';
+  var tile = function (id, d, label, kind) {
+    return '<label class="den-tile ' + kind + '" for="' + id + '"><span class="den-name">' + label + '</span>' +
+      '<input id="' + id + '" data-den="' + d + '" data-p="' + prefix + '" inputmode="none" autocomplete="off" placeholder="0">' +
+      '<span class="den-sub num" data-sub="' + id + '"></span></label>';
   };
-  var keys = ['7', '8', '9', 'del', '4', '5', '6', 'clr', '1', '2', '3', 'next', '0', '.'].map(function (k) {
+  return '<div class="den-grid">' +
+    DENOMS.map(function (d) { return tile(prefix + d, d, '฿' + d.toLocaleString(), 'note n' + d); }).join('') +
+    COINS.map(function (d) {
+      var k = d >= 10 ? 'c10' : d >= 1 ? 'cs' : 'cb';
+      return tile(prefix + 'c' + String(d).replace('.', '_'), d, d >= 1 ? 'เหรียญ ' + d : 'เหรียญ ' + (d * 100) + ' สต.', 'coin ' + k);
+    }).join('') +
+    tile(prefix + 'coin', 1, 'อื่น ๆ (บาท)', 'other') + '</div>';
+}
+
+/** On-screen keypad for the drawer count. */
+function denomPad(prefix) {
+  return '<div class="den-kp keypad">' + ['7', '8', '9', 'del', '4', '5', '6', 'clr', '1', '2', '3', 'next', '0', '.'].map(function (k) {
     var t = { del: '⌫', clr: 'C', next: 'ถัดไป ↓' }[k] || k;
     return '<button type="button" data-dk="' + k + '" data-p="' + prefix + '"' + (k === '0' ? ' class="wide"' : '') + ' aria-label="' + ({ del: 'ลบ', clr: 'ล้าง', next: 'ช่องถัดไป' }[k] || k) + '">' + t + '</button>';
-  }).join('');
-  return '<div class="denom"><div class="den-col"><h3>ธนบัตร <span class="muted">(ใบ)</span></h3>' +
-    DENOMS.map(function (d) { return row(prefix + d, d, d.toLocaleString()); }).join('') + '</div>' +
-    '<div class="den-col"><h3>เหรียญ <span class="muted">(เหรียญ)</span></h3>' +
-    COINS.map(function (d) { return row(prefix + 'c' + String(d).replace('.', '_'), d, d >= 1 ? String(d) : (d * 100) + ' สต.'); }).join('') +
-    row(prefix + 'coin', 1, 'อื่น ๆ<span class="muted">เป็นบาท</span>') + '</div>' +
-    '<div class="den-kp keypad">' + keys + '</div></div>';
+  }).join('') + '</div>';
 }
 
 /** Show each row's value and the total. */
