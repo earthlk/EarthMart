@@ -753,6 +753,7 @@ call('importProducts', T, [
   await page.click('nav button[data-v=shift]');
   await page.waitForSelector('#shiftsum h2');
   await page.fill('#c1000', '0'); await page.fill('#c500', '1'); await page.fill('#c100', '1'); await page.fill('#ccoin', '112.80');
+  await shot('10-close-shift');
   await page.click('[data-act=closeShift]');
   await page.click('[data-x=yes]');
   await page.waitForSelector('.modal h1:has-text("ปิดกะแล้ว")');

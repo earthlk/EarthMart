@@ -611,14 +611,33 @@ a{color:var(--brand-text)}
 .key .ic.has-img{width:100%;height:76px;border-radius:8px}
 
 /* ===== Drawer count (open / close shift) ===== */
-.denom{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 260px;gap:14px;align-items:start}
-.den-col{display:flex;flex-direction:column;gap:4px}
-.den-col h3{margin:0 0 4px;font-size:15px}
-.den-row{display:grid;grid-template-columns:76px 84px minmax(0,1fr);align-items:center;gap:8px;font-size:15px;color:var(--ink);cursor:pointer}
-.den-row input{height:42px;width:84px;text-align:center;font-size:17px;padding:0 4px}
-.den-row input:focus{outline:2px solid var(--brand);border-color:var(--brand)}
-.den-sub{color:var(--muted);font-size:13px;text-align:right}
-.den-kp button{height:54px;font-size:22px}
-.den-kp button[data-dk=next]{font-size:15px;background:var(--brand-soft);color:var(--brand-text)}
-.den-kp button[data-dk=del],.den-kp button[data-dk=clr]{background:var(--surface-muted);font-size:20px}
-@media (max-width:1100px){ .denom{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} .den-kp{grid-column:1/-1} }
+/* Shift page: the count fills the left, totals and actions on the right */
+.shift-page{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;align-items:stretch;overflow:hidden}
+.shift-count{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0}
+.shift-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.shift-head h2{margin:0;font-size:22px}
+.shift-side{display:flex;flex-direction:column;gap:16px;min-height:0;overflow:auto}
+.shift-total{display:flex;flex-direction:column;gap:2px;padding:14px 16px;border-radius:12px;background:var(--brand-soft);color:var(--brand-text)}
+.shift-total span{font-size:15px;font-weight:600}
+.shift-total b{font-size:40px;line-height:1.1;color:var(--ink)}
+.shift-side .btn{height:52px;font-size:17px}
+.shift-side .btn.shift-go{height:68px;font-size:21px}
+.shift-side .field input{height:46px;font-size:16px}
+.denom{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(280px,1.15fr);gap:18px;align-items:stretch}
+.den-col{display:grid;grid-template-rows:auto repeat(7,minmax(44px,1fr));gap:8px;min-height:0}
+.den-col h3{margin:0;font-size:17px}
+.den-row{display:grid;grid-template-columns:92px minmax(70px,1fr) 72px;align-items:stretch;gap:10px;font-size:20px;font-weight:600;color:var(--ink);cursor:pointer;min-height:0}
+.den-row>span:first-child{display:flex;flex-direction:column;justify-content:center;line-height:1.15}
+.den-row>span:first-child .muted{font-size:13px;font-weight:500}
+.den-row input{height:100%;min-height:44px;width:100%;text-align:center;font-size:24px;font-weight:600;padding:0 4px}
+.den-row input:focus{outline:3px solid var(--brand);border-color:var(--brand)}
+.den-sub{display:flex;align-items:center;justify-content:flex-end;color:var(--muted);font-size:15px;font-weight:500}
+.den-kp{grid-template-rows:repeat(4,minmax(56px,1fr));gap:10px;height:100%;min-height:0}
+.den-kp button{height:auto;min-height:56px;font-size:30px}
+.den-kp button[data-dk=next]{grid-row:span 2;font-size:18px;background:var(--brand-soft);color:var(--brand-text)}
+.den-kp button[data-dk=del],.den-kp button[data-dk=clr]{background:var(--surface-muted);font-size:26px}
+@media (max-width:1100px){
+  .shift-page{grid-template-columns:1fr;overflow:auto}
+  .denom{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} .den-kp{grid-column:1/-1;height:auto}
+  .den-col{grid-template-rows:auto;grid-auto-rows:52px}
+}
