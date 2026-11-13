@@ -868,6 +868,7 @@ function go(view) {
   if (view === 'receive') loadReceive();
   if (view === 'expiry') { S.expSel = null; loadExpiry(); }
   if (view !== 'reports') killCharts();
+  if (view === 'shift') { S.denFocus = null; S.shiftSum = null; denomRefresh(S.shift ? 'c' : 'o'); }
   if (view === 'shift' && S.shift) loadShift();
   if (view === 'reports') loadReport();
   if (view === 'settings') loadSettings();
@@ -4019,43 +4020,50 @@ function stockHist(sku) {
 /* =================================================================== */
 
 var DENOMS = [1000, 500, 100, 50, 20];
-var COINS = [10, 5, 2, 1, 0.5, 0.25];
+var COINS = [10, 5, 2, 1];   // satang go in "other" as baht
 
 function renderShift() {
   if (!S.isCounter) return '<div class="page"><div class="card pad" style="max-width:560px">เปิด/ปิดกะได้เฉพาะเครื่องหน้าร้านที่ลงทะเบียนแล้ว</div></div>';
   var open = !S.shift, p = open ? 'o' : 'c';
   var count = '<section class="card pad shift-count"><div class="shift-head"><h2>' + (open ? 'เปิดกะ · นับเงินทอน' : 'ปิดกะ · นับเงินในลิ้นชัก') +
-    '</h2><span class="muted">แตะช่องแล้วกดแป้นตัวเลข · ใส่เป็นจำนวนใบ / เหรียญ</span></div>' + denomTable(p) + '</section>';
-  var pad = '<section class="card pad shift-pad"><div class="shift-total"><span>' + (open ? 'เงินทอนตั้งต้น' : 'นับได้จริง') +
-    '</span><b id="' + p + '-total" class="num">฿0.00</b></div>' + denomPad(p) +
+    '</h2><span class="muted">นับตามลำดับ 1 → 10 · กด + / − ทีละใบ หรือพิมพ์ที่แป้น · แตะแถวไหนก็ได้เพื่อแก้</span></div>' + denomTable(p) +
+    (open ? '' : '<div class="shift-sum" id="shiftsum"><h2>สรุปจากระบบ</h2><span class="muted">กำลังโหลด…</span></div>') + '</section>';
+  var side = '<aside class="card pad shift-pad"><div class="shift-total"><div class="st-top"><span>' + (open ? 'เงินทอนตั้งต้น' : 'นับได้จริง') + '</span><small id="' + p + '-prog">นับแล้ว 0 / 11 ชนิด</small></div>' +
+    '<b id="' + p + '-total" class="num">฿0.00</b>' + (open ? '' : '<div class="st-cmp"><span id="c-exp"></span><b id="c-diff"></b></div>') +
+    '<div class="st-bar"><i id="' + p + '-bar"></i></div></div>' +
+    '<div class="den-cur" id="' + p + '-cur"></div>' + denomPad(p) + '<div class="shift-acts">' +
     (open ? '<button class="btn primary shift-go" type="submit">เปิดกะ · เริ่มขาย</button>'
-      : '<div class="shift-acts"><div class="field"><label for="cnote">หมายเหตุ</label><input id="cnote" placeholder="เช่น ทอนเกิน"></div>' +
-        '<button class="btn" type="button" data-act="noSale">เปิดลิ้นชักเพื่อนับเงิน</button>' +
-        '<button class="btn primary shift-go" type="button" data-act="closeShift">ปิดกะ' + (S.settings.lineEnabled ? ' · ส่ง LINE' : '') + '</button></div>') + '</section>';
-  if (open) return '<form class="page shift-page open" data-form="openShift">' + count + pad + '</form>';
-  return '<div class="page shift-page">' + count + pad +
-    '<aside class="shift-side"><div class="card pad" id="shiftsum"><span class="muted">กำลังโหลด…</span></div>' +
-    '<form class="card pad col" data-form="cashMove" style="gap:10px"><h2 style="margin:0">เงินเข้า / ออกลิ้นชัก</h2>' +
-    '<div class="seg"><button type="button" data-mv="OUT" class="on">เงินออก</button><button type="button" data-mv="IN">เงินเข้า</button></div>' +
-    '<div class="row"><label class="sr" for="mvamt">จำนวน</label><input id="mvamt" type="number" step="0.25" placeholder="จำนวนเงิน" style="width:110px">' +
-    '<label class="sr" for="mvwhy">เหตุผล</label><input id="mvwhy" placeholder="เหตุผล" class="grow"></div>' +
-    '<button class="btn" type="submit">บันทึก</button></form></aside></div>';
+      : '<div class="row" style="gap:8px"><button class="btn grow" type="button" data-act="cashMoveModal">เงินเข้า / ออก</button><button class="btn grow" type="button" data-act="noSale">เปิดลิ้นชัก</button></div>' +
+        '<div class="field"><label for="cnote">หมายเหตุ</label><input id="cnote" placeholder="เช่น ทอนเกิน"></div>' +
+        '<button class="btn primary shift-go" type="button" data-act="closeShift">ปิดกะ' + (S.settings.lineEnabled ? ' · ส่ง LINE' : '') + '</button>') + '</div></aside>';
+  return open ? '<form class="page shift-page" data-form="openShift">' + count + side + '</form>' : '<div class="page shift-page">' + count + side + '</div>';
 }
 
-/** Count the drawer: one tile per note / coin (count of pieces), plus "other" in baht for odd change. */
+var DEN_COLORS = { 1000: '#8A6D4B', 500: '#7B4FA0', 100: '#C0392B', 50: '#2F6DB5', 20: '#2E8B57', 10: '#B8901C', 5: '#8A9098', 2: '#8A9098', 1: '#8A9098' };
+function denChip(d) {
+  return '<span class="den-chip ' + (d >= 20 ? 'note' : 'coin') + '" style="background:' + DEN_COLORS[d] + '">' + d.toLocaleString() + '</span>';
+}
+
+/** Count the drawer in order: notes, then coins (pieces), then "other" in baht for satang and odd change. */
 function denomTable(prefix) {
-  var tile = function (id, d, label, kind) {
-    return '<label class="den-tile ' + kind + '" for="' + id + '"><span class="den-name">' + label + '</span>' +
-      '<input id="' + id + '" data-den="' + d + '" data-p="' + prefix + '" inputmode="none" autocomplete="off" placeholder="0">' +
-      '<span class="den-sub num" data-sub="' + id + '"></span></label>';
+  var n = 0;
+  var row = function (id, d, chip, name, pm) {
+    n++;
+    return '<div class="den-row" data-row="' + id + '"><span class="den-no" data-no="' + n + '">' + n + '</span>' + chip +
+      (pm ? '<button type="button" class="den-pm" data-dpm="-1" data-for="' + id + '" aria-label="ลด ' + name + ' หนึ่ง">−</button>' : '') +
+      '<label class="sr" for="' + id + '">' + name + '</label><input id="' + id + '" data-den="' + (pm ? d : 1) + '" data-p="' + prefix + '" data-name="' + name +
+      '" inputmode="none" autocomplete="off" placeholder="' + (pm ? '' : 'พิมพ์เป็นบาท') + '"' + (pm ? '' : ' class="wide"') + '>' +
+      (pm ? '<button type="button" class="den-pm plus" data-dpm="1" data-for="' + id + '" aria-label="เพิ่ม ' + name + ' หนึ่ง">+</button>' : '') +
+      '<span class="den-sub num" data-sub="' + id + '"></span></div>';
   };
-  return '<div class="den-grid">' +
-    DENOMS.map(function (d) { return tile(prefix + d, d, '฿' + d.toLocaleString(), 'note n' + d); }).join('') +
-    COINS.map(function (d) {
-      var k = d >= 10 ? 'c10' : d >= 1 ? 'cs' : 'cb';
-      return tile(prefix + 'c' + String(d).replace('.', '_'), d, d >= 1 ? 'เหรียญ ' + d : 'เหรียญ ' + (d * 100) + ' สต.', 'coin ' + k);
-    }).join('') +
-    tile(prefix + 'coin', 1, 'อื่น ๆ (บาท)', 'other') + '</div>';
+  var col = function (title, key, body) {
+    return '<div class="den-col"><div class="den-colhead"><b>' + title + '</b><span class="muted">จำนวน · บาท</span></div>' + body +
+      '<div class="den-coltotal"><b>รวม' + title + '</b><b class="num" id="' + prefix + '-t' + key + '">0.00</b></div></div>';
+  };
+  var notes = DENOMS.map(function (d) { return row(prefix + d, d, denChip(d), 'ธนบัตร ' + d.toLocaleString(), true); }).join('');
+  var coins = COINS.map(function (d) { return row(prefix + 'c' + d, d, denChip(d), 'เหรียญ ' + d, true); }).join('') +
+    row(prefix + 'coin', 1, '<span class="den-chip other">อื่น ๆ<small>เศษสตางค์</small></span>', 'อื่น ๆ (บาท)', false);
+  return '<div class="den-cols">' + col('ธนบัตร', 'n', notes) + col('เหรียญ', 'c', coins) + '</div>';
 }
 
 /** On-screen keypad for the drawer count. */
@@ -4066,24 +4074,48 @@ function denomPad(prefix) {
   }).join('') + '</div>';
 }
 
-/** Show each row's value and the total. */
+/** Row values, column totals, progress, the row being counted and (closing) the difference from the system. */
 function denomRefresh(prefix) {
-  $all('[data-den][data-p="' + prefix + '"]').forEach(function (i) {
-    var n = Number(i.value || 0) * Number(i.getAttribute('data-den')), sub = $('[data-sub="' + i.id + '"]');
-    if (sub) sub.textContent = i.value && n ? money(n) : '';
+  var boxes = $all('[data-den][data-p="' + prefix + '"]'), done = 0, tn = 0, tc = 0;
+  var cur = S.denFocus && boxes.indexOf(S.denFocus) >= 0 ? S.denFocus : null;
+  boxes.forEach(function (i, k) {
+    var v = Number(i.value || 0) * Number(i.getAttribute('data-den')), sub = $('[data-sub="' + i.id + '"]'), r = i.closest('.den-row');
+    if (sub) sub.textContent = i.value !== '' ? money(v) : '';
+    if (i.value !== '') done++;
+    if (k < DENOMS.length) tn += v; else tc += v;
+    if (r) { r.classList.toggle('done', i.value !== '' && i !== cur); r.classList.toggle('cur', i === cur); }
   });
-  var out = $('#' + prefix + '-total');
-  if (out) out.textContent = '฿' + money(denomSum(prefix));
+  var set = function (id, t) { var el = $('#' + id); if (el) el.textContent = t; };
+  set(prefix + '-tn', money(tn)); set(prefix + '-tc', money(tc));
+  var total = denomSum(prefix);
+  set(prefix + '-total', '฿' + money(total));
+  set(prefix + '-prog', 'นับแล้ว ' + done + ' / ' + boxes.length + ' ชนิด');
+  var bar = $('#' + prefix + '-bar'); if (bar) bar.style.width = Math.round(done / (boxes.length || 1) * 100) + '%';
+  var curBox = $('#' + prefix + '-cur');
+  if (curBox) {
+    var c = cur || boxes.filter(function (i) { return i.value === ''; })[0];
+    curBox.innerHTML = c ? (cur ? 'กำลังนับ: ' : 'ถัดไป: ') + '<b>' + esc(c.getAttribute('data-name')) + '</b>' : '<b>นับครบแล้ว</b> · ตรวจยอดแล้วกดปุ่มด้านล่าง';
+  }
+  if (prefix === 'c' && S.shiftSum) {
+    set('c-exp', 'ระบบคาดว่ามี ฿' + money(S.shiftSum.expectedCash));
+    var diff = round2(total - S.shiftSum.expectedCash), el = $('#c-diff');
+    // All notes and coins counted ("other" may stay empty) before showing short / over.
+    var main = boxes.slice(0, DENOMS.length + COINS.length).every(function (i) { return i.value !== ''; });
+    if (el) {
+      el.className = !main ? 'muted' : Math.abs(diff) < 0.005 ? 'ok' : 'bad';
+      el.textContent = !main ? 'ยังนับไม่ครบ' : Math.abs(diff) < 0.005 ? 'พอดี' : diff < 0 ? 'ขาด ' + money(-diff) : 'เกิน ' + money(diff);
+    }
+  }
 }
 
 /** On-screen keypad for the drawer count: types into the focused box. */
 function denomKey(btn) {
   var p = btn.getAttribute('data-p'), k = btn.getAttribute('data-dk');
   var boxes = $all('[data-den][data-p="' + p + '"]');
-  var cur = document.activeElement && boxes.indexOf(document.activeElement) >= 0 ? document.activeElement : (S.denFocus && boxes.indexOf(S.denFocus) >= 0 ? S.denFocus : boxes[0]);
+  var cur = document.activeElement && boxes.indexOf(document.activeElement) >= 0 ? document.activeElement : (S.denFocus && boxes.indexOf(S.denFocus) >= 0 ? S.denFocus : boxes.filter(function (i) { return i.value === ''; })[0] || boxes[0]);
   if (!cur) return;
   var v = cur.value || '', other = cur.id === p + 'coin';
-  if (k === 'next') { var nx = boxes[(boxes.indexOf(cur) + 1) % boxes.length]; nx.focus(); nx.select(); return; }
+  if (k === 'next') return denomNext(cur);
   if (k === 'del') v = v.slice(0, -1);
   else if (k === 'clr') v = '';
   else if (k === '.') { if (other && v.indexOf('.') < 0) v = (v || '0') + '.'; }
@@ -4091,6 +4123,24 @@ function denomKey(btn) {
   cur.value = v;
   cur.focus();
   denomRefresh(p);
+}
+
+/** Next row: an untouched row counts as 0 when you move past it. */
+function denomNext(cur) {
+  var p = cur.getAttribute('data-p'), boxes = $all('[data-den][data-p="' + p + '"]');
+  if (cur.value === '' && cur.id !== p + 'coin') cur.value = '0';
+  var nx = boxes[boxes.indexOf(cur) + 1] || boxes.filter(function (i) { return i.value === ''; })[0];
+  if (nx) { nx.focus(); nx.select(); } else { cur.blur(); S.denFocus = null; }
+  denomRefresh(p);
+}
+
+/** + / − one piece. */
+function denomStep(btn) {
+  var i = $('#' + btn.getAttribute('data-for'));
+  if (!i) return;
+  i.value = String(Math.max(0, Math.floor(Number(i.value || 0)) + Number(btn.getAttribute('data-dpm'))));
+  i.focus();
+  denomRefresh(i.getAttribute('data-p'));
 }
 
 function denomSum(prefix) {
@@ -4112,14 +4162,26 @@ function loadShift() {
 function drawShiftSum(s) {
   var box = $('#shiftsum');
   if (!box) return;
-  var row = function (k, v, strong) { return '<div class="row" style="justify-content:space-between' + (strong ? ';font-weight:700' : '') + '"><span>' + k + '</span><span class="num">' + v + '</span></div>'; };
-  box.innerHTML = '<h2>สรุปจากระบบ</h2>' + row('เปิดกะ', dateTime(s.openedAt)) + row('เงินทอนตั้งต้น', money(s.openingCash)) + row('ขายเงินสด', money(s.cashSales)) +
-    row('เงินเข้า', money(s.cashIn)) + row('เงินออก', '−' + money(s.cashOut)) +
-    (s.cashRefunds ? row('คืนเงินลูกค้า (เงินสด)', '−' + money(s.cashRefunds)) : '') +
-    '<hr style="border:0;border-top:1px solid var(--line)">' + row('ต้องมีในลิ้นชัก', money(s.expectedCash), true) +
-    '<div class="muted" style="font-size:14px;margin-top:6px">QR ' + money(s.qrSales) + ' · โอน ' + money(s.transferSales) + ' · รวมขาย ' + money(s.totalSales) +
-    '<br>' + s.billCount + ' บิล · ยกเลิก ' + s.voidCount + ' · ส่วนลด ' + money(s.discount) +
-    (s.returnCount ? '<br>คืนสินค้า ' + s.returnCount + ' ครั้ง · เงินสด ' + money(s.cashRefunds) + ' · โอนคืน ' + money(s.otherRefunds) : '') + '</div>';
+  S.shiftSum = s;
+  var row = function (k, v, cls) { return '<div class="ss-row"><span>' + k + '</span><span class="num' + (cls ? ' ' + cls : '') + '">' + v + '</span></div>'; };
+  var grp = function (title, rows, foot, tint) {
+    return '<div class="ss-grp' + (tint ? ' tint' : '') + '"><b class="ss-title">' + title + '</b>' + rows.join('') +
+      (foot ? '<div class="ss-foot"><span>' + foot[0] + '</span><span class="num">' + foot[1] + '</span></div>' : '') + '</div>';
+  };
+  var mins = Math.max(0, Math.round((Date.now() - new Date(s.openedAt).getTime()) / 60000));
+  var moves = (s.cashMoves || []).slice(-3).map(function (m) {
+    return row((m.type === 'IN' ? 'เงินเข้า' : 'เงินออก') + ': ' + esc(m.reason || '') + ' ' + timeOf(m.createdAt), (m.type === 'IN' ? '+' : '−') + money(m.amount), m.type === 'IN' ? '' : 'bad');
+  });
+  box.innerHTML = '<div class="ss-head"><h2>สรุปจากระบบ</h2><span class="muted">กะเปิด ' + dateTime(s.openedAt) + (s.openedByName ? ' โดย ' + esc(s.openedByName) : '') +
+    ' · ' + (mins >= 60 ? Math.floor(mins / 60) + ' ชม. ' : '') + (mins % 60) + ' นาที</span></div><div class="ss-grid">' +
+    grp('เงินสดในลิ้นชัก', [row('เงินทอนตั้งต้น', money(s.openingCash)), row('+ ขายเงินสด', money(s.cashSales)), row('+ เงินเข้า', money(s.cashIn)),
+      row('− เงินออก', money(s.cashOut), s.cashOut ? 'bad' : ''), row('− คืนเงินลูกค้า', money(s.cashRefunds), s.cashRefunds ? 'bad' : '')], ['ต้องมีในลิ้นชัก', money(s.expectedCash)], true) +
+    grp('ยอดขายกะนี้', [row('เงินสด', money(s.cashSales)), row('QR พร้อมเพย์', money(s.qrSales)), row('โอน', money(s.transferSales)),
+      row('ส่วนลด', money(s.discount)), row('โปรโมชั่น', money(s.promoDiscount || 0))], ['รวมขาย', money(s.totalSales)]) +
+    grp('บิลและรายการ', [row('บิลขาย', s.billCount + ' บิล'), row('เฉลี่ยต่อบิล', s.billCount ? money(s.totalSales / s.billCount) : '–'),
+      row('ยกเลิกบิล', s.voidCount + ' บิล', s.voidCount ? 'bad' : ''), row('คืนสินค้า', s.returnCount + ' ครั้ง' + (s.otherRefunds ? ' · โอนคืน ' + money(s.otherRefunds) : ''))].concat(moves)) +
+    '</div>';
+  denomRefresh('c');
 }
 
 function openShift() {
@@ -5012,12 +5074,16 @@ var ACTIONS = {
   }
 };
 
-document.addEventListener('mousedown', function (e) { if (e.target.closest('[data-dk]')) e.preventDefault(); });
-document.addEventListener('focusin', function (e) { if (e.target.hasAttribute && e.target.hasAttribute('data-den')) S.denFocus = e.target; });
+document.addEventListener('mousedown', function (e) { if (e.target.closest('[data-dk],[data-dpm]')) e.preventDefault(); });
+document.addEventListener('focusin', function (e) { if (e.target.hasAttribute && e.target.hasAttribute('data-den')) { S.denFocus = e.target; denomRefresh(e.target.getAttribute('data-p')); } });
 document.addEventListener('click', function (e) {
   S.lastActivity = Date.now();
   var dk = e.target.closest('[data-dk]');
   if (dk) { denomKey(dk); return; }
+  var dpm = e.target.closest('[data-dpm]');
+  if (dpm) { denomStep(dpm); return; }
+  var drow = e.target.closest('.den-row');
+  if (drow && !e.target.closest('input')) { var di = drow.querySelector('input'); di.focus(); di.select(); return; }
   var el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;
   if (topModal() && !topModal().contains(el)) return;
@@ -5143,6 +5209,7 @@ document.addEventListener('change', function (e) {
 
 document.addEventListener('keydown', function (e) {
   S.lastActivity = Date.now();
+  if (e.key === 'Enter' && e.target.hasAttribute && e.target.hasAttribute('data-den')) { e.preventDefault(); denomNext(e.target); return; }
   if (e.target.id === 'lab-q' && e.key === 'Enter' && !modalStack.length) { e.preventDefault(); labEnter(e.target.value); return; }
   if (e.key === 'Escape' && modalStack.length) { e.preventDefault(); closeModal(); return; }
   if (S.view === 'login' && !modalStack.length) {

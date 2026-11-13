@@ -99,6 +99,12 @@ call('importProducts', T, [
   await page.click('#o500'); await page.click('[data-dk="1"][data-p=o]');
   await page.click('#oc10'); await page.click('[data-dk="2"][data-p=o]');
   assert.strictEqual(await page.textContent('[data-sub=oc10]'), '20.00', 'row shows its value');
+  await page.click('[data-dpm="1"][data-for=o1000]'); await page.click('[data-dpm="1"][data-for=o1000]'); await page.click('[data-dpm="-1"][data-for=o1000]');
+  assert.strictEqual(await page.inputValue('#o1000'), '1', '+ / − buttons step one piece');
+  await page.click('[data-dpm="-1"][data-for=o1000]');
+  await page.keyboard.press('Enter');
+  assert.strictEqual(await page.evaluate(() => document.activeElement.id), 'o500', 'Enter moves to the next row');
+  assert.ok(await page.$('.den-row.done[data-row=o1000]'), 'counted row is ticked');
   await shot('03-open-shift');
   assert.match(await page.textContent('#o-total'), /520/);
   await page.click('[data-form=openShift] button[type=submit]');

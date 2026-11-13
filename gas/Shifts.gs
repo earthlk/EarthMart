@@ -93,7 +93,7 @@ function shiftSummary_(shiftId) {
   var shift = readAll_('Shifts').filter(function (x) { return x.shiftId === shiftId; })[0];
   if (!shift) throw new Error('ไม่พบกะ');
   var sum = { cash: 0, qr: 0, transfer: 0 };
-  var billCount = 0, voidCount = 0, discount = 0;
+  var billCount = 0, voidCount = 0, discount = 0, promo = 0;
   readAll_('Sales').forEach(function (b) {
     if (b.shiftId !== shiftId) return;
     if (b.status === 'VOID') { voidCount++; return; }
@@ -101,6 +101,7 @@ function shiftSummary_(shiftId) {
     var pp = payParts_(b);
     sum.cash += pp.cash; sum.qr += pp.qr; sum.transfer += pp.transfer;
     discount += num_(b.discount);
+    promo += num_(b.promoDiscount);
   });
   var cashRefunds = 0, otherRefunds = 0, returnCount = 0;
   readAll_('Returns').forEach(function (r) {
@@ -115,7 +116,8 @@ function shiftSummary_(shiftId) {
   return {
     shiftId: shiftId, openedAt: shift.openedAt, status: shift.status, openingCash: opening,
     cashSales: round2_(sum.cash), qrSales: round2_(sum.qr), transferSales: round2_(sum.transfer),
-    totalSales: round2_(sum.cash + sum.qr + sum.transfer), discount: round2_(discount),
+    totalSales: round2_(sum.cash + sum.qr + sum.transfer), discount: round2_(discount), promoDiscount: round2_(promo),
+    openedByName: (readAll_('Users').filter(function (u) { return u.userId === shift.userId; })[0] || {}).name || '',
     cashIn: round2_(cashIn), cashOut: round2_(cashOut),
     cashRefunds: round2_(cashRefunds), otherRefunds: round2_(otherRefunds), returnCount: returnCount,
     expectedCash: round2_(opening + sum.cash + cashIn - cashOut - cashRefunds),
