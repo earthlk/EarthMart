@@ -670,3 +670,12 @@ a{color:var(--brand-text)}
 .shift-acts .btn.shift-go{height:64px;font-size:21px}
 @media (max-width:1180px){ .den-cols{grid-template-columns:1fr} .ss-grid{grid-template-columns:1fr 1fr} }
 @media (max-width:1000px){ .shift-page{grid-template-columns:1fr;grid-auto-rows:max-content;overflow:auto} .shift-count,.shift-pad{overflow:visible} }
+/* Cash in / out: amount, quick reasons, on-screen keypad */
+.modal.wide:has(.cm-body){width:820px}
+.modal .body.cm-body{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
+.cm-left{display:flex;flex-direction:column;gap:12px}
+.cm-chips{display:flex;flex-wrap:wrap;gap:8px}
+.cm-chips .chip{height:44px;font-size:15px}
+.cm-kp{grid-auto-rows:60px;gap:8px}
+.cm-kp button{height:auto}
+@media (max-width:760px){ .modal .body.cm-body{grid-template-columns:1fr} }

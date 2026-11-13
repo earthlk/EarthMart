@@ -760,6 +760,16 @@ call('importProducts', T, [
   await page.waitForSelector('#shiftsum h2');
   await page.fill('#c1000', '0'); await page.fill('#c500', '1'); await page.fill('#c100', '1'); await page.fill('#ccoin', '112.80');
   await shot('10-close-shift');
+  await page.click('.shift-acts [data-act=cashMoveModal]');
+  await page.waitForSelector('#cm-amt');
+  await page.waitForTimeout(400);   // the modal focuses the amount box after it opens
+  await page.click('.cm-kp [data-ck="5"]'); await page.click('.cm-kp [data-ck="0"]');
+  await page.click('[data-cr="ค่าน้ำแข็ง"]');
+  assert.strictEqual(await page.inputValue('#cm-amt'), '50', 'keypad types the amount');
+  await shot('10b-cash-move');
+  await page.click('.modal [data-x=ok]');
+  await page.waitForSelector('#shiftsum:has-text("ค่าน้ำแข็ง")');
+  await page.fill('#ccoin', '62.80');
   if (process.env.SIZES) for (const [w, h] of [[1920, 1080], [1280, 1024], [1024, 768]]) { await page.setViewportSize({ width: w, height: h }); await shot('sz-' + w); }
   await page.setViewportSize({ width: 1366, height: 800 });
   await page.click('[data-act=closeShift]');

@@ -4933,14 +4933,40 @@ var ACTIONS = {
   payQr: function () { openPay('qr'); },
   cashMoveModal: function () {
     var type = 'OUT';
-    var m = openModal('<header><h1>เงินเข้า / ออกลิ้นชัก</h1></header><form class="body">' +
-      '<div class="seg"><button type="button" data-t="OUT" class="on">เงินออก</button><button type="button" data-t="IN">เงินเข้า</button></div>' +
-      '<div class="field"><label for="cm-amt">จำนวนเงิน</label><input id="cm-amt" type="number" step="0.25" inputmode="decimal" class="big-input" autofocus></div>' +
-      '<div class="field"><label for="cm-why">เหตุผล</label><input id="cm-why" placeholder="เช่น ค่าน้ำแข็ง, แลกเหรียญ"></div></form>' +
-      '<footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">บันทึก</button></footer>');
-    $all('[data-t]', m).forEach(function (b) { b.onclick = function () { type = b.getAttribute('data-t'); $all('[data-t]', m).forEach(function (x) { x.classList.toggle('on', x === b); }); }; });
+    var keys = ['7', '8', '9', 'del', '4', '5', '6', 'clr', '1', '2', '3', '.', '0'].map(function (k) {
+      return '<button type="button" data-ck="' + k + '"' + (k === '0' ? ' class="wide"' : '') + ' aria-label="' + ({ del: 'ลบ', clr: 'ล้าง' }[k] || k) + '">' + ({ del: '⌫', clr: 'C' }[k] || k) + '</button>';
+    }).join('');
+    var reasons = { OUT: ['ค่าน้ำแข็ง', 'ซื้อของใช้ร้าน', 'เจ้าของเก็บเงิน', 'จ่ายค่าสินค้า'], IN: ['แลกเหรียญ', 'เติมเงินทอน', 'เจ้าของใส่เงิน'] };
+    var chips = function () { return reasons[type].map(function (r) { return '<button type="button" class="chip" data-cr="' + r + '">' + r + '</button>'; }).join(''); };
+    var m = openModal('<header><h1>เงินเข้า / ออกลิ้นชัก</h1></header><form class="body cm-body">' +
+      '<div class="cm-left"><div class="seg"><button type="button" data-t="OUT" class="on">เงินออก</button><button type="button" data-t="IN">เงินเข้า</button></div>' +
+      '<div class="field"><label for="cm-amt">จำนวนเงิน (บาท)</label><input id="cm-amt" inputmode="decimal" autocomplete="off" class="big-input" placeholder="0" autofocus></div>' +
+      '<div class="field"><label for="cm-why">เหตุผล</label><input id="cm-why" placeholder="เลือกด้านล่าง หรือพิมพ์เอง"></div>' +
+      '<div class="cm-chips" id="cm-chips">' + chips() + '</div></div>' +
+      '<div class="keypad cm-kp">' + keys + '</div></form>' +
+      '<footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">บันทึก · เปิดลิ้นชัก</button></footer>', { wide: true });
+    var amt = $('#cm-amt', m);
+    $all('[data-t]', m).forEach(function (b) {
+      b.onclick = function () {
+        type = b.getAttribute('data-t');
+        $all('[data-t]', m).forEach(function (x) { x.classList.toggle('on', x === b); });
+        $('#cm-chips', m).innerHTML = chips();
+      };
+    });
+    m.addEventListener('mousedown', function (e) { if (e.target.closest('[data-ck]')) e.preventDefault(); });
+    m.addEventListener('click', function (e) {
+      var k = e.target.closest('[data-ck]'), r = e.target.closest('[data-cr]');
+      if (r) { $('#cm-why', m).value = r.getAttribute('data-cr'); return; }
+      if (!k) return;
+      var v = amt.value || '', key = k.getAttribute('data-ck');
+      if (key === 'del') v = v.slice(0, -1);
+      else if (key === 'clr') v = '';
+      else if (key === '.') { if (v.indexOf('.') < 0) v = (v || '0') + '.'; }
+      else if (!/\.\d\d$/.test(v) && v.length < 8) v = (v === '0' ? '' : v) + key;
+      amt.value = v;
+    });
     var save = function () {
-      cashMove(type, $('#cm-amt', m).value, $('#cm-why', m).value).then(function (sum) {
+      cashMove(type, amt.value, $('#cm-why', m).value).then(function (sum) {
         closeModal(); toast((type === 'IN' ? 'บันทึกเงินเข้าแล้ว' : 'บันทึกเงินออกแล้ว') + (sum ? '' : ' (รอส่ง)')); openDrawer(true);
         if (S.view === 'shift' && sum && sum.expectedCash !== undefined) drawShiftSum(sum);
       }).catch(fail);
