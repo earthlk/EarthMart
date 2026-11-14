@@ -108,6 +108,10 @@ call('importProducts', T, [
   await shot('03-open-shift');
   assert.match(await page.textContent('#o-total'), /520/);
   await page.click('[data-form=openShift] button[type=submit]');
+  await page.waitForSelector('.modal h1:has-text("เงินทอนมาจากไหน")');
+  assert.ok(await page.$('.modal input[name=fsrc][value=owner]:checked'), 'first float defaults to the owner\'s money');
+  await shot('03b-float-source');
+  await page.click('.modal [data-x=ok]');
 
   // 3b. Customer display in a second window of the same browser
   const cd = await page.context().newPage();
@@ -443,8 +447,12 @@ call('importProducts', T, [
   assert.match(await page.textContent('#rsum'), /น้ำดื่ม 600 มล\. \+0\.30/);
   await shot('09j-receive');
   await page.click('[data-act=rcCommit]');
-  await page.click('[data-x=yes]');
+  await page.waitForSelector('.modal h1:has-text("ยืนยันรับสินค้า")');
+  await page.click('.modal input[name=rcpay][value=WBANK]');
+  await shot('09k-receive-pay');
+  await page.click('.modal [data-x=ok]');
   await page.waitForFunction(() => document.querySelectorAll('#rlines .rcv-grid').length === 0);
+  assert.ok(g.__sheet('Ledger').some(t => t.kind === 'PURCHASE' && Number(t.amount) === -153), 'paid from the bank account');
   const wl = call('lots', T, 'W0001');
   assert.deepStrictEqual(wl.slice(-1).map(l => [l.qtyIn, l.qtyLeft, l.unitCost, l.expiryDate]), [[24, 24, 4.5, '2027-03-31']], 'new FIFO lot');
   assert.ok(wl.length === 2 && wl[0].unitCost === 4.2, 'opening lot still first');
@@ -773,7 +781,10 @@ call('importProducts', T, [
   if (process.env.SIZES) for (const [w, h] of [[1920, 1080], [1280, 1024], [1024, 768]]) { await page.setViewportSize({ width: w, height: h }); await shot('sz-' + w); }
   await page.setViewportSize({ width: 1366, height: 800 });
   await page.click('[data-act=closeShift]');
-  await page.click('[data-x=yes]');
+  await page.waitForSelector('#dp-keep');
+  await page.fill('#dp-keep', '300'); await page.dispatchEvent('#dp-keep', 'input');
+  await shot('10c-deposit');
+  await page.click('.modal [data-x=ok]');
   await page.waitForSelector('.modal h1:has-text("ปิดกะแล้ว")');
   assert.match(await page.textContent('.modal .body'), /เงินพอดี/);
   await shot('10-closed');

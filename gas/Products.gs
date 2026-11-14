@@ -38,6 +38,8 @@ function api_bootstrap(token) {
                  multiplier: num_(b.multiplier) || 1, price: b.price === '' ? null : num_(b.price) };
       }),
       shift: openShiftForDevice_(s.deviceId),
+      prevFloat: isCounter_(s.deviceId) ? prevFloat_(s.deviceId) : 0,
+      wallets: walletsForClient_(),
       markdowns: activeMarkdowns_(),
       promos: promosForClient_(),
       slides: slidesForClient_(),

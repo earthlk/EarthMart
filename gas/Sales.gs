@@ -5,7 +5,7 @@
  * accepted for products marked openPrice. Discounts need an owner approval.
  */
 
-var PAY_METHODS = ['cash', 'qr', 'transfer', 'split'];
+var PAY_METHODS = ['cash', 'qr', 'transfer', 'split', 'credit'];
 var PAY_PARTS = ['cash', 'qr', 'transfer'];
 
 /** Amount paid by each method for one bill (older bills only have payMethod + total). */
@@ -99,8 +99,10 @@ function api_commitSale(token, sale) {
         var used = PAY_PARTS.filter(function (m) { return parts[m] > 0; });
         if (used.length < 2) throw new Error('แบ่งจ่ายต้องมีอย่างน้อย 2 ช่องทาง');
         if (round2_(parts.cash + parts.qr + parts.transfer) !== total) throw new Error('ยอดแบ่งจ่ายรวมต้องเท่ากับ ' + total + ' บาท');
-      } else parts[sale.payMethod] = total;
-      var received = total, change = 0;
+      } else if (sale.payMethod !== 'credit') parts[sale.payMethod] = total;
+      // Credit (ค้างจ่าย): the whole bill is owed by a named customer; nothing goes in the drawer.
+      var cust = sale.payMethod === 'credit' ? ensureCustomer_(sale.customer) : null;
+      var received = sale.payMethod === 'credit' ? 0 : total, change = 0;
       if (parts.cash > 0) {
         received = round2_(num_(sale.received));
         if (received < parts.cash) throw new Error('รับเงินสดไม่พอ');
@@ -116,7 +118,8 @@ function api_commitSale(token, sale) {
         subtotal: subtotal, discount: discount, total: total, payMethod: sale.payMethod,
         received: received, change: change, status: 'PAID',
         cashPaid: parts.cash, qrPaid: parts.qr, transferPaid: parts.transfer, returnedTotal: 0, offline: off.at ? true : '',
-        promoDiscount: promoTotal || '', promos: promosApplied.length ? JSON.stringify(promosApplied) : ''
+        promoDiscount: promoTotal || '', promos: promosApplied.length ? JSON.stringify(promosApplied) : '',
+        creditPaid: cust ? total : '', customerId: cust ? cust.customerId : ''
       };
       // FIFO: each line costs what its pieces (or its recipe components) cost in the oldest lots.
       var ctx = fifoOpen_(), rec = recipesMap_(), prodBySku = {};
@@ -241,12 +244,15 @@ function linesOf_(billNo) {
 
 function parsePromos_(v) { try { return v ? JSON.parse(v) : []; } catch (e) { return []; } }
 
+function customerName_(id) { return (readAll_('Customers').filter(function (c) { return c.customerId === id; })[0] || {}).name || ''; }
+
 function receipt_(h, lines) {
   return {
     billNo: h.billNo, createdAt: h.createdAt, payMethod: h.payMethod, subtotal: num_(h.subtotal),
     discount: num_(h.discount), total: num_(h.total), received: num_(h.received), change: num_(h.change),
     status: h.status, payments: payParts_(h), returnedTotal: num_(h.returnedTotal),
     promoDiscount: num_(h.promoDiscount), promos: parsePromos_(h.promos),
+    credit: num_(h.creditPaid), customer: h.customerId ? customerName_(h.customerId) : '',
     lines: lines.map(function (l) {
       return { lineNo: num_(l.lineNo), sku: String(l.sku), name: l.name, unitName: l.unitName, multiplier: num_(l.multiplier) || 1,
                qty: num_(l.qty), unitPrice: num_(l.unitPrice), lineDiscount: num_(l.lineDiscount), lineTotal: num_(l.lineTotal),

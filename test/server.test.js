@@ -803,4 +803,79 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(m('bootstrap', T).products.find(p => p.sku === 'C1').image, '', 'photo removed');
 }
 
+{
+  // Accounting: wallets, opening float source, credit sales, customer payments, expenses, payables, deposit, P&L
+  const h = makeContext({ now: '2026-11-05T03:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m = (fn, ...a) => { const r = c(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  h.createOwner('O', '1111');
+  const DV = 'Dacc0000000000000001';
+  let T = m('login', m('status').users[0].userId, '1111', DV).token;
+  m('registerDevice', T, DV, 'เครื่อง 1');
+  T = m('login', m('status').users[0].userId, '1111', DV).token;
+  m('importProducts', T, ['sku,name,category,type,unit,cost,price,minStock,openingStock', 'W1,น้ำ,เครื่องดื่ม,nobarcode,ขวด,5,7,0,0'].join('\n'));
+  const boot = m('bootstrap', T);
+  eq(boot.wallets.map(w => w.walletId), ['WRESERVE', 'WBANK'], 'default wallets: cash reserve + bank');
+  eq(boot.prevFloat, 0, 'first shift starts from 0 in the drawer');
+  m('accSetup', T, { start: '2026-11-01', wallets: [
+    { walletId: 'WRESERVE', name: 'เงินสดสำรอง', type: 'reserve', opening: 10000 },
+    { walletId: 'WBANK', name: 'กสิกร', type: 'bank', opening: 50000, receivesQr: true }] });
+  m('receive', T, { receiptUid: 'R1', supplier: 'แม็คโคร', payFrom: 'WBANK', lines: [{ sku: 'W1', qty: 12, unitCost: 5 }] });
+  m('receive', T, { receiptUid: 'R2', supplier: 'เอเย่นต์', payFrom: 'credit', dueDate: '2026-11-20', lines: [{ sku: 'W1', qty: 2, unitCost: 5 }] });
+  const sh = m('openShift', T, 1000, '', { source: 'owner' });
+  ok(sh.shiftId, 'shift open');
+  const line = [{ sku: 'W1', qty: 2 }];
+  m('commitSale', T, { saleUid: 'A1', payMethod: 'cash', received: 20, lines: line });
+  m('commitSale', T, { saleUid: 'A2', payMethod: 'qr', lines: [{ sku: 'W1', qty: 1 }] });
+  const cr = m('commitSale', T, { saleUid: 'A3', payMethod: 'credit', customer: { customerId: 'CU1', name: 'ป้าแดง' }, lines: [{ sku: 'W1', qty: 1 }] });
+  eq([cr.credit, cr.customer], [7, 'ป้าแดง'], 'credit bill names the customer');
+  m('commitSale', T, { saleUid: 'A4', payMethod: 'credit', customer: { customerId: 'CU1' }, lines: [{ sku: 'W1', qty: 1 }] });
+  const cs = m('customers', T);
+  eq([cs.length, cs[0].name, cs[0].balance, cs[0].bills], [1, 'ป้าแดง', 14, 2], 'picking the same name again adds to that customer');
+  ok(!c('custPay', T, { payUid: 'P0', customerId: 'CU1', amount: 20, method: 'cash' }).ok, 'cannot take more than owed');
+  m('custPay', T, { payUid: 'P1', customerId: 'CU1', amount: 5, method: 'cash' });
+  eq(m('custPay', T, { payUid: 'P1', customerId: 'CU1', amount: 5, method: 'cash' }).duplicate, true, 'customer payment idempotent');
+  m('cashMove', T, 'OUT', 20, 'ค่าน้ำแข็ง', { kind: 'expense', category: 'น้ำแข็ง' });
+  const sum = m('shiftSummary', T);
+  eq([sum.creditSales, sum.custPayCash, sum.expectedCash], [14, 5, 999], 'credit sales stay out of the drawer, cash paid back goes in');
+  m('saveExpense', T, { expUid: 'E1', date: '2026-11-04', category: 'ค่าไฟ / น้ำ', amount: 300, payFrom: 'WBANK', note: 'ค่าไฟ ต.ค.' });
+  m('saveExpense', T, { expUid: 'E2', date: '2026-11-04', category: 'ซ่อมบำรุง', amount: 100, payFrom: 'credit', party: 'ช่างวิทย์', dueDate: '2026-11-10' });
+  let aps = m('payables', T);
+  eq(aps.map(p => [p.party, p.left]), [['ช่างวิทย์', 100], ['เอเย่นต์', 10]], 'payables from a credit expense and a credit receive, by due date');
+  m('payPayable', T, aps[0].payableId, 100, 'WRESERVE');
+  eq(m('payables', T).length, 1, 'paid payable leaves the list');
+  ok(!c('closeShift', T, 999, '', { floatLeft: 500 }).ok, 'deposit needs a destination');
+  m('closeShift', T, 999, '', { floatLeft: 500, depositTo: 'WBANK' });
+  m('writeOff', T, { sku: 'W1', qty: 1, reason: m('bootstrap', T).products ? 'เสียหาย' : '' });
+  const W = m('wallets', T, 'WBANK');
+  const bank = W.wallets.find(w => w.walletId === 'WBANK'), res = W.wallets.find(w => w.walletId === 'WRESERVE');
+  eq([bank.balance, bank.pending, res.balance], [50000 - 60 + 7 - 300, 499, 10000 - 100], 'wallet balances: receive, QR sale, expense, pending deposit, payable');
+  eq(W.drawers[0].cash, 500, 'drawer keeps the float after closing');
+  const dep = W.rows.find(r => r.kind === 'DEPOSIT');
+  ok(dep && !dep.cleared, 'deposit waits until marked banked');
+  m('setCleared', T, dep.txId, true);
+  eq(m('wallets', T, 'WBANK').wallets.find(w => w.walletId === 'WBANK').balance, 50000 - 60 + 7 - 300 + 499, 'banked deposit counts');
+  const A = m('accSummary', T, { from: '2026-11-01', to: '2026-11-05' });
+  eq([A.f.netSales, A.f.cogs, A.f.waste, A.f.expenses, A.f.credit], [35, 25, 5, 420, 14], 'P&L figures');
+  eq(A.f.net, 35 - 25 - 5 - 420, 'net profit');
+  eq(A.f.byCat['น้ำแข็ง'], 20, 'drawer cash-out counted as an expense');
+  eq(A.f.invests, 1000, 'first float from the owner counts as money put in');
+  eq([A.stock.purchases, A.stock.start, A.stock.end, A.assets.stock], [70, 0, 40, 40], 'stock: bought 70, 8 bottles left at cost 5');
+  eq([A.assets.receivable, A.assets.payable], [9, 10], 'customer owes 9, we owe the supplier 10');
+  const sh2 = m('openShift', T, 500, '', {});
+  eq(m('shiftSummary', T).prevFloat, 500, 'next shift carries the float');
+  m('closeShift', T, 500, '', { floatLeft: 500 });
+  m('openShift', T, 600, '', { source: 'WRESERVE' });
+  eq(m('wallets', T).wallets.find(w => w.walletId === 'WRESERVE').balance, 9900 - 100, 'extra float taken from the cash reserve');
+  const ex = m('expenses', T, { from: '2026-11-01', to: '2026-11-05' });
+  eq(ex.rows.length, 3, 'expense list: bank, credit and drawer');
+  eq(ex.purchases.map(p => p.status), ['ค้างจ่าย · ครบ 2026-11-20', 'จ่ายแล้ว'], 'purchases show how they were paid');
+  const tax = m('accTax', T, '2026', false);
+  eq([tax.income, tax.flat], [35, 21], 'tax: income and the 60% flat deduction');
+  ok(tax.actual === 25 + 5 + 420, 'tax: actual expenses');
+  ok(sh2.shiftId, 'shift 2');
+}
+
 console.log('server tests passed:', pass);

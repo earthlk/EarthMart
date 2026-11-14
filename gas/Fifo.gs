@@ -169,6 +169,18 @@ function api_receive(token, rc) {
 
       var receiptNo = nextDocNo_('RC');
       var total = round2_(lines.reduce(function (a, l) { return a + l.qty * l.unitCost; }, 0));
+      // How it was paid: a wallet, the drawer (open shift), or on credit (we owe the supplier).
+      var pay = { payFrom: rc.payFrom || '', payableId: '' };
+      if (pay.payFrom && total > 0) {
+        var label = 'ซื้อสินค้า ' + receiptNo + (rc.supplier ? ' · ' + String(rc.supplier).trim() : '');
+        if (pay.payFrom === 'credit') {
+          pay.payableId = uid_('AP');
+          append_('Payables', { payableId: pay.payableId, payUid: '', createdAt: now_(), party: String(rc.supplier || '').trim() || 'ซัพพลายเออร์',
+                                category: 'ซื้อสินค้า', amount: total, paid: 0, dueDate: validYmd_(rc.dueDate, ''), source: 'receive', ref: receiptNo,
+                                note: String(rc.invoiceNo || ''), status: 'OPEN', userId: s.userId });
+        } else if (pay.payFrom === 'drawer') drawerPay_(s, total, 'purchase', '', label, receiptNo);
+        else { walletById_(pay.payFrom); addLedger_(s, { walletId: pay.payFrom, amount: -total, kind: 'PURCHASE', ref: receiptNo, note: label }); }
+      }
       var ctx = fifoOpen_();
       var changed = [];
       lines.forEach(function (l) {
@@ -184,7 +196,8 @@ function api_receive(token, rc) {
       append_('Receipts', {
         receiptNo: receiptNo, receiptUid: rc.receiptUid, createdAt: now_(), supplier: String(rc.supplier || '').trim(),
         invoiceNo: String(rc.invoiceNo || '').trim(), userId: s.userId, itemsCount: lines.length,
-        pieces: lines.reduce(function (a, l) { return a + l.pieces; }, 0), total: total, note: String(rc.note || '')
+        pieces: lines.reduce(function (a, l) { return a + l.pieces; }, 0), total: total, note: String(rc.note || ''),
+        payFrom: pay.payFrom, payableId: pay.payableId
       });
       fifoFlush_(ctx);
       addStockMoves_(s, lines.map(function (l) {

@@ -91,6 +91,7 @@ const server = http.createServer((req, res) => {
   // 3. Open the shift offline, sell, sell something the system says is out of stock
   await page.fill('#o500', '1');
   await page.click('[data-form=openShift] button[type=submit]');
+  await page.click('.modal [data-x=ok]');
   await page.waitForSelector('#scan');
   await page.fill('#scan', '8850000000011'); await page.keyboard.press('Enter');
   await page.waitForSelector('.toast:has-text("ขนมปัง หมดแล้ว")');

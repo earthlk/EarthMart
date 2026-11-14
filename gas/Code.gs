@@ -29,11 +29,12 @@ var SCHEMA = {
                'expStatus', 'expFound', 'markdownPct', 'markdownLeft', 'expBy', 'expAt'],
   LotUse:     ['createdAt', 'refNo', 'lotId', 'sku', 'qty', 'unitCost', 'note'],
   Receipts:   ['receiptNo', 'receiptUid', 'createdAt', 'supplier', 'invoiceNo', 'userId', 'itemsCount', 'pieces',
-               'total', 'note'],
+               'total', 'note', 'payFrom', 'payableId'],
   Barcodes:   ['barcode', 'sku', 'unitName', 'multiplier', 'price'],
   Sales:      ['billNo', 'saleUid', 'createdAt', 'shiftId', 'deviceId', 'userId', 'itemsCount', 'subtotal',
                'discount', 'total', 'payMethod', 'received', 'change', 'status', 'voidReason', 'voidBy', 'voidAt',
-               'cashPaid', 'qrPaid', 'transferPaid', 'returnedTotal', 'offline', 'promoDiscount', 'promos'],
+               'cashPaid', 'qrPaid', 'transferPaid', 'returnedTotal', 'offline', 'promoDiscount', 'promos',
+               'creditPaid', 'customerId'],
   SaleLines:  ['billNo', 'lineNo', 'sku', 'name', 'barcode', 'unitName', 'multiplier', 'qty', 'unitPrice',
                'lineDiscount', 'lineTotal', 'cost', 'markdownLotId', 'markdownQty', 'markdown', 'returnedQty', 'promo'],
   Slides:     ['slideId', 'title', 'fileId', 'mime', 'startDate', 'endDate', 'active', 'sort', 'createdAt', 'updatedAt'],
@@ -44,8 +45,18 @@ var SCHEMA = {
   StockMoves: ['moveId', 'createdAt', 'sku', 'qtyPieces', 'type', 'refNo', 'userId', 'note'],
   Shifts:     ['shiftId', 'deviceId', 'userId', 'openedAt', 'openingCash', 'closedAt', 'closedBy', 'cashSales',
                'qrSales', 'transferSales', 'cashIn', 'cashOut', 'expectedCash', 'countedCash', 'diff', 'billCount',
-               'voidCount', 'note', 'status', 'cashRefunds', 'otherRefunds', 'openUid', 'offline'],
-  CashMoves:  ['moveId', 'shiftId', 'createdAt', 'type', 'amount', 'reason', 'userId', 'offline'],
+               'voidCount', 'note', 'status', 'cashRefunds', 'otherRefunds', 'openUid', 'offline',
+               'prevFloat', 'openSource', 'floatLeft', 'depositAmt', 'depositTo', 'creditSales', 'custPayCash'],
+  CashMoves:  ['moveId', 'shiftId', 'createdAt', 'type', 'amount', 'reason', 'userId', 'offline', 'kind', 'category', 'ref'],
+  Wallets:    ['walletId', 'name', 'type', 'opening', 'receivesQr', 'active', 'sort', 'createdAt'],
+  Ledger:     ['txId', 'txUid', 'createdAt', 'walletId', 'amount', 'kind', 'ref', 'note', 'userId', 'cleared', 'status'],
+  Expenses:   ['expenseId', 'expUid', 'createdAt', 'date', 'category', 'amount', 'payFrom', 'note', 'fileId', 'recurring',
+               'payableId', 'userId', 'status'],
+  Payables:   ['payableId', 'payUid', 'createdAt', 'party', 'category', 'amount', 'paid', 'dueDate', 'source', 'ref',
+               'note', 'status', 'userId'],
+  Customers:  ['customerId', 'name', 'phone', 'note', 'createdAt', 'active'],
+  CustPays:   ['payId', 'payUid', 'createdAt', 'customerId', 'amount', 'method', 'walletId', 'shiftId', 'deviceId',
+               'userId', 'note'],
   AuditLog:   ['logId', 'createdAt', 'userId', 'action', 'ref', 'detail', 'approvedBy', 'deviceId']
 };
 
@@ -73,7 +84,10 @@ var DEFAULT_SETTINGS = {
   cdHints: '1',
   expiryWarnDays: '{}',
   expiryDefaultDays: '3',
-  markdownPct: '30'
+  markdownPct: '30',
+  expenseCats: '',
+  accStart: '',
+  accStartAssets: ''
 };
 
 /* ------------------------------------------------------------------ */
@@ -259,7 +273,7 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '12';
+var SCHEMA_VERSION = '13';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {

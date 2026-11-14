@@ -39,6 +39,7 @@ call('importProducts', T, ['sku,name,category,type,unit,cost,price,minStock,open
   await page.waitForSelector('[data-form=openShift]');
   await page.fill('#o500', '1');
   await page.click('[data-form=openShift] button[type=submit]');
+  await page.click('.modal [data-x=ok]');
   await page.fill('#scan', '8851234567890'); await page.keyboard.press('Enter');
   await page.keyboard.press('F12');
   await page.click('#kp [data-k="1"]'); await page.click('#kp [data-k="0"]');

@@ -34,12 +34,20 @@ function api_openShift(token, openingCash, note, opt) {
       }
       var actor = opt.offlineBy ? offlineActor_(s, opt.offlineBy, opt.openUid) || s : s;
       var at = offlineTime_(opt.openedAt) || now_();
+      var prev = prevFloat_(s.deviceId);
+      var d = round2_(cash - prev);
+      var src = d === 0 ? 'carry' : String(opt.source || (d > 0 ? 'owner' : 'short'));
+      if (d > 0 && ['owner', 'reserve', 'bank'].indexOf(src) < 0 && !walletIdOk_(src)) src = 'owner';
+      if (d < 0 && ['draw', 'short'].indexOf(src) < 0) src = 'short';
       var shift = {
         shiftId: 'SH' + fmtDate_(at, 'yyMMddHHmm') + '-' + uid_('').slice(0, 4),
         deviceId: s.deviceId, userId: actor.userId, openedAt: at, openingCash: cash,
-        note: note || '', status: 'OPEN', openUid: opt.openUid || '', offline: opt.openedAt ? true : ''
+        note: note || '', status: 'OPEN', openUid: opt.openUid || '', offline: opt.openedAt ? true : '',
+        prevFloat: prev, openSource: src
       };
       append_('Shifts', shift);
+      // Extra float taken from a wallet: money leaves that wallet.
+      if (d > 0 && walletIdOk_(src)) addLedger_(actor, { walletId: src, amount: -d, kind: 'FLOAT', ref: shift.shiftId, note: 'เงินทอนเข้าลิ้นชัก' });
       log_(actor, 'SHIFT_OPEN', shift.shiftId, 'เงินทอนตั้งต้น ' + cash + (opt.openedAt ? ' (เปิดตอนออฟไลน์)' : ''), '');
       return openShiftForDevice_(s.deviceId);
     });
@@ -53,6 +61,15 @@ function offlineTime_(iso) {
   return !isNaN(t.getTime()) && t.getTime() <= nowT + 5 * 60000 && t.getTime() >= nowT - 7 * 86400000 ? t : null;
 }
 
+/** Cash left in this device's drawer when its last shift closed (0 for the first shift). */
+function prevFloat_(deviceId) {
+  var last = readAll_('Shifts').filter(function (x) { return x.deviceId === deviceId && x.status === 'CLOSED'; }).pop();
+  if (!last) return 0;
+  return last.floatLeft === '' || last.floatLeft === undefined ? num_(last.countedCash) : num_(last.floatLeft);
+}
+
+function walletIdOk_(id) { return !!id && readAll_('Wallets').some(function (w) { return w.walletId === id; }); }
+
 function shiftView_(sh) {
   return { shiftId: sh.shiftId, openedAt: sh.openedAt, openingCash: num_(sh.openingCash), userId: sh.userId, status: sh.status };
 }
@@ -62,6 +79,7 @@ function shiftView_(sh) {
  * opt (offline outbox) = { moveId, at, shiftId, offlineBy }.
  */
 function api_cashMove(token, type, amount, reason, opt) {
+  // opt.kind: expense | draw | purchase | invest | change | other ; opt.category for expenses
   return respond_(function () {
     var s = session_(token);
     requireCounter_(s);
@@ -82,7 +100,9 @@ function api_cashMove(token, type, amount, reason, opt) {
       var actor = opt.offlineBy ? offlineActor_(s, opt.offlineBy, opt.moveId) || s : s;
       var at = offlineTime_(opt.at);
       append_('CashMoves', { moveId: opt.moveId || uid_('C'), shiftId: shift.shiftId, createdAt: at || now_(), type: type,
-                             amount: amt, reason: reason, userId: actor.userId, offline: at ? true : '' });
+                             amount: amt, reason: reason, userId: actor.userId, offline: at ? true : '',
+                             kind: ['expense', 'draw', 'purchase', 'invest', 'change', 'other'].indexOf(opt.kind) >= 0 ? opt.kind : (type === 'OUT' ? 'expense' : 'change'),
+                             category: String(opt.category || (type === 'OUT' && !opt.kind ? 'อื่น ๆ' : '')) });
       log_(actor, type === 'IN' ? 'CASH_IN' : 'CASH_OUT', shift.shiftId, amt + ' บาท · ' + reason + (at ? ' (ตอนออฟไลน์)' : ''), '');
       return shiftSummary_(shift.shiftId);
     });
@@ -109,6 +129,10 @@ function shiftSummary_(shiftId) {
     returnCount++;
     if (r.refundMethod === 'cash') cashRefunds += num_(r.total); else otherRefunds += num_(r.total);
   });
+  var credit = 0;
+  readAll_('Sales').forEach(function (b) { if (b.shiftId === shiftId && b.status !== 'VOID') credit += num_(b.creditPaid); });
+  var custCash = 0, custOther = 0;
+  readAll_('CustPays').forEach(function (p) { if (p.shiftId === shiftId && !p.walletId) { if (p.method === 'cash') custCash += num_(p.amount); else custOther += num_(p.amount); } });
   var cashIn = 0, cashOut = 0;
   var moves = readAll_('CashMoves').filter(function (m) { return m.shiftId === shiftId; });
   moves.forEach(function (m) { if (m.type === 'IN') cashIn += num_(m.amount); else cashOut += num_(m.amount); });
@@ -116,11 +140,12 @@ function shiftSummary_(shiftId) {
   return {
     shiftId: shiftId, openedAt: shift.openedAt, status: shift.status, openingCash: opening,
     cashSales: round2_(sum.cash), qrSales: round2_(sum.qr), transferSales: round2_(sum.transfer),
-    totalSales: round2_(sum.cash + sum.qr + sum.transfer), discount: round2_(discount), promoDiscount: round2_(promo),
+    totalSales: round2_(sum.cash + sum.qr + sum.transfer + credit), creditSales: round2_(credit), custPayCash: round2_(custCash), custPayOther: round2_(custOther),
+    prevFloat: shift.prevFloat === '' ? null : num_(shift.prevFloat), discount: round2_(discount), promoDiscount: round2_(promo),
     openedByName: (readAll_('Users').filter(function (u) { return u.userId === shift.userId; })[0] || {}).name || '',
     cashIn: round2_(cashIn), cashOut: round2_(cashOut),
     cashRefunds: round2_(cashRefunds), otherRefunds: round2_(otherRefunds), returnCount: returnCount,
-    expectedCash: round2_(opening + sum.cash + cashIn - cashOut - cashRefunds),
+    expectedCash: round2_(opening + sum.cash + custCash + cashIn - cashOut - cashRefunds),
     billCount: billCount, voidCount: voidCount,
     cashMoves: moves.map(function (m) { return { type: m.type, amount: num_(m.amount), reason: m.reason, createdAt: m.createdAt }; })
   };
@@ -136,7 +161,7 @@ function api_shiftSummary(token) {
 }
 
 /** countedCash = cash actually in the drawer. Returns the summary with the difference. */
-function api_closeShift(token, countedCash, note) {
+function api_closeShift(token, countedCash, note, opt) {
   return respond_(function () {
     var s = session_(token);
     requireCounter_(s);
@@ -163,6 +188,20 @@ function api_closeShift(token, countedCash, note) {
       shift.voidCount = sum.voidCount;
       shift.note = note || '';
       shift.status = 'CLOSED';
+      shift.creditSales = sum.creditSales;
+      shift.custPayCash = sum.custPayCash;
+      // Keep a float for the next shift; the rest goes to the bank (waiting to be deposited) or the cash reserve.
+      opt = opt || {};
+      var keep = opt.floatLeft === undefined || opt.floatLeft === null || opt.floatLeft === '' ? counted : round2_(num_(opt.floatLeft));
+      if (keep < 0 || keep > counted) throw new Error('เงินทอนที่ทิ้งไว้ต้องอยู่ระหว่าง 0 ถึง ' + counted);
+      var dep = round2_(counted - keep);
+      shift.floatLeft = keep; shift.depositAmt = dep; shift.depositTo = dep > 0 ? String(opt.depositTo || '') : '';
+      if (dep > 0) {
+        var w = readAll_('Wallets').filter(function (x) { return x.walletId === opt.depositTo; })[0];
+        if (!w) throw new Error('เลือกว่าเงินที่เก็บออกไปไว้ที่ไหน');
+        addLedger_(s, { walletId: w.walletId, amount: dep, kind: 'DEPOSIT', ref: shift.shiftId, note: 'เงินจากกะ ' + fmtDate_(shift.closedAt, 'd/M HH:mm'),
+                        cleared: w.type === 'bank' ? false : true });
+      }
       writeRow_('Shifts', shift);
       log_(s, 'SHIFT_CLOSE', shift.shiftId, 'นับได้ ' + counted + ' · ต่าง ' + shift.diff, '');
       sum.status = 'CLOSED';

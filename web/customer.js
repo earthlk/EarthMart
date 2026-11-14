@@ -129,7 +129,7 @@
         (qr ? '<b style="font-size:1.3em">สแกนจ่ายด้วยแอปธนาคาร</b><div class="cd-qr" id="cdqr"></div>' +
           (st.split ? '<div class="cd-num" style="font-size:1.6em;font-weight:700;color:#1F6B45">QR ฿' + money(st.split.qr) + '</div><div class="cd-muted">+ ' + esc(st.split.otherName || 'เงินสด') + ' ฿' + money(st.split.other) + '</div>' : '') +
           '<div><b>PromptPay' + (st.ppName ? ' · ' + esc(st.ppName) : '') + '</b><div class="cd-muted" style="font-size:.8em">ยอดถูกใส่ใน QR แล้ว ไม่ต้องพิมพ์เอง</div></div>'
-          : '<b style="font-size:1.4em">' + (st.method === 'transfer' ? 'โอนเงิน' : 'ชำระด้วยเงินสด') + '</b><div class="cd-num" style="font-size:4em;font-weight:700;color:#1F6B45">฿' + money(st.total) + '</div>') +
+          : '<b style="font-size:1.4em">' + (st.method === 'transfer' ? 'โอนเงิน' : st.method === 'credit' ? 'ค้างจ่าย' : 'ชำระด้วยเงินสด') + '</b><div class="cd-num" style="font-size:4em;font-weight:700;color:#1F6B45">฿' + money(st.total) + '</div>') +
         '</div></section>';
     }
     if (st.mode === 'done') {
@@ -141,7 +141,7 @@
         '<div style="width:4.4em;height:4.4em;border-radius:50%;background:#1F6B45;display:flex;align-items:center;justify-content:center">' +
         '<svg width="50%" height="50%" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>' +
         '<div style="text-align:center"><div style="font-size:1.9em;font-weight:700">ชำระเงินเรียบร้อย</div><div class="cd-muted" style="font-size:1.1em">' + esc(st.thanks || 'ขอบคุณที่อุดหนุนค่ะ') + '</div></div>' +
-        '<div style="display:flex;gap:.8em">' + card('ยอดรวม', st.total) + (st.method === 'cash' ? card('รับเงินมา', st.received) + card('เงินทอน', st.change, true) : card(st.method === 'qr' ? 'พร้อมเพย์' : 'โอน', st.total, true)) + '</div>' +
+        '<div style="display:flex;gap:.8em">' + card('ยอดรวม', st.total) + (st.method === 'cash' ? card('รับเงินมา', st.received) + card('เงินทอน', st.change, true) : card(st.method === 'qr' ? 'พร้อมเพย์' : st.method === 'credit' ? 'ค้างจ่าย' : 'โอน', st.total, true)) + '</div>' +
         '<div class="cd-muted" style="font-size:.75em">กลับหน้าหลักใน 5 วินาที</div></div>';
     }
     return '<section class="cd-brand" style="width:43%;box-sizing:border-box;padding:2.6em 2.2em;display:flex;flex-direction:column;justify-content:space-between">' +
