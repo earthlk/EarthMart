@@ -46,7 +46,8 @@
   "topoUrl": "/html/amp/wificoverinfo/getTopoInfo.asp",
   "ssids": [
     "SSID-1",
-    "SSID-5"
+    "SSID-5",
+    "SSID-6"
   ],
   "lanFilterUnused": {
     "filterPage": "/html/bbsp/macfilter/macfilter.asp",
@@ -64,7 +65,8 @@
   "perSsidMax": 8,
   "onePerDevice": true,
   "ssidNames": {
-    "SSID-1": "klaypan_2.4G",
-    "SSID-5": "klaypan_5G"
+    "SSID-1": "Klaypan_2.4G",
+    "SSID-5": "Klaypan_5G",
+    "SSID-6": "Klaypan_admin"
   }
 }

@@ -92,12 +92,12 @@ const server = http.createServer((req, res) => {
     await page.click('.net-newrow:has-text("iPhone") [data-act=netNew]');
     await page.fill('#nd-name', 'มือถือแบงค์');
     await page.click('.chip-radio label:has-text("แบงค์")');
-    await page.click('.chip-radio label:has-text("klaypan_5G")');
+    await page.click('.chip-radio label:has-text("Klaypan_5G")');
     await shot('n2-name-device');
     await page.click('.modal [data-x=ok]');
     await page.waitForSelector('.net-table :text("มือถือแบงค์")');
     assert.deepStrictEqual(r.st.list.filter(e => e.mac === '7A:11:C8:5D:02:E9').map(e => e.ssid), ['SSID-5'], 'cashier phone allowed on 5G only');
-    assert.ok(await page.$('tr:has-text("มือถือแบงค์") :text("WiFi klaypan_5G")'), 'Wi-Fi shown in the list');
+    assert.ok(await page.$('tr:has-text("มือถือแบงค์") :text("WiFi Klaypan_5G")'), 'Wi-Fi shown in the list');
     await page.click('.net-newrow:has-text("HUAWEI-P30") [data-act=netDecline]');
     await page.waitForFunction(() => !document.querySelector('.net-newrow'));
     assert.deepStrictEqual(r.st.macs().sort(), [HERE, 'A4:83:E7:22:91:BC', '7A:11:C8:5D:02:E9'].sort(), 'router whitelist has the allowed devices');

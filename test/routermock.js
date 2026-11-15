@@ -4,7 +4,7 @@ const http = require('http');
 const qs = require('querystring');
 module.exports = function startRouter(opts) {
   opts = opts || {};
-  const st = { ssids: opts.ssids || ['SSID-1', 'SSID-5'], macs: () => Array.from(new Set(st.list.map(e => e.mac))), pass: opts.pass || 'secret', token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', sid: '', enabled: 0, policy: 0, list: [], seq: 0, posts: [],
+  const st = { ssids: opts.ssids || ['SSID-1', 'SSID-5', 'SSID-6'], macs: () => Array.from(new Set(st.list.map(e => e.mac))), pass: opts.pass || 'secret', token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', sid: '', enabled: 0, policy: 0, list: [], seq: 0, posts: [],
     devices: opts.devices || [['192.168.1.20', '3C:52:82:1A:4F:09', 'POS-PC', 'Online'], ['192.168.1.34', 'A4:83:E7:22:91:BC', 'Earth-phone', 'Online'], ['192.168.1.57', 'D2:6F:3B:90:AE:14', 'HUAWEI-P30', 'Online']] };
   const hex = s => s.replace(/:/g, '\\x3a');
   const loginPage = '<html><input type="password" id="txt_Password" name="PassWord"><button id="loginbutton">Login</button></html>';
