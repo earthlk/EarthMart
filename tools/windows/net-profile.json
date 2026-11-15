@@ -28,6 +28,6 @@
   "addBody": "x.SourceMACAddress={mac}&x.DeviceAlias={name}&x.X_HW_Token={token}",
   "delUrl": "/html/bbsp/macfilter/del.cgi?x={filterPath}&RequestFile={filterPageRel}",
   "delBody": "{entry}=&x.X_HW_Token={token}",
-  "modeUrl": "/set.cgi?x=InternetGatewayDevice.X_HW_Security&RequestFile={filterPageRel}",
-  "modeBody": "x.MacFilterRight={enabled}&x.MacFilterPolicy={policy}&x.X_HW_Token={token}"
+  "modeUrl": "/html/bbsp/macfilter/set.cgi?x=InternetGatewayDevice.X_HW_Security&RequestFile={filterPageRel}",
+  "modeBody": "x.MacFilterPolicy={policy}&x.MacFilterRight={enabled}&x.X_HW_Token={token}"
 }
