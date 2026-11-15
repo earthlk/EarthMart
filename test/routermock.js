@@ -39,7 +39,7 @@ module.exports = function startRouter(opts) {
       }
       if (u.pathname === '/html/bbsp/macfilter/macfilter.asp') {
         st.pageToken = 'be' + Math.random().toString(16).slice(2).padEnd(14, '0') + 'c0ffee11c0ffee11c0ffee11c0ffee11';
-        return send((st.noPageToken ? '' : '<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '">') + '<script>var MacFilterRight = "' + st.enabled + '"; var MacFilterPolicy = "' + st.policy + '";\n' +
+        return send((st.noPageToken ? '' : '<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '">') + '<script>function SubmitForm(){ a.push(new stSpecParaArray("x.MacFilterRight", 1, 1)); b.push(new stSpecParaArray("x.MacFilterPolicy", 0, 1)); }\nvar WhiteList = 0;\nvar enableFilter = \'' + st.enabled + '\';\nvar Mode = \'' + st.policy + '\';\n' +
           'var MacFilter = new Array(' + st.list.map(e => 'new stMacFilter("InternetGatewayDevice.X_HW_Security.MacFilter.' + e.n + '","' + hex(e.mac) + '","' + e.name + '")').join(',') + ',null);</script>');
       }
       const f = qs.parse(body);

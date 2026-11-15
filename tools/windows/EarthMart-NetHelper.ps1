@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.8'
+$Version = '1.9'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -335,9 +335,13 @@ function Parse-Filter($prof, [string]$page) {
     }
   }
   $enabled = $false; $policy = ''
-  $m1 = [regex]::Match($t, ($prof.enabledField + '\W{1,6}(\d)'))
+  # The page states them as  var enableFilter = '1';  var Mode = '1';  (its script also mentions
+  # "x.MacFilterRight", 1, 1 in submit code - that is not the current value, so prefer the var line).
+  $m1 = [regex]::Match($t, ('\bvar\s+' + $prof.enabledField + '\s*=\s*[''"]?(\d)'))
+  if (-not $m1.Success) { $m1 = [regex]::Match($t, ($prof.enabledField + '\W{1,6}(\d)')) }
   if ($m1.Success) { $enabled = ($m1.Groups[1].Value -eq '1') }
-  $m2 = [regex]::Match($t, ($prof.policyField + '\W{1,6}(\d)'))
+  $m2 = [regex]::Match($t, ('\bvar\s+' + $prof.policyField + '\s*=\s*[''"]?(\d)'))
+  if (-not $m2.Success) { $m2 = [regex]::Match($t, ($prof.policyField + '\W{1,6}(\d)')) }
   if ($m2.Success) { if ($m2.Groups[1].Value -eq [string]$prof.policyWhitelist) { $policy = 'white' } else { $policy = 'black' } }
   return [pscustomobject]@{ enabled = $enabled; policy = $policy; entries = @($entries) }
 }
