@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.7'
+$Version = '1.8'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -378,7 +378,39 @@ function Get-State($cfg) {
       foreach ($x in $d) { if (-not ($devs | Where-Object { $_.mac -eq $x.mac })) { $devs += $x } }
     } catch { Log ('devices ' + $u + ': ' + $_.Exception.Message) }
   }
+  # Names the phones give themselves (as on the router's Home Network page); the DHCP list often says android-dhcp-NN.
+  if ($prof.topoUrl) {
+    try {
+      $names = Get-TopoNames $prof
+      foreach ($k in $names.Keys) {
+        $n = $names[$k].name
+        $hit = $devs | Where-Object { $_.mac -eq $k } | Select-Object -First 1
+        if ($hit) { if (-not $hit.name -or $hit.name -match '^(?i)android[-_]|^(?i)unknown$|^[0-9A-Fa-f:.-]+$') { $hit.name = $n } }
+        else { $devs += [pscustomobject]@{ mac = $k; ip = $names[$k].ip; name = $n; online = $true } }
+      }
+    } catch { Log ('topo names: ' + $_.Exception.Message) }
+  }
   return [pscustomobject]@{ enabled = $f.enabled; policy = $f.policy; entries = $f.entries; devices = @($devs); page = $page }
+}
+
+# {HostName:"Galaxy-A12",MAC:"fa:f6:33:28:8f:11",IP:"192.168.1.102",...} -> MAC => name
+function Get-TopoNames($prof) {
+  $t = Invoke-Router 'POST' $prof.topoUrl '' ''
+  if (-not ($t -match '(?i)HostName')) {
+    $tok = Get-Token $prof
+    if ($tok) { $t = Invoke-Router 'POST' $prof.topoUrl ('x.X_HW_Token=' + $tok) '' }
+  }
+  $t = Decode-Js $t
+  $out = @{}
+  foreach ($chunk in ($t -split '\{')) {
+    $hn = [regex]::Match($chunk, '(?i)["'']?HostName["'']?\s*:\s*["'']([^"'']*)["'']')
+    $mc = [regex]::Match($chunk, '(?i)["'']?MAC["'']?\s*:\s*["'']((?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})["'']')
+    $ip = [regex]::Match($chunk, '(?i)["'']?IP["'']?\s*:\s*["'']((?:\d{1,3}\.){3}\d{1,3})["'']')
+    if ($hn.Success -and $mc.Success -and $hn.Groups[1].Value.Trim()) {
+      $out[$mc.Groups[1].Value.ToUpper().Replace('-', ':')] = [pscustomobject]@{ name = $hn.Groups[1].Value.Trim(); ip = $ip.Groups[1].Value }
+    }
+  }
+  return $out
 }
 
 # ---------------------------------------------------------------- changes

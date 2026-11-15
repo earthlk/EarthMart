@@ -6,7 +6,8 @@ const fs = require('fs'), os = require('os'), path = require('path');
 const startRouter = require('./routermock');
 const PWSH = process.env.PWSH || 'pwsh';
 (async () => {
-  const r = await startRouter();
+  const r = await startRouter({ devices: [['192.168.1.20', '3C:52:82:1A:4F:09', 'POS-PC', 'Online'], ['192.168.1.34', 'A4:83:E7:22:91:BC', 'Earth-phone', 'Online'], ['192.168.1.57', 'D2:6F:3B:90:AE:14', 'android-dhcp-12', 'Online']] });
+  r.st.topo = [['D2:6F:3B:90:AE:14', 'HUAWEI-P30', '192.168.1.57'], ['46:6B:60:A4:95:88', 'supaporn-s-Z-Flip6', '192.168.1.101']];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'emnet-'));
   fs.copyFileSync(path.join(__dirname, '..', 'tools', 'windows', 'net-profile.json'), path.join(dir, 'net-profile.json'));
   const port = 18765 + Math.floor(Math.random() * 500);
@@ -33,7 +34,7 @@ const PWSH = process.env.PWSH || 'pwsh';
     const pr = await call('/pair', { host, user: 'admin', pass: 'secret', code: r.st.code });
     assert.ok(pr.ok && pr.key, 'paired, got a key');
     key = pr.key;
-    assert.deepStrictEqual(pr.devices.map(d => [d.mac, d.ip, d.name]), [['3C:52:82:1A:4F:09', '192.168.1.20', 'POS-PC'], ['A4:83:E7:22:91:BC', '192.168.1.34', 'Earth-phone'], ['D2:6F:3B:90:AE:14', '192.168.1.57', 'HUAWEI-P30']], 'connected devices read');
+    assert.deepStrictEqual(pr.devices.map(d => [d.mac, d.ip, d.name]), [['3C:52:82:1A:4F:09', '192.168.1.20', 'POS-PC'], ['A4:83:E7:22:91:BC', '192.168.1.34', 'Earth-phone'], ['D2:6F:3B:90:AE:14', '192.168.1.57', 'HUAWEI-P30'], ['46:6B:60:A4:95:88', '192.168.1.101', 'supaporn-s-Z-Flip6']], 'connected devices read; real names from the Wi-Fi topology replace android-dhcp-NN');
     assert.strictEqual((await call('/state', null, 'wrong')).status, 401, 'key required');
     let s = await call('/allow', { mac: '3c-52-82-1a-4f-09', name: 'POS หน้าร้าน' });
     assert.deepStrictEqual(s.entries.map(e => e.mac), ['3C:52:82:1A:4F:09'], 'allowed device listed');

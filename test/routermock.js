@@ -34,6 +34,9 @@ module.exports = function startRouter(opts) {
         return send('var UserDevinfo = new Array(' + st.devices.map(d => 'new USERDevice("InternetGatewayDevice.LANDevice.1.X_HW_UserDev.1","' + d[0] + '","' + hex(d[1]) + '","' + d[2] + '","' + d[3] + '")').join(',') + ',null);');
       }
       if (u.pathname === '/html/ssmp/common/getRandString.asp') { st.pageToken = 'aa' + Math.random().toString(16).slice(2).padEnd(14, '0') + 'feed0001feed0001feed0001feed0001'; return send(st.pageToken); }
+      if (u.pathname === '/html/amp/wificoverinfo/getTopoInfo.asp') {
+        return send('[{"ApMac":"f8:de:73:5e:05:51","Width":"0.51","StaList":[' + (st.topo || []).map(d => '{HostName:"' + d[1] + '",MAC:"' + d[0].toLowerCase() + '",IP:"' + (d[2] || '') + '"}').join(',') + ']}]');
+      }
       if (u.pathname === '/html/bbsp/macfilter/macfilter.asp') {
         st.pageToken = 'be' + Math.random().toString(16).slice(2).padEnd(14, '0') + 'c0ffee11c0ffee11c0ffee11c0ffee11';
         return send((st.noPageToken ? '' : '<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '">') + '<script>var MacFilterRight = "' + st.enabled + '"; var MacFilterPolicy = "' + st.policy + '";\n' +
