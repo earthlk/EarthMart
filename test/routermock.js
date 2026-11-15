@@ -9,7 +9,8 @@ module.exports = function startRouter(opts) {
   const hex = s => s.replace(/:/g, '\\x3a');
   const loginPage = '<html><input type="password" id="txt_Password" name="PassWord"><button id="loginbutton">Login</button></html>';
   const waiting = '<html><head><title>Waiting...</title><script type="text/javascript">var pageName = \'/\'; top.location.replace(pageName);</script></head><body></body></html>';
-  const authed = req => st.sid && (req.headers.cookie || '').indexOf('sid=' + st.sid) >= 0;
+  // Like the ONT: the session lives in the FIRST cookie named "Cookie" (sid=...:Language:...).
+  const authed = req => { const m = (req.headers.cookie || '').match(/(?:^|;\s*)Cookie=([^;]*)/); return !!(st.sid && m && m[1].indexOf('sid=' + st.sid + ':') === 0); };
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', c => { body += c; });
@@ -25,7 +26,7 @@ module.exports = function startRouter(opts) {
         st.code = null;
         if (!ok) return send('<script>top.location="/";</script>');
         st.sid = 'S' + Date.now().toString(36);
-        return send('<script>top.location="/index.asp";</script>', { 'Set-Cookie': 'sid=' + st.sid + '; path=/' });
+        return send('<script>top.location="/index.asp";</script>', { 'Set-Cookie': 'Cookie=sid=' + st.sid + ':Language:english:id=1;path=/' });
       }
       if (!authed(req)) return send(waiting);
       if (u.pathname === '/index.asp') return send('<html><frame src="/html/bbsp/macfilter/macfilter.asp"><script>var menu="html/bbsp/common/lanuserinfo.asp";</script></html>');

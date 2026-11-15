@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.3'
+$Version = '1.4'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -70,43 +70,63 @@ $script:LoggedIn = $false
 $script:JarAt = [DateTime]::MinValue
 $script:Base = ''
 
-function Invoke-Router([string]$method, [string]$path, [string]$body, [string]$extraCookie) {
+# Cookies are kept by hand (name -> value), like a browser: the router's session cookie is named
+# "Cookie" and must REPLACE the one the login page sets. .NET's CookieContainer kept both.
+function New-Jar { return @{} }
+
+function Set-JarCookie([string]$line) {
+  if (-not $script:Jar -or -not $line) { return }
+  $pair = ($line -split ';')[0].Trim()
+  $i = $pair.IndexOf('=')
+  if ($i -gt 0) { $script:Jar[$pair.Substring(0, $i).Trim()] = $pair.Substring($i + 1).Trim() }
+}
+
+function Open-Router([string]$method, [string]$path, [string]$body, [string]$extraCookie) {
+  if ($extraCookie) { Set-JarCookie $extraCookie }
   $url = $script:Base + $path
-  $req = [System.Net.HttpWebRequest]::Create($url)
-  $req.Method = $method
-  $req.CookieContainer = $script:Jar
-  $req.AllowAutoRedirect = $true
-  $req.Timeout = 15000
-  $req.UserAgent = 'Mozilla/5.0 EarthMart'
-  $req.Referer = $script:Base + '/'
-  if ($script:RefPage) { $req.Referer = $script:Base + $script:RefPage }
-  if ($extraCookie -and $script:Jar) {
-    # Put it in the jar: a hand-written Cookie header is dropped when a CookieContainer is used.
-    $i = $extraCookie.IndexOf('=')
-    if ($i -gt 0) {
-      $c = New-Object System.Net.Cookie($extraCookie.Substring(0, $i), $extraCookie.Substring($i + 1), '/', ([Uri]$url).Host)
-      $script:Jar.Add($c)
+  for ($hop = 0; $hop -lt 5; $hop++) {
+    $req = [System.Net.HttpWebRequest]::Create($url)
+    $req.Method = $method
+    $req.AllowAutoRedirect = $false
+    $req.Timeout = 15000
+    $req.UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) EarthMart'
+    $req.Accept = 'text/html,application/xhtml+xml,image/avif,image/webp,image/apng,*/*;q=0.8'
+    $req.Referer = $script:Base + '/'
+    if ($script:RefPage) { $req.Referer = $script:Base + $script:RefPage }
+    if ($script:Jar -and $script:Jar.Count) { $req.Headers.Add('Cookie', (($script:Jar.Keys | ForEach-Object { $_ + '=' + $script:Jar[$_] }) -join '; ')) }
+    if ($method -eq 'POST') {
+      $bytes = [Text.Encoding]::UTF8.GetBytes([string]$body)
+      $req.ContentType = 'application/x-www-form-urlencoded'
+      $req.ContentLength = $bytes.Length
+      $s = $req.GetRequestStream(); $s.Write($bytes, 0, $bytes.Length); $s.Close()
     }
+    try { $resp = $req.GetResponse() } catch [System.Net.WebException] {
+      if ($_.Exception.Response) { $resp = $_.Exception.Response } else { throw ('router not reachable: ' + $_.Exception.Message) }
+    }
+    $sc = $resp.Headers.GetValues('Set-Cookie')
+    if ($sc) { foreach ($c in $sc) { Set-JarCookie $c } }
+    $code = [int]$resp.StatusCode
+    $loc = $resp.Headers['Location']
+    if ($code -ge 300 -and $code -lt 400 -and $loc) {
+      $resp.Close()
+      if ($loc -notmatch '^https?://') { if (-not $loc.StartsWith('/')) { $loc = '/' + $loc }; $loc = $script:Base + $loc }
+      $url = $loc; $method = 'GET'; $body = ''
+      continue
+    }
+    return $resp
   }
-  if ($method -eq 'POST') {
-    $bytes = [Text.Encoding]::UTF8.GetBytes([string]$body)
-    $req.ContentType = 'application/x-www-form-urlencoded'
-    $req.ContentLength = $bytes.Length
-    $s = $req.GetRequestStream(); $s.Write($bytes, 0, $bytes.Length); $s.Close()
-  }
-  try { $resp = $req.GetResponse() } catch [System.Net.WebException] {
-    if ($_.Exception.Response) { $resp = $_.Exception.Response } else { throw ('router not reachable: ' + $_.Exception.Message) }
-  }
+  throw 'router redirected too many times'
+}
+
+function Invoke-Router([string]$method, [string]$path, [string]$body, [string]$extraCookie) {
+  $resp = Open-Router $method $path $body $extraCookie
   $r = New-Object IO.StreamReader($resp.GetResponseStream())
   $text = $r.ReadToEnd(); $r.Close(); $resp.Close()
   return $text
 }
 
 function Invoke-RouterBytes([string]$path) {
-  $req = [System.Net.HttpWebRequest]::Create($script:Base + $path)
-  $req.Method = 'GET'; $req.CookieContainer = $script:Jar; $req.Timeout = 15000
-  $req.UserAgent = 'Mozilla/5.0 EarthMart'; $req.Referer = $script:Base + '/'
-  try { $resp = $req.GetResponse() } catch [System.Net.WebException] { throw ('router not reachable: ' + $_.Exception.Message) }
+  $resp = Open-Router 'GET' $path '' ''
   $ms = New-Object IO.MemoryStream
   $resp.GetResponseStream().CopyTo($ms); $type = $resp.ContentType; $resp.Close()
   if (-not $type -or $type -notmatch '^image/') { $type = 'image/jpeg' }
@@ -118,13 +138,12 @@ function Get-Captcha([string]$hostName) {
   $prof = Get-Profile
   if (-not $prof.captchaUrl) { return $null }
   $script:Base = 'http://' + $hostName
-  $script:Jar = New-Object System.Net.CookieContainer
+  $script:Jar = New-Jar
   $script:LoggedIn = $false
-  $c = New-Object System.Net.Cookie('Cookie', 'body:Language:english:id=-1', '/', $hostName.Split(':')[0])
-  $script:Jar.Add($c)
-  $null = Invoke-Router 'GET' $prof.loginPage '' ''
+  $null = Invoke-Router 'GET' $prof.loginPage '' $prof.loginCookie
   $ms = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
   $img = Invoke-RouterBytes (Fill $prof.captchaUrl @{ rand = $ms })
+  Log ('captcha picture: ' + $img.type + ', ' + $img.bytes.Length + ' bytes')
   return ('data:' + $img.type + ';base64,' + [Convert]::ToBase64String($img.bytes))
 }
 
@@ -217,7 +236,7 @@ function Connect-Router($cfg, [bool]$force, [string]$code = '') {
   } else {
     # After a failed login, wait before trying again: the router locks logins after a few misses.
     if (-not $force -and $script:LoginPauseUntil -and (Get-Date) -lt $script:LoginPauseUntil) { throw ('login paused until ' + $script:LoginPauseUntil.ToString('HH:mm') + ' after a failed login (router locks after a few tries)') }
-    $script:Jar = New-Object System.Net.CookieContainer
+    $script:Jar = New-Jar
     $null = Invoke-Router 'GET' $prof.loginPage '' ''
   }
   $script:LoggedIn = $false
@@ -234,8 +253,11 @@ function Connect-Router($cfg, [bool]$force, [string]$code = '') {
     } else { $pw = $pass }
     $body = Fill $prof.loginBody @{ user = (UrlEnc $cfg.user); pass = (UrlEnc $pw); token = $token; code = (UrlEnc $code.Trim()) }
     $res = Invoke-Router 'POST' $prof.loginUrl $body $prof.loginCookie
-    $homeHtml = Invoke-Router 'GET' $prof.homePage '' ''
-    if (-not (Logged-Out $prof $homeHtml) -and -not (Logged-Out $prof (Invoke-Router 'GET' $prof.filterPage '' ''))) {
+    $rt = [regex]::Match([string]$res, '(?i)<title>([^<]{0,60})').Groups[1].Value
+    $rl = [regex]::Match([string]$res, '(?i)(?:pageName|location[^=]{0,20})\s*=\s*[''"]([^''"]{0,80})').Groups[1].Value
+    Log ('login answer: ' + ([string]$res).Length + ' chars, title=' + $rt + ' goes to=' + $rl + ' cookies=' + (($script:Jar.Keys | ForEach-Object { $_ + '(' + ([string]$script:Jar[$_]).Length + ')' }) -join ','))
+    $fp = Invoke-Router 'GET' $prof.filterPage '' ''
+    if (-not (Logged-Out $prof $fp)) {
       $script:JarAt = Get-Date
       $script:LoggedIn = $true
       Log ('login ok (' + $mode + ')')
@@ -245,6 +267,7 @@ function Connect-Router($cfg, [bool]$force, [string]$code = '') {
     $sn = [regex]::Replace($sn, '(?i)<!DOCTYPE[^>]*>|<meta[^>]*>|<link[^>]*>', '')
     if ($sn.Length -gt 700) { $sn = $sn.Substring(0, 700) }
     Log ('login failed with ' + $mode + ' - router answered: ' + $sn)
+    Log ('filter page after login: ' + ([string]$fp).Length + ' chars, title=' + [regex]::Match([string]$fp, '(?i)<title>([^<]{0,60})').Groups[1].Value)
     if ($sn -match '(?i)retri|locked') { $script:Jar = $null; throw 'router locked: too many tries, wait a minute and try again' }
     if ($sn -match '(?i)captcha|checkcode') { break }
   }
