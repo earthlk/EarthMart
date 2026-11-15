@@ -92,6 +92,21 @@ const PWSH = process.env.PWSH || 'pwsh';
     r.st.ssids = ['SSID-1', 'SSID-5'];
     s = await call('/mode', { enabled: false });
     assert.strictEqual(s.enabled, false, 'whitelist off');
+    // band choice: 5G only, then both, then 2.4G only; and the 8-per-Wi-Fi limit
+    const rows = m => r.st.list.filter(e => e.mac === m).map(e => e.ssid).sort().join('+');
+    s = await call('/allow', { mac: '9C:2E:A1:00:00:10', name: 'Staff', ssids: ['SSID-5'] });
+    assert.strictEqual(rows('9C:2E:A1:00:00:10'), 'SSID-5', '5G only');
+    s = await call('/allow', { mac: '9C:2E:A1:00:00:10', name: 'Staff', ssids: ['SSID-1', 'SSID-5'] });
+    assert.strictEqual(rows('9C:2E:A1:00:00:10'), 'SSID-1+SSID-5', 'changed to both');
+    s = await call('/allow', { mac: '9C:2E:A1:00:00:10', name: 'Staff', ssids: ['SSID-1'] });
+    assert.strictEqual(rows('9C:2E:A1:00:00:10'), 'SSID-1', 'changed to 2.4G only (5G row removed)');
+    assert.ok(s.ssidUse && s.ssidMax === 8 && s.ssidUse['SSID-1'] >= 1, 'page gets per-Wi-Fi use and the limit');
+    for (let i = 0; r.st.list.filter(e => e.ssid === 'SSID-5').length < 8; i++) await call('/allow', { mac: '9C:2E:A1:00:01:' + String(i).padStart(2, '0'), name: 'F' + i, ssids: ['SSID-5'] });
+    const full = await call('/allow', { mac: '9C:2E:A1:00:00:20', name: 'Ninth' });
+    assert.ok(!full.ok && /wifi full: SSID-5/.test(full.error) && !r.st.macs().includes('9C:2E:A1:00:00:20'), '5G full: refused before touching the router');
+    s = await call('/allow', { mac: '9C:2E:A1:00:00:20', name: 'Ninth', ssids: ['SSID-1'] });
+    assert.strictEqual(rows('9C:2E:A1:00:00:20'), 'SSID-1', 'still fits on 2.4G');
+    for (const m of r.st.macs().filter(m => m.startsWith('9C:2E:A1'))) await call('/block', { mac: m });
     // the real AIS page (trimmed, anonymised): on, whitelist, 5 devices each on SSID-1 and SSID-5
     r.st.rawPage = fs.readFileSync(path.join(__dirname, 'fixtures', 'wlanmacfilter-ais.asp'), 'utf8');
     s = await call('/state');

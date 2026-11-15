@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '2.2'
+$Version = '2.3'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -485,11 +485,15 @@ function Normalize-Mac([string]$mac) {
 }
 
 # Wi-Fi filter entries are per SSID (2.4G and 5G are separate SSIDs): one entry for each SSID in the profile.
-function Add-Entry($cfg, [string]$mac, [string]$name) {
+# $want: which Wi-Fi this device may use (e.g. SSID-5 only); empty = every SSID in the profile.
+function Add-Entry($cfg, [string]$mac, [string]$name, $want) {
   $prof = Get-Profile
   $mac = Normalize-Mac $mac
   $st = Get-State $cfg
-  $ssids = @($prof.ssids | Where-Object { $_ }); if (-not $ssids.Count) { $ssids = @('') }
+  $all = @($prof.ssids | Where-Object { $_ })
+  $ssids = $all; if (-not $ssids.Count) { $ssids = @('') }
+  $picked = @(@($want) | Where-Object { $_ -and ($all -contains $_) })
+  if ($picked.Count) { $ssids = $picked }
   # Never add to a list that is in blacklist mode: there an entry BLOCKS the device.
   if (-not $st.known) { Save-FilterPage $st; throw 'mode unknown: cannot read the filter mode from the router page - not changing anything' }
   if ($st.policy -ne 'white') {
@@ -500,8 +504,12 @@ function Add-Entry($cfg, [string]$mac, [string]$name) {
   }
   $have = @($st.entries | Where-Object { $_.mac -eq $mac })
   $todo = @($ssids | Where-Object { $s = $_; -not ($have | Where-Object { $_.ssid -eq $s -or (-not $s) -or (-not $_.ssid) }) })
-  if (-not $todo.Count) { return $st }
-  if ($prof.maxEntries -and ($st.entries.Count + $todo.Count) -gt [int]$prof.maxEntries) { throw ('the router list is full (' + $prof.maxEntries + ')') }
+  if (-not $todo.Count -and -not $picked.Count) { return $st }
+  # The router takes perSsidMax devices per Wi-Fi (8 on the HG8045X6).
+  if ($prof.perSsidMax) {
+    foreach ($x in $todo) { if ($x -and @($st.entries | Where-Object { $_.ssid -eq $x }).Count -ge [int]$prof.perSsidMax) { throw ('wifi full: ' + $x + ' already has ' + $prof.perSsidMax + ' devices') } }
+  }
+  if ($todo.Count -and $prof.maxEntries -and ($st.entries.Count + $todo.Count) -gt [int]$prof.maxEntries) { throw ('the router list is full (' + $prof.maxEntries + ')') }
   $safe = ($name -replace '[^A-Za-z0-9 _.-]', '').Trim()
   if (-not $safe) { $safe = 'EM-' + $mac.Replace(':', '').Substring(6) }
   $after = $null; $ok = 0
@@ -510,8 +518,19 @@ function Add-Entry($cfg, [string]$mac, [string]$name) {
     $r = Post-Change $cfg $prof.addUrl $prof.addBody @{ mac = (UrlEnc $mac); name = (UrlEnc $safe); ssid = (UrlEnc $ssid) } { param($a) @($a.entries | Where-Object { $_.mac -eq $mac }).Count -gt $before }
     if ($r) { $ok++; $after = $r; $st = $r } else { Log ('add ' + $mac + ' to ' + $ssid + ' was not kept') }
   }
-  if (-not $ok -and -not $have.Count) { throw 'the router did not keep the new entry' }
-  if (-not $after) { $after = Get-State $cfg }
+  if ($todo.Count -and -not $ok -and -not $have.Count) { throw 'the router did not keep the new entry' }
+  if ($picked.Count -and $ok -lt $todo.Count) { throw 'the router did not keep the new entry' }
+  if (-not $after) { $after = $st }
+  # A band choice also takes the device off the other Wi-Fi.
+  if ($picked.Count) {
+    $extra = @($after.entries | Where-Object { $_.mac -eq $mac -and $_.ssid -and ($picked -notcontains $_.ssid) })
+    if ($extra.Count) {
+      $joined = ($extra | ForEach-Object { $_.entry }) -join '=&'
+      $r = Post-Change $cfg $prof.delUrl $prof.delBody @{ entry = $joined } { param($a) -not ($a.entries | Where-Object { $_.mac -eq $mac -and $_.ssid -and ($picked -notcontains $_.ssid) }) }
+      if (-not $r) { throw 'the router did not remove the entry' }
+      $after = $r
+    }
+  }
   return $after
 }
 
@@ -656,7 +675,11 @@ function Public-State($st) {
     if ($r) { if ($e.ssid) { $r.ssids += $e.ssid } }
     else { $rows += [pscustomobject]@{ mac = $e.mac; name = $e.name; entry = $e.entry; ssids = @(@($e.ssid) | Where-Object { $_ }) } }
   }
-  return [pscustomobject]@{ ok = $true; enabled = $st.enabled; policy = $st.policy; known = $st.known; entries = @($rows); devices = $st.devices; at = (Get-Date -Format 'HH:mm:ss') }
+  $prof = $null; try { $prof = Get-Profile } catch { }
+  $use = [ordered]@{}
+  if ($prof) { foreach ($x in @($prof.ssids)) { if ($x) { $use[$x] = @($st.entries | Where-Object { $_.ssid -eq $x }).Count } } }
+  $max = 0; if ($prof -and $prof.perSsidMax) { $max = [int]$prof.perSsidMax }
+  return [pscustomobject]@{ ok = $true; enabled = $st.enabled; policy = $st.policy; known = $st.known; ssidUse = $use; ssidMax = $max; entries = @($rows); devices = $st.devices; at = (Get-Date -Format 'HH:mm:ss') }
 }
 
 function Handle($rq) {
@@ -699,7 +722,7 @@ function Handle($rq) {
   switch ($rq.path) {
     '/login' { $null = Connect-Router $cfg $true ([string]$data.code); Send $rq.stream 200 (Public-State (Get-State $cfg)) }
     '/state' { Send $rq.stream 200 (Public-State (Get-State $cfg)) }
-    '/allow' { Send $rq.stream 200 (Public-State (Add-Entry $cfg ([string]$data.mac) ([string]$data.name))) }
+    '/allow' { Send $rq.stream 200 (Public-State (Add-Entry $cfg ([string]$data.mac) ([string]$data.name) @($data.ssids))) }
     '/block' { Send $rq.stream 200 (Public-State (Remove-Entry $cfg ([string]$data.mac))) }
     '/mode' { Send $rq.stream 200 (Public-State (Set-Mode $cfg ([bool]$data.enabled))) }
     '/test' { Send $rq.stream 200 @{ ok = $true; steps = @(Test-Router $cfg) } }

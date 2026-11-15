@@ -51,6 +51,7 @@ module.exports = function startRouter(opts) {
       if (!st.pageToken || f['x.X_HW_Token'] !== st.pageToken) return send('token error');
       if (u.pathname === '/html/bbsp/wlanmacfilter/add.cgi') {
         if (!f['x.SourceMACAddress'] || st.ssids.indexOf(f['x.SSIDName']) < 0) return send('bad');
+        if (st.list.filter(e => e.ssid === f['x.SSIDName']).length >= 8) return send('full');
         st.list.push({ n: ++st.seq, ssid: f['x.SSIDName'], mac: String(f['x.SourceMACAddress']).toUpperCase(), name: f['x.DeviceName'] || '' }); return send('ok');
       }
       if (u.pathname === '/html/bbsp/wlanmacfilter/del.cgi') { const ks = Object.keys(f).filter(x => x.startsWith('InternetGatewayDevice.X_HW_Security.WLANMacFilter.')); st.list = st.list.filter(e => ks.indexOf('InternetGatewayDevice.X_HW_Security.WLANMacFilter.' + e.n) < 0); return send('ok'); }

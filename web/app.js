@@ -5086,8 +5086,37 @@ function netMacInfoText(r) {
   return parts.join(' · ');
 }
 /** Name to offer for a device: "Samsung Galaxy Z Flip6 ของ supaporn", else the model, else what the device calls itself. */
+/* Wi-Fi bands: the router keeps one row per SSID, 8 devices each (SSID-1 = 2.4G, SSID-5 = 5G). */
+var NET_BAND_TH = { 'SSID-1': '2.4G', 'SSID-5': '5G' };
+function netBandTh(id) { return NET_BAND_TH[id] || id; }
+function netBands() { var u = (S.net && S.net.st && S.net.st.ssidUse) || {}; return Object.keys(u).length ? Object.keys(u) : ['SSID-1', 'SSID-5']; }
+function netBandRoom(id, mac) {
+  var st = (S.net && S.net.st) || {}, max = st.ssidMax || 8;
+  var mine = (st.entries || []).some(function (e) { return e.mac === mac && (e.ssids || []).indexOf(id) >= 0; });
+  return mine || ((st.ssidUse || {})[id] || 0) < max;
+}
+function netBandLabel(ssids) { ssids = ssids || []; return ssids.length >= netBands().length ? 'ทั้ง 2.4G + 5G' : ssids.map(netBandTh).join(' + ') + ' อย่างเดียว'; }
+/** Default for switching a device on: both if there is room, else the band that has room. */
+function netPickBands(mac) {
+  var all = netBands(), ok = all.filter(function (b) { return netBandRoom(b, mac); });
+  return ok.length === all.length ? all : ok;
+}
+function netUseLine() {
+  var st = (S.net && S.net.st) || {}, max = st.ssidMax || 8;
+  return netBands().map(function (b) { var n = (st.ssidUse || {})[b] || 0; return '<span class="' + (n >= max ? 'warn-text' : '') + '">' + netBandTh(b) + ' ' + n + '/' + max + '</span>'; }).join(' · ');
+}
+
 /** Connected now (on the router's Wi-Fi list / marked online) or not. */
 function netOnlineTag(r) { return r.online ? '<span class="net-on">● ใช้งานอยู่</span>' : '<span class="net-off">○ ไม่ได้เชื่อมต่อ</span>'; }
+function netBandChips(r) {
+  var all = netBands(), cur = (r.allowed && (r.ssids || []).length ? r.ssids : netPickBands(r.mac)).slice().sort().join('+');
+  var opts = [{ v: all.join('+'), t: 'ทั้ง 2.4G + 5G' }].concat(all.map(function (b) { return { v: b, t: netBandTh(b) + ' อย่างเดียว' }; }));
+  if (r.local) return '<div class="muted" style="font-size:13px">เครื่องหน้าร้านนี้ใช้ได้ทั้ง 2 คลื่นเสมอ (กันเครื่องหลุดเน็ต)</div>';
+  return '<div class="chip-radio">' + opts.map(function (o) {
+    var ok = o.v.split('+').every(function (b) { return netBandRoom(b, r.mac); });
+    return '<label class="' + (ok ? '' : 'disabled') + '"><input type="radio" name="ndband" value="' + o.v + '"' + (o.v === cur ? ' checked' : '') + (ok ? '' : ' disabled') + '><span>' + o.t + (ok ? '' : ' (เต็ม)') + '</span></label>';
+  }).join('') + '</div>';
+}
 function netSuggestName(r) { var i = r.info || {}; return i.model && i.owner ? i.model + ' ของ ' + i.owner : (i.model && !/^คอม Windows$/.test(i.model) ? i.model : '') || r.host || ''; }
 function netTypeFromInfo(i) { return { phone: 'phone', pc: 'pc', tablet: 'tablet', cam: 'camera' }[(i || {}).type] || ''; }
 
@@ -5116,6 +5145,7 @@ function netErrTh(m) {
   if (/did not keep|did not remove|did not switch/.test(m)) return 'เราเตอร์ไม่รับคำสั่ง — กด "ทดสอบระบบ" ในตั้งค่าการเชื่อม';
   if (/^mode unknown/.test(m)) return 'อ่านโหมดตัวกรองจากเราเตอร์ไม่ได้ — ไม่ได้เปลี่ยนอะไร (ส่งไฟล์ %TEMP%\\earthmart-filterpage.txt ให้ผู้ดูแล)';
   if (/this PC is not on the list/.test(m)) return 'เครื่องหน้าร้านนี้ยังไม่อยู่ในรายชื่อของ WiFi ครบทั้ง 2.4G และ 5G — อนุญาตเครื่องนี้ก่อน';
+  if (/^wifi full: (\S+)/.test(m)) { var b = netBandTh(m.match(/^wifi full: (\S+)/)[1]); return 'WiFi ' + b + ' เต็มแล้ว (8 เครื่อง) — เลือกให้ใช้อีกคลื่นอย่างเดียว หรือปิดสิทธิ์เครื่องอื่นก่อน'; }
   if (/list is full/.test(m)) return 'รายชื่อในเราเตอร์เต็มแล้ว';
   if (/12 hex/.test(m)) return 'MAC ต้องมี 12 หลัก (0-9, A-F)';
   return m;
@@ -5267,6 +5297,7 @@ function drawNet() {
   box.innerHTML = '<div class="net-grid"><div class="col" style="gap:14px;min-width:0">' +
     '<div class="card pad net-master"><button type="button" class="switch big' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '" aria-label="เปิดระบบ Whitelist" data-act="netMode"></button>' +
     '<div class="grow"><b style="font-size:18px">เปิดระบบ Whitelist</b><div class="muted" style="font-size:13px">ใช้เน็ตร้านได้เฉพาะเครื่องที่อนุญาต · ปิดสวิตช์ = ทุกเครื่องใช้ได้ปกติ</div>' +
+    '<div style="font-size:13px;margin-top:2px">ที่ว่างในเราเตอร์ (เครื่องต่อ WiFi): ' + netUseLine() + '</div>' +
     (st.known === false ? '<div class="warn-text" style="font-size:13px">อ่านโหมดตัวกรองจากเราเตอร์ไม่ได้ — ระบบจะไม่เปลี่ยนอะไรในเราเตอร์จนกว่าจะแก้</div>' : '') +
     (st.enabled && st.policy === 'black' ? '<div class="warn-text" style="font-size:13px">เราเตอร์ตั้งเป็น Blacklist อยู่ (ตั้งจากหน้า 192.168.1.1) — เปิดสวิตช์เพื่อเปลี่ยนเป็น Whitelist</div>' : '') + '</div>' +
     '<div class="net-counts"><div><b>' + onlineN + '</b><small>ใช้งานอยู่</small></div><div><b class="brand-text">' + listed.filter(function (r) { return r.allowed; }).length + '</b><small>อนุญาต</small></div><div><b class="warn-text">' + listed.filter(function (r) { return !r.allowed; }).length + '</b><small>ไม่อนุญาต</small></div><div><b class="amber">' + fresh.length + '</b><small>เครื่องใหม่</small></div></div></div>' +
@@ -5279,7 +5310,7 @@ function drawNet() {
     '<table class="table net-table"><thead><tr><th>ชื่อเครื่อง</th><th>IP ตอนนี้</th><th>MAC</th><th>สิทธิ์</th><th></th></tr></thead><tbody>' +
     (listed.map(function (r) {
       return '<tr class="' + (r.allowed ? '' : 'off') + '"><td><button type="button" class="linkish" data-act="netEdit" data-mac="' + r.mac + '"><i class="net-dot' + (r.online ? ' on' : '') + '"></i><b>' + esc(r.name || r.mac) + '</b> ' + (r.locked ? lock : '') + '</button> ' + netOnlineTag(r) +
-        '<div class="muted" style="font-size:12px;padding-left:18px">' + netTypeTh(r.type) + ' · ' + netMacInfoText(r).replace(/<\/?b>/g, '') + (r.saved && r.saved.ownerId && users[r.saved.ownerId] ? ' · ' + esc(users[r.saved.ownerId]) : '') + '</div></td>' +
+        '<div class="muted" style="font-size:12px;padding-left:18px">' + (r.allowed && (r.ssids || []).length ? '<b>' + netBandLabel(r.ssids) + '</b> · ' : '') + netTypeTh(r.type) + ' · ' + netMacInfoText(r).replace(/<\/?b>/g, '') + (r.saved && r.saved.ownerId && users[r.saved.ownerId] ? ' · ' + esc(users[r.saved.ownerId]) : '') + '</div></td>' +
         '<td class="muted num">' + esc(r.ip || '—') + '</td><td class="mono muted">' + esc(r.mac) + '</td><td class="' + (r.allowed ? 'brand-text' : 'warn-text') + '"><b>' + (r.allowed ? 'อนุญาต' : 'ไม่อนุญาต') + '</b></td>' +
         '<td class="r"><button type="button" class="switch' + (r.allowed ? ' on' : '') + '" role="switch" aria-checked="' + !!r.allowed + '" aria-label="อนุญาต ' + esc(r.name || r.mac) + '" data-act="netToggle" data-mac="' + r.mac + '"' + (r.locked && r.allowed ? ' disabled title="เครื่องสำคัญ — ปิดสิทธิ์ไม่ได้"' : '') + '></button></td></tr>';
     }).join('') || '<tr><td colspan="5" class="muted">ยังไม่มีเครื่องในรายชื่อ · กด "ตั้งชื่อ + อนุญาต" ที่เครื่องใหม่</td></tr>') + '</tbody></table></div></div>' +
@@ -5316,6 +5347,7 @@ function netDeviceModal(r, mode) {
     '<div class="field"><label for="nd-name">ชื่อเครื่อง</label><input id="nd-name" class="big-input" value="' + esc(sv.name || (mode === 'edit' ? r.name : '') || '') + '" placeholder="' + esc(netSuggestName(r) || 'เช่น มือถือแบงค์') + '"></div>' +
     '<div class="field"><span class="lbl">ประเภท</span>' + chipRadio('ndtype', NET_TYPES.map(function (t) { return { v: t[0], t: t[1] }; }), sv.type || r.type || netTypeFromInfo(r.info) || 'other') + '</div>' +
     '<div class="field"><span class="lbl">เป็นของใคร (ไม่บังคับ)</span>' + chipRadio('ndowner', [{ v: '', t: 'ไม่ระบุ' }].concat(users.filter(function (u) { return u.active !== false; }).map(function (u) { return { v: u.userId, t: u.name }; })), sv.ownerId || '') + '</div>' +
+    '<div class="field"><span class="lbl">ใช้ WiFi ได้ <small class="muted">(' + netUseLine() + ')</small></span>' + netBandChips(r) + '</div>' +
     '<label class="row" style="gap:8px"><input type="checkbox" id="nd-lock"' + (sv.locked || r.local ? ' checked' : '') + (r.local ? ' disabled' : '') + '> เครื่องสำคัญ — กันปิดสิทธิ์ (เช่น มือถือเจ้าของ, แท็บเล็ตจอลูกค้า)</label>' +
     (r.mac && netRandomMac(r.mac) ? '<div class="muted" style="font-size:13px;padding:10px 12px;border-radius:10px;background:var(--surface-muted)">MAC นี้เป็นแบบสุ่ม — ถ้าเป็นมือถือพนักงาน ให้ปิด MAC แบบสุ่มสำหรับ WiFi ร้านก่อน ไม่งั้นพรุ่งนี้อาจขึ้นเป็นเครื่องใหม่</div>' : '') +
     '</form><footer>' + (mode === 'edit' && !r.local ? '<button class="btn danger" data-x="del">ลบออกจากรายชื่อ</button><span class="grow"></span>' : '') +
@@ -5333,7 +5365,10 @@ function netDeviceModal(r, mode) {
     var d = { mac: mac, name: $('#nd-name', m).value.trim() || netSuggestName(r) || '', type: radioVal(m, 'ndtype'), ownerId: radioVal(m, 'ndowner'), locked: $('#nd-lock', m).checked || !!r.local };
     if (!d.name) return toast('ใส่ชื่อเครื่อง', true);
     closeModal();
-    var step = mode === 'edit' ? Promise.resolve() : netDo('/allow', { mac: mac, name: d.name }, 'กำลังเพิ่มในเราเตอร์…');
+    var band = r.local ? netBands() : String(radioVal(m, 'ndband') || netPickBands(mac).join('+')).split('+').filter(Boolean);
+    if (!band.length) return toast('WiFi เต็มทั้ง 2 คลื่น — ปิดสิทธิ์เครื่องอื่นก่อน', true);
+    var bandChanged = mode === 'edit' && r.allowed && band.slice().sort().join('+') !== (r.ssids || []).slice().sort().join('+');
+    var step = mode === 'edit' && !bandChanged ? Promise.resolve() : netDo('/allow', { mac: mac, name: d.name, ssids: band }, mode === 'edit' ? 'กำลังเปลี่ยนคลื่น WiFi…' : 'กำลังเพิ่มในเราเตอร์…');
     step.then(function () { if (mode !== 'edit') d.allowed = true; return api('saveNetDevice', S.token, d); })
       .then(function () { toast(mode === 'edit' ? 'บันทึกแล้ว' : d.name + ' ใช้เน็ตได้แล้ว'); loadNet(); }).catch(function (e) { if (e && e.message) toast(e.message, true); });
   };
@@ -5424,7 +5459,9 @@ var NET_ACTIONS = {
     var r = netRow(el.getAttribute('data-mac'));
     if (r.allowed && r.locked) return toast('เครื่องสำคัญ — ปิดสิทธิ์ไม่ได้', true);
     var to = !r.allowed;
-    netDo(to ? '/allow' : '/block', { mac: r.mac, name: r.name }, to ? 'กำลังอนุญาต…' : 'กำลังปิดสิทธิ์…')
+    var band = to ? (r.local ? netBands() : netPickBands(r.mac)) : null;
+    if (to && !band.length) return toast('WiFi เต็มทั้ง 2 คลื่น (8 เครื่องต่อคลื่น) — ปิดสิทธิ์เครื่องอื่นก่อน', true);
+    netDo(to ? '/allow' : '/block', to ? { mac: r.mac, name: r.name, ssids: band } : { mac: r.mac, name: r.name }, to ? 'กำลังอนุญาต…' : 'กำลังปิดสิทธิ์…')
       .then(function () { return api('saveNetDevice', S.token, { mac: r.mac, name: r.name, allowed: to }); }).then(function () { toast((r.name || r.mac) + (to ? ' ใช้เน็ตได้' : ' ใช้เน็ตไม่ได้แล้ว')); }).catch(function () {});
   },
   netMode: function () {
