@@ -78,6 +78,7 @@ function Invoke-Router([string]$method, [string]$path, [string]$body, [string]$e
   $req.Timeout = 15000
   $req.UserAgent = 'Mozilla/5.0 EarthMart'
   $req.Referer = $script:Base + '/'
+  if ($script:RefPage) { $req.Referer = $script:Base + $script:RefPage }
   if ($extraCookie) { $req.Headers.Add('Cookie', $extraCookie) }
   if ($method -eq 'POST') {
     $bytes = [Text.Encoding]::UTF8.GetBytes([string]$body)
@@ -116,8 +117,12 @@ function Get-Token($prof) {
 }
 
 function Get-PageToken($prof, [string]$page) {
-  $m = [regex]::Match($page, ($prof.tokenInPage + '[^0-9a-fA-F]{1,40}([0-9a-fA-F]{16,})'))
+  $k = [regex]::Escape([string]$prof.tokenInPage)
+  # <input ... id="hwonttoken" value="HEX"> (attributes in either order)
+  $m = [regex]::Match($page, ('(?s)' + $k + '.{0,120}?["'']([0-9a-fA-F]{16,})["'']'))
+  if (-not $m.Success) { $m = [regex]::Match($page, ('["'']([0-9a-fA-F]{16,})["''][^<>]{0,120}' + $k)) }
   if ($m.Success) { return $m.Groups[1].Value }
+  Log 'page token not found, using GetRandCount'
   return (Get-Token $prof)
 }
 
@@ -241,7 +246,10 @@ function Post-Change($cfg, [string]$urlTpl, [string]$bodyTpl, $vals) {
   $url = Fill $urlTpl $vals
   $body = Fill $bodyTpl $vals
   Log ('POST ' + $url)
-  $null = Invoke-Router 'POST' $url $body ''
+  $script:RefPage = $prof.filterPage
+  try { $res = Invoke-Router 'POST' $url $body '' } finally { $script:RefPage = $null }
+  $short = ($res -replace '\s+', ' '); if ($short.Length -gt 200) { $short = $short.Substring(0, 200) }
+  Log ('router said: ' + $short)
 }
 
 function Normalize-Mac([string]$mac) {

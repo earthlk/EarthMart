@@ -81,6 +81,8 @@ if /i not "%~dp0"=="%RUNDIR%\" (
   if exist "%~dp0EarthMart-NetHelper.ps1" copy /y "%~dp0EarthMart-NetHelper.ps1" "%RUNDIR%\EarthMart-NetHelper.ps1" >nul
   if exist "%~dp0net-profile.json" if not exist "%RUNDIR%\net-profile.json" copy /y "%~dp0net-profile.json" "%RUNDIR%\net-profile.json" >nul
 )
+rem Stop an older copy first so an updated helper file takes effect.
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*EarthMart-NetHelper.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
 if exist "%RUNDIR%\EarthMart-NetHelper.ps1" (
   start "EarthMart Net" /min powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%RUNDIR%\EarthMart-NetHelper.ps1"
   echo net helper started >> "%LOG%"

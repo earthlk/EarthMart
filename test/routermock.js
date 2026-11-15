@@ -16,7 +16,7 @@ module.exports = function startRouter(opts) {
       const u = new URL(req.url, 'http://x');
       const send = (txt, headers) => { res.writeHead(200, Object.assign({ 'Content-Type': 'text/html' }, headers || {})); res.end(txt); };
       if (u.pathname === '/') return send(loginPage, { 'Set-Cookie': 'Cookie=body:Language:english:id=-1; path=/' });
-      if (u.pathname === '/asp/GetRandCount.asp') return send('﻿' + st.token);
+      if (u.pathname === '/asp/GetRandCount.asp') { if (st.sid && authed(req)) { st.rand = (Date.now().toString(16) + 'f00d').padEnd(32, '9'); return send('\ufeff' + st.rand); } return send('\ufeff' + st.token); }
       if (u.pathname === '/login.cgi') {
         const f = qs.parse(body);
         const ok = f.UserName === 'admin' && Buffer.from(f.PassWord || '', 'base64').toString() === st.pass && f['x.X_HW_Token'] === st.token;
@@ -30,12 +30,13 @@ module.exports = function startRouter(opts) {
         return send('var UserDevinfo = new Array(' + st.devices.map(d => 'new USERDevice("InternetGatewayDevice.LANDevice.1.X_HW_UserDev.1","' + d[0] + '","' + hex(d[1]) + '","' + d[2] + '","' + d[3] + '")').join(',') + ',null);');
       }
       if (u.pathname === '/html/bbsp/macfilter/macfilter.asp') {
-        return send('<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.token + '"><script>var MacFilterRight = "' + st.enabled + '"; var MacFilterPolicy = "' + st.policy + '";\n' +
+        st.pageToken = 'be' + Math.random().toString(16).slice(2).padEnd(14, '0') + 'c0ffee11c0ffee11c0ffee11c0ffee11';
+        return send('<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '"><script>var MacFilterRight = "' + st.enabled + '"; var MacFilterPolicy = "' + st.policy + '";\n' +
           'var MacFilter = new Array(' + st.list.map(e => 'new stMacFilter("InternetGatewayDevice.X_HW_Security.MacFilter.' + e.n + '","' + hex(e.mac) + '","' + e.name + '")').join(',') + ',null);</script>');
       }
       const f = qs.parse(body);
       st.posts.push({ path: u.pathname + u.search, body: f });
-      if (f['x.X_HW_Token'] !== st.token) return send('token error');
+      if (!st.pageToken || f['x.X_HW_Token'] !== st.pageToken) return send('token error');
       if (u.pathname === '/html/bbsp/macfilter/add.cgi') { if (!f['x.SourceMACAddress']) return send('bad'); st.list.push({ n: ++st.seq, mac: String(f['x.SourceMACAddress']).toUpperCase(), name: f['x.DeviceAlias'] || '' }); return send('ok'); }
       if (u.pathname === '/html/bbsp/macfilter/del.cgi') { const k = Object.keys(f).find(x => x.startsWith('InternetGatewayDevice.X_HW_Security.MacFilter.')); st.list = st.list.filter(e => 'InternetGatewayDevice.X_HW_Security.MacFilter.' + e.n !== k); return send('ok'); }
       if (u.pathname === '/html/bbsp/macfilter/set.cgi') { st.enabled = Number(f['x.MacFilterRight']); st.policy = Number(f['x.MacFilterPolicy']); return send('ok'); }
