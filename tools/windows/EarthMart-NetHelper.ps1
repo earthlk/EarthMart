@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.5'
+$Version = '1.6'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -275,6 +275,20 @@ function Connect-Router($cfg, [bool]$force, [string]$code = '') {
     if ($sn.Length -gt 700) { $sn = $sn.Substring(0, 700) }
     Log ('login failed with ' + $mode + ' - router answered: ' + $sn)
     Log ('filter page after login: ' + ([string]$fp).Length + ' chars, title=' + [regex]::Match([string]$fp, '(?i)<title>([^<]{0,60})').Groups[1].Value)
+    # The router's error page says why (wrong code / wrong password / locked): log its variables and messages.
+    if ($rl -and $rl -notmatch '^/?$') {
+      try {
+        $ep = Invoke-Router 'GET' ('/' + $rl.TrimStart('/')) '' ''
+        $hints = @()
+        foreach ($m in [regex]::Matches($ep, '(?im)^[^\r\n]*(?:err|lock|fail|retr|check|times|count|incorrect|wrong)[^\r\n]*$')) {
+          $l = ($m.Value -replace '\s+', ' ').Trim()
+          if ($l.Length -gt 160) { $l = $l.Substring(0, 160) }
+          if ($l -notmatch '(?i)<script src|\.js|\.css|function\s*\(' -and $hints.Count -lt 25) { $hints += $l }
+        }
+        Log ('error page ' + $rl + ' (' + $ep.Length + ' chars): ' + ($hints -join ' | '))
+        Set-Content -Path (Join-Path $tmp 'earthmart-loginerror.txt') -Value $ep -Encoding UTF8
+      } catch { }
+    }
     if ($sn -match '(?i)retri|locked') { $script:Jar = $null; throw 'router locked: too many tries, wait a minute and try again' }
     if ($sn -match '(?i)captcha|checkcode') { break }
   }
