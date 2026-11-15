@@ -76,6 +76,15 @@ if exist "%HELPER%" powershell -NoProfile -ExecutionPolicy Bypass -File "%HELPER
 echo old shop screen closed >> "%LOG%"
 timeout /t 1 /nobreak >nul
 
+rem Shop internet helper (router whitelist): runs hidden on 127.0.0.1:8765, from the plain-English folder.
+if /i not "%~dp0"=="%RUNDIR%\" (
+  if exist "%~dp0EarthMart-NetHelper.ps1" copy /y "%~dp0EarthMart-NetHelper.ps1" "%RUNDIR%\EarthMart-NetHelper.ps1" >nul
+  if exist "%~dp0net-profile.json" if not exist "%RUNDIR%\net-profile.json" copy /y "%~dp0net-profile.json" "%RUNDIR%\net-profile.json" >nul
+)
+if exist "%RUNDIR%\EarthMart-NetHelper.ps1" (
+  start "EarthMart Net" /min powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%RUNDIR%\EarthMart-NetHelper.ps1"
+  echo net helper started >> "%LOG%"
+)
 echo starting Chrome >> "%LOG%"
 set "COMMON=--user-data-dir="%KDIR%" --no-first-run --no-default-browser-check --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch --kiosk-printing"
 

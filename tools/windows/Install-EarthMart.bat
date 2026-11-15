@@ -9,7 +9,7 @@ rem  Plain ASCII on purpose.
 rem ==================================================================
 set "SRC=%~dp0"
 set "DEST=%LocalAppData%\EarthMart"
-for %%F in (EarthMart.html EarthMart-Counter.bat EarthMart-BackOffice.bat EarthMart-Helper.ps1 Make-Shortcuts.ps1) do (
+for %%F in (EarthMart.html EarthMart-Counter.bat EarthMart-BackOffice.bat EarthMart-Helper.ps1 EarthMart-NetHelper.ps1 net-profile.json Make-Shortcuts.ps1) do (
   if not exist "%SRC%%%F" (
     echo Missing %%F - keep all setup files together in one folder.
     pause
@@ -50,6 +50,8 @@ copy /y "%SRC%EarthMart-Counter.bat" "%DEST%\EarthMart-Counter.bat" >nul || goto
 copy /y "%SRC%EarthMart-BackOffice.bat" "%DEST%\EarthMart-BackOffice.bat" >nul || goto :copyfail
 copy /y "%SRC%Make-Shortcuts.ps1" "%DEST%\Make-Shortcuts.ps1" >nul || goto :copyfail
 copy /y "%SRC%EarthMart-Helper.ps1" "%DEST%\EarthMart-Helper.ps1" >nul || goto :copyfail
+copy /y "%SRC%EarthMart-NetHelper.ps1" "%DEST%\EarthMart-NetHelper.ps1" >nul || goto :copyfail
+copy /y "%SRC%net-profile.json" "%DEST%\net-profile.json" >nul || goto :copyfail
 rem Old per-mode launcher copies from earlier versions: one launcher now reads the settings file.
 if exist "%DEST%\EarthMart-Counter-2Screens.bat" del "%DEST%\EarthMart-Counter-2Screens.bat"
 if exist "%DEST%\EarthMart-Counter-2Screens-Left.bat" del "%DEST%\EarthMart-Counter-2Screens-Left.bat"

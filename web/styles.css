@@ -840,3 +840,38 @@ a{color:var(--brand-text)}
 #app.m .set-nav button small{display:none}
 #app.m .set-cols{grid-template-columns:1fr}
 @media (max-width:1100px){ .set-cols{grid-template-columns:1fr} }
+/* Shop internet (whitelist) */
+.net-wrap{position:relative}
+.net-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;align-items:start}
+.net-master{display:flex;align-items:center;gap:16px}
+.net-counts{display:flex;gap:18px;text-align:center}
+.net-counts b{display:block;font-size:24px}.net-counts small{font-size:12px;color:var(--muted)}
+.switch{position:relative;width:46px;height:26px;border-radius:13px;border:0;background:var(--line-strong);cursor:pointer;flex:none;padding:0}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .15s}
+.switch.on{background:var(--brand)}.switch.on::after{left:23px}
+.switch.big{width:58px;height:32px;border-radius:16px}.switch.big::after{width:26px;height:26px}.switch.big.on::after{left:29px}
+.switch:disabled{opacity:.55;cursor:not-allowed}
+.switch:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+.net-new{display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:14px;background:var(--warn-soft);border:1px solid #F2C9A8}
+.net-badge{width:24px;height:24px;border-radius:50%;background:var(--warn);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}
+.net-newrow{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:var(--surface);border:1px solid #F2C9A8}
+.net-table td,.net-table th{padding:9px 8px}
+.net-table th{font-size:12px;color:var(--muted);border-bottom:2px solid var(--ink)}
+.net-table tr.off{opacity:.65}
+.net-table .r{text-align:right}
+.net-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--line-strong);margin-right:8px;vertical-align:middle}
+.net-dot.on{background:var(--brand)}
+.linkish{border:0;background:transparent;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-align:left;display:inline-flex;align-items:center;gap:4px}
+.linkish:hover b{text-decoration:underline}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px}
+.net-tip{font-size:13px;color:var(--muted);line-height:1.65}.net-tip b{color:var(--ink);font-size:15px}
+.net-mini{display:grid;grid-template-columns:1fr 170px 90px;gap:8px;padding:6px 0;border-bottom:1px solid var(--line-soft);font-size:14px}
+.net-chk{display:flex;gap:12px;align-items:center;padding:11px 13px;border:1px solid var(--line);border-radius:12px}
+.net-chk>span{width:26px;height:26px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:none}
+.net-chk>span.ok{background:var(--brand)}.net-chk>span.bad{background:var(--warn)}
+.net-chk>div{display:flex;flex-direction:column}.net-chk small{font-size:13px;color:var(--muted)}
+.net-sumline{display:flex;justify-content:space-between;padding:11px 13px;border-radius:12px;background:var(--surface-muted)}
+.net-busy{position:absolute;inset:0;background:rgba(255,255,255,.6);display:flex;align-items:flex-start;justify-content:center;padding-top:120px;z-index:5;border-radius:14px}
+.net-busy span{padding:10px 18px;border-radius:12px;background:var(--ink);color:var(--surface);font-weight:600}
+@media (max-width:1180px){ .net-grid{grid-template-columns:1fr} }
+#app.m .net-master{flex-wrap:wrap} #app.m .net-table th:nth-child(3),#app.m .net-table td:nth-child(3){display:none}

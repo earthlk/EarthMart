@@ -875,7 +875,7 @@ function go(view) {
   if (view === 'shift' && S.shift) loadShift();
   if (view === 'reports') loadReport();
   if (view === 'acct') loadAcct();
-  if (view === 'settings') loadSettings();
+  if (view === 'settings') { loadSettings(); if (S.setTab === 'net') loadNet(); }
   if (view === 'home') loadHome();
 }
 
@@ -5008,7 +5008,7 @@ var ACC_ACTIONS = {
   accSetup: function () { accSetupModal(loadAcct); },
   accPrint: function () { var b = $('#pl-print'); if (b) accPrintHtml('<h2>' + esc(S.settings.shopName || '') + '</h2>' + b.innerHTML); },
   accTaxCsv: accTaxCsv,
-  setTab: function (el) { S.setTab = el.getAttribute('data-t'); $all('.set-nav button').forEach(function (b) { b.classList.toggle('on', b === el); }); $all('.set-sec').forEach(function (x) { x.classList.toggle('hidden', x.getAttribute('data-sec') !== S.setTab); }); },
+  setTab: function (el) { S.setTab = el.getAttribute('data-t'); $all('.set-nav button').forEach(function (b) { b.classList.toggle('on', b === el); }); $all('.set-sec').forEach(function (x) { x.classList.toggle('hidden', x.getAttribute('data-sec') !== S.setTab); }); if (S.setTab === 'net') loadNet(); },
   accTaxPrint: function () { var b = $('#acc-body'); if (b) accPrintHtml('<h2>' + esc(S.settings.shopName || '') + ' · สรุปรายได้–รายจ่าย ' + (acc().taxHalf ? 'ม.ค.–มิ.ย. ' : 'ทั้งปี ') + beYear(acc().taxYear) + '</h2>' + b.innerHTML); },
   mExpense: function () { accCats().then(function () { expenseModal(null, function () { toast('บันทึกแล้ว'); }); }); }
 };
@@ -5017,6 +5017,266 @@ function accCats() {
   if (S.accCats && S.accCats.length) return Promise.resolve(S.accCats);
   return api('expenses', S.token, { from: today(), to: today() }).then(function (d) { S.accCats = d.cats; return d.cats; });
 }
+
+/* =================================================================== */
+/* Shop internet: router MAC whitelist through the helper on this PC   */
+/* =================================================================== */
+
+var NET_URL = window.EM_NET_URL || 'http://127.0.0.1:8765';
+var NET_TYPES = [['phone', 'มือถือ'], ['pc', 'คอม'], ['tablet', 'แท็บเล็ต'], ['camera', 'กล้อง'], ['other', 'อื่น ๆ']];
+function netTypeTh(t) { return (NET_TYPES.filter(function (x) { return x[0] === t; })[0] || NET_TYPES[4])[1]; }
+function netRandomMac(mac) { return (parseInt(String(mac).charAt(1), 16) & 2) === 2; }
+
+function netCall(path, body, timeoutMs) {
+  var ctl = window.AbortController ? new AbortController() : null;
+  var t = ctl ? setTimeout(function () { ctl.abort(); }, timeoutMs || 60000) : null;
+  return fetch(NET_URL + path, {
+    method: body ? 'POST' : 'GET', signal: ctl ? ctl.signal : undefined,
+    headers: Object.assign({ 'Content-Type': 'application/json' }, store('em_netkey') ? { 'X-EM-Key': store('em_netkey') } : {}),
+    body: body ? JSON.stringify(body) : undefined
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (t) clearTimeout(t);
+    if (!d.ok) { var e = new Error(netErrTh(d.error)); e.code = d.code; throw e; }
+    return d;
+  }, function (e) { if (t) clearTimeout(t); var x = new Error('ติดต่อตัวช่วยอินเทอร์เน็ตไม่ได้'); x.code = 'OFF'; throw x; });
+}
+function netErrTh(m) {
+  m = String(m || '');
+  if (/login failed/.test(m)) return 'ล็อกอินเราเตอร์ไม่ได้ — ตรวจชื่อผู้ใช้ / รหัสผ่าน';
+  if (/not reachable/.test(m)) return 'ติดต่อเราเตอร์ไม่ได้ — เครื่องนี้ต่อเน็ตร้านอยู่ไหม';
+  if (/did not keep|did not remove|did not switch/.test(m)) return 'เราเตอร์ไม่รับคำสั่ง — กด "ทดสอบระบบ" ในตั้งค่าการเชื่อม';
+  if (/list is full/.test(m)) return 'รายชื่อในเราเตอร์เต็มแล้ว';
+  if (/12 hex/.test(m)) return 'MAC ต้องมี 12 หลัก (0-9, A-F)';
+  return m;
+}
+
+function netBox() { return $('#netbox'); }
+
+function loadNet() {
+  var box = netBox();
+  if (!box) return;
+  clearInterval(S.netTimer);
+  S.netTimer = setInterval(function () { if (S.view === 'settings' && (S.setTab || 'shop') === 'net' && !$('.modal')) loadNet(); else if (S.view !== 'settings') clearInterval(S.netTimer); }, 60000);
+  var saved = api('netDevices', S.token).catch(function () { return []; });
+  var users = api('listUsers', S.token).catch(function () { return []; });
+  netCall('/ping', null, 3000).then(function (p) {
+    S.netPing = p;
+    if (!p.configured || !store('em_netkey')) return Promise.all([saved, users]).then(function (r) { drawNetSetup(r[0]); });
+    return Promise.all([netCall('/state'), saved, users]).then(function (r) {
+      S.net = { st: r[0], saved: r[1], users: r[2], local: p.localMacs || [] };
+      drawNet();
+    });
+  }).catch(function (e) {
+    if (e.code === 'KEY' || e.code === 'SETUP') return saved.then(drawNetSetup);
+    Promise.all([saved, users]).then(function (r) { drawNetOffline(r[0], e); });
+  });
+}
+
+function netSavedList(saved) {
+  if (!saved.length) return '';
+  return '<div class="card pad"><b>รายชื่อที่บันทึกไว้</b><div class="muted" style="font-size:13px;margin:4px 0 8px">ดูได้อย่างเดียว · เปิด/ปิดสิทธิ์ได้ที่เครื่องหน้าร้าน</div>' +
+    saved.map(function (d) { return '<div class="net-mini"><b>' + esc(d.name || d.mac) + '</b><span class="mono muted">' + esc(d.mac) + '</span><span class="' + (d.allowed ? 'brand-text' : 'warn-text') + '">' + (d.allowed ? 'อนุญาต' : 'ไม่อนุญาต') + '</span></div>'; }).join('') + '</div>';
+}
+
+function drawNetOffline(saved, e) {
+  var box = netBox(); if (!box) return;
+  box.innerHTML = '<div class="card pad col" style="gap:10px;max-width:720px"><h2>อินเทอร์เน็ตร้าน</h2>' +
+    '<div class="banner warn" style="border-radius:10px">' + esc(e.message) + '</div>' +
+    '<div class="muted" style="line-height:1.7">หน้านี้สั่งเราเตอร์ผ่าน "ตัวช่วยอินเทอร์เน็ต" ที่ติดตั้งมากับ EarthMart บนเครื่องหน้าร้าน<br>' +
+    '• ใช้ได้เมื่ออยู่ที่เครื่องหน้าร้าน ที่เปิดด้วยไอคอน <b>EarthMart Counter</b><br>• ถ้ายังไม่มี: ดาวน์โหลดชุดติดตั้งล่าสุด (ตั้งค่า › การเชื่อมต่อ / ติดตั้ง) แล้วรัน Install-EarthMart.bat อีกครั้ง</div>' +
+    '<button class="btn" data-act="netReload" style="align-self:flex-start">ลองใหม่</button></div>' + netSavedList(saved);
+}
+
+function drawNetSetup(saved) {
+  var box = netBox(); if (!box) return;
+  box.innerHTML = '<div class="card pad col" style="gap:12px;max-width:560px"><h2>ตั้งค่าการเชื่อมเราเตอร์</h2><div class="muted">ทำครั้งเดียวบนเครื่องหน้าร้าน · ใช้รหัส admin ของเราเตอร์ AIS (หน้า 192.168.1.1)</div>' +
+    netSetupFields() + '<div class="muted" style="font-size:13px;line-height:1.6">รหัสผ่านเก็บในเครื่องหน้าร้านนี้เท่านั้น (ไม่ส่งขึ้น Google / GitHub)</div>' +
+    '<button class="btn primary" data-act="netPair">เชื่อมเราเตอร์</button></div>' + netSavedList(saved || []);
+}
+
+function netSetupFields() {
+  var p = S.netPing || {};
+  return '<div class="field"><label for="net-host">ที่อยู่เราเตอร์</label><input id="net-host" value="' + esc(p.host || '192.168.1.1') + '"></div>' +
+    '<div class="field"><label for="net-user">ชื่อผู้ใช้</label><input id="net-user" value="admin" autocomplete="off"></div>' +
+    '<div class="field"><label for="net-pass">รหัสผ่าน</label><input id="net-pass" type="password" autocomplete="off"></div>';
+}
+
+function netRows() {
+  var n = S.net, st = n.st, byMac = {};
+  var get = function (mac) { return byMac[mac] || (byMac[mac] = { mac: mac }); };
+  (st.devices || []).forEach(function (d) { var r = get(d.mac); r.ip = d.ip; r.host = d.name; r.online = d.online; });
+  (n.saved || []).forEach(function (d) { var r = get(d.mac); r.saved = d; });
+  (st.entries || []).forEach(function (e) { var r = get(e.mac); r.allowed = true; r.routerName = e.name; });
+  return Object.keys(byMac).map(function (k) {
+    var r = byMac[k];
+    r.local = n.local.indexOf(r.mac) >= 0;
+    r.locked = r.local || !!(r.saved && r.saved.locked);
+    r.name = (r.saved && r.saved.name) || (r.local ? 'เครื่องหน้าร้านนี้' : '') || r.routerName || r.host || '';
+    r.type = (r.saved && r.saved.type) || (r.local ? 'pc' : '');
+    r.isNew = !r.allowed && !r.saved;
+    return r;
+  });
+}
+
+function drawNet() {
+  var box = netBox(); if (!box) return;
+  var n = S.net, st = n.st, rows = netRows();
+  var listed = rows.filter(function (r) { return !r.isNew; }).sort(function (a, b) { return (b.allowed - a.allowed) || (b.locked - a.locked) || String(a.name).localeCompare(String(b.name)); });
+  var fresh = rows.filter(function (r) { return r.isNew; });
+  var on = st.enabled && st.policy === 'white';
+  var users = {};
+  (n.users || []).forEach(function (u) { users[u.userId] = u.name; });
+  var lock = '<svg aria-label="กันปิดสิทธิ์" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+  box.innerHTML = '<div class="net-grid"><div class="col" style="gap:14px;min-width:0">' +
+    '<div class="card pad net-master"><button type="button" class="switch big' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '" aria-label="เปิดระบบ Whitelist" data-act="netMode"></button>' +
+    '<div class="grow"><b style="font-size:18px">เปิดระบบ Whitelist</b><div class="muted" style="font-size:13px">ใช้เน็ตร้านได้เฉพาะเครื่องที่อนุญาต · ปิดสวิตช์ = ทุกเครื่องใช้ได้ปกติ</div>' +
+    (st.enabled && st.policy === 'black' ? '<div class="warn-text" style="font-size:13px">เราเตอร์ตั้งเป็น Blacklist อยู่ (ตั้งจากหน้า 192.168.1.1) — เปิดสวิตช์เพื่อเปลี่ยนเป็น Whitelist</div>' : '') + '</div>' +
+    '<div class="net-counts"><div><b class="brand-text">' + listed.filter(function (r) { return r.allowed; }).length + '</b><small>อนุญาต</small></div><div><b class="warn-text">' + listed.filter(function (r) { return !r.allowed; }).length + '</b><small>ไม่อนุญาต</small></div><div><b class="amber">' + fresh.length + '</b><small>เครื่องใหม่</small></div></div></div>' +
+    (fresh.length ? '<div class="net-new"><div class="row" style="gap:8px"><span class="net-badge">' + fresh.length + '</span><b>เครื่องใหม่ที่ยังไม่อยู่ในรายชื่อ</b><span class="muted" style="font-size:13px">' + (on ? 'ตอนนี้ใช้เน็ตไม่ได้ จนกว่าจะกดอนุญาต' : 'เปิด Whitelist แล้วจะใช้เน็ตไม่ได้') + '</span></div>' +
+      fresh.map(function (r) {
+        return '<div class="net-newrow"><div class="grow"><b>' + esc(r.host || 'ไม่ทราบชื่อ') + '</b> <small class="muted">· ชื่อที่เครื่องบอกมา</small><div class="muted" style="font-size:12px">' + esc(r.ip || '') + ' · <span class="mono">' + esc(r.mac) + '</span>' + (netRandomMac(r.mac) ? ' · MAC แบบสุ่ม' : '') + '</div></div>' +
+          '<button class="btn sm" data-act="netDecline" data-mac="' + r.mac + '">ไม่อนุญาต</button><button class="btn sm primary" data-act="netNew" data-mac="' + r.mac + '">ตั้งชื่อ + อนุญาต</button></div>';
+      }).join('') + '</div>' : '') +
+    '<div class="card pad" style="min-width:0"><div class="row" style="gap:8px;margin-bottom:6px"><b style="font-size:17px">เครื่องในรายชื่อ</b><span class="grow"></span><button class="btn sm" data-act="netManual">+ เพิ่มเครื่องเอง (ใส่ MAC)</button></div>' +
+    '<table class="table net-table"><thead><tr><th>ชื่อเครื่อง</th><th>IP ตอนนี้</th><th>MAC</th><th>สิทธิ์</th><th></th></tr></thead><tbody>' +
+    (listed.map(function (r) {
+      return '<tr class="' + (r.allowed ? '' : 'off') + '"><td><button type="button" class="linkish" data-act="netEdit" data-mac="' + r.mac + '"><i class="net-dot' + (r.online ? ' on' : '') + '"></i><b>' + esc(r.name || r.mac) + '</b> ' + (r.locked ? lock : '') + '</button>' +
+        '<div class="muted" style="font-size:12px;padding-left:18px">' + netTypeTh(r.type) + (r.saved && r.saved.ownerId && users[r.saved.ownerId] ? ' · ' + esc(users[r.saved.ownerId]) : '') + (r.online ? '' : ' · ออฟไลน์') + '</div></td>' +
+        '<td class="muted num">' + esc(r.ip || '—') + '</td><td class="mono muted">' + esc(r.mac) + '</td><td class="' + (r.allowed ? 'brand-text' : 'warn-text') + '"><b>' + (r.allowed ? 'อนุญาต' : 'ไม่อนุญาต') + '</b></td>' +
+        '<td class="r"><button type="button" class="switch' + (r.allowed ? ' on' : '') + '" role="switch" aria-checked="' + !!r.allowed + '" aria-label="อนุญาต ' + esc(r.name || r.mac) + '" data-act="netToggle" data-mac="' + r.mac + '"' + (r.locked && r.allowed ? ' disabled title="เครื่องสำคัญ — ปิดสิทธิ์ไม่ได้"' : '') + '></button></td></tr>';
+    }).join('') || '<tr><td colspan="5" class="muted">ยังไม่มีเครื่องในรายชื่อ · กด "ตั้งชื่อ + อนุญาต" ที่เครื่องใหม่</td></tr>') + '</tbody></table></div></div>' +
+    '<aside class="col" style="gap:14px"><div class="card pad"><div class="row" style="gap:8px"><i class="net-dot on"></i><b>เชื่อมเราเตอร์แล้ว</b></div><div style="font-size:14px;line-height:1.7;margin-top:6px"><span class="muted">รุ่น</span> ' + esc((S.netPing || {}).profile || '') +
+    '<br><span class="muted">ที่อยู่</span> ' + esc((S.netPing || {}).host || '') + '<br><span class="muted">อัปเดตล่าสุด</span> ' + esc(st.at || '') + ' (ทุก 1 นาที)</div>' +
+    '<div class="row" style="gap:8px;margin-top:10px"><button class="btn sm" data-act="netReload">รีเฟรช</button><button class="btn sm" data-act="netSetup">ตั้งค่าการเชื่อม</button></div></div>' +
+    '<div class="card pad net-tip"><b>กันล็อกตัวเอง</b><br>' + lock + ' เครื่องหน้าร้านนี้และเครื่องที่ติ๊ก "เครื่องสำคัญ" ปิดสิทธิ์ไม่ได้ · ถ้าตั้งผิด ยังเข้า 192.168.1.1 → Basic Setup → Security Configuration → MAC Address Filtering แล้วเอาติ๊ก Enable ออกได้เสมอ</div>' +
+    '<div class="card pad net-tip"><b>มือถือที่สุ่ม MAC</b><br>iPhone / Android รุ่นใหม่เปลี่ยน MAC ต่อ WiFi · ปิด "ที่อยู่ส่วนตัว / MAC แบบสุ่ม" สำหรับ WiFi ร้านครั้งเดียว ไม่งั้นจะขึ้นเป็นเครื่องใหม่บ่อย</div></aside></div>';
+}
+
+function netBusy(on, text) {
+  var b = netBox(); if (!b) return;
+  var x = $('.net-busy', b);
+  if (on && !x) { x = document.createElement('div'); x.className = 'net-busy'; b.appendChild(x); }
+  if (x) { if (on) x.innerHTML = '<span>' + esc(text || 'กำลังสั่งเราเตอร์…') + '</span>'; else x.remove(); }
+}
+
+/** Apply a router change, then refresh. */
+function netDo(path, body, label) {
+  netBusy(true, label);
+  return netCall(path, body).then(function (st) { S.net.st = st; netBusy(false); drawNet(); return st; })
+    .catch(function (e) { netBusy(false); toast(e.message, true); throw e; });
+}
+
+function netRow(mac) { return netRows().filter(function (r) { return r.mac === mac; })[0] || { mac: mac }; }
+
+/** Name / type / owner / important flag; allow=true also lets it on the internet. */
+function netDeviceModal(r, mode) {
+  var users = (S.net && S.net.users) || [];
+  var sv = r.saved || {};
+  var title = mode === 'new' ? 'เครื่องใหม่ · ตั้งชื่อ + อนุญาต' : mode === 'manual' ? 'เพิ่มเครื่องเอง' : 'แก้ข้อมูลเครื่อง';
+  var m = openModal('<header><h1>' + title + '</h1>' + (r.mac && mode !== 'manual' ? '<span class="muted">' + esc(r.ip || '') + ' · <span class="mono">' + esc(r.mac) + '</span></span>' : '') + '</header><form class="body col" style="gap:12px">' +
+    (mode === 'manual' ? '<div class="field"><label for="nd-mac">MAC address</label><input id="nd-mac" class="mono" placeholder="เช่น A4:83:E7:22:91:BC" autocomplete="off"></div>' : '') +
+    '<div class="field"><label for="nd-name">ชื่อเครื่อง</label><input id="nd-name" class="big-input" value="' + esc(sv.name || (mode === 'edit' ? r.name : '') || '') + '" placeholder="' + esc(r.host || 'เช่น มือถือแบงค์') + '"></div>' +
+    '<div class="field"><span class="lbl">ประเภท</span>' + chipRadio('ndtype', NET_TYPES.map(function (t) { return { v: t[0], t: t[1] }; }), sv.type || r.type || 'phone') + '</div>' +
+    '<div class="field"><span class="lbl">เป็นของใคร (ไม่บังคับ)</span>' + chipRadio('ndowner', [{ v: '', t: 'ไม่ระบุ' }].concat(users.filter(function (u) { return u.active !== false; }).map(function (u) { return { v: u.userId, t: u.name }; })), sv.ownerId || '') + '</div>' +
+    '<label class="row" style="gap:8px"><input type="checkbox" id="nd-lock"' + (sv.locked || r.local ? ' checked' : '') + (r.local ? ' disabled' : '') + '> เครื่องสำคัญ — กันปิดสิทธิ์ (เช่น มือถือเจ้าของ, แท็บเล็ตจอลูกค้า)</label>' +
+    (r.mac && netRandomMac(r.mac) ? '<div class="muted" style="font-size:13px;padding:10px 12px;border-radius:10px;background:var(--surface-muted)">MAC นี้เป็นแบบสุ่ม — ถ้าเป็นมือถือพนักงาน ให้ปิด MAC แบบสุ่มสำหรับ WiFi ร้านก่อน ไม่งั้นพรุ่งนี้อาจขึ้นเป็นเครื่องใหม่</div>' : '') +
+    '</form><footer>' + (mode === 'edit' && !r.local ? '<button class="btn danger" data-x="del">ลบออกจากรายชื่อ</button><span class="grow"></span>' : '') +
+    '<button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">' + (mode === 'edit' ? 'บันทึก' : 'อนุญาต · ใช้เน็ตได้') + '</button></footer>');
+  $('[data-x=no]', m).onclick = function () { closeModal(); };
+  var del = $('[data-x=del]', m);
+  if (del) del.onclick = function () {
+    closeModal();
+    (r.allowed ? netDo('/block', { mac: r.mac }, 'กำลังลบออกจากเราเตอร์…') : Promise.resolve()).then(function () { return api('deleteNetDevice', S.token, r.mac); }).then(loadNet).catch(function () {});
+  };
+  var save = function () {
+    var mac = mode === 'manual' ? $('#nd-mac', m).value.trim() : r.mac;
+    var clean = String(mac || '').replace(/[^0-9a-fA-F]/g, '');
+    if (clean.length !== 12) return toast('MAC ต้องมี 12 หลัก (0-9, A-F)', true);
+    var d = { mac: mac, name: $('#nd-name', m).value.trim() || r.host || '', type: radioVal(m, 'ndtype'), ownerId: radioVal(m, 'ndowner'), locked: $('#nd-lock', m).checked || !!r.local };
+    if (!d.name) return toast('ใส่ชื่อเครื่อง', true);
+    closeModal();
+    var step = mode === 'edit' ? Promise.resolve() : netDo('/allow', { mac: mac, name: d.name }, 'กำลังเพิ่มในเราเตอร์…');
+    step.then(function () { if (mode !== 'edit') d.allowed = true; return api('saveNetDevice', S.token, d); })
+      .then(function () { toast(mode === 'edit' ? 'บันทึกแล้ว' : d.name + ' ใช้เน็ตได้แล้ว'); loadNet(); }).catch(function (e) { if (e && e.message) toast(e.message, true); });
+  };
+  $('[data-x=ok]', m).onclick = save;
+  $('form', m).onsubmit = function (e) { e.preventDefault(); save(); };
+}
+
+/** Turning the whitelist on: make sure this PC (and the important devices) can still get online. */
+function netEnableModal() {
+  var rows = netRows();
+  var allowed = rows.filter(function (r) { return r.allowed; });
+  var hereOk = rows.some(function (r) { return r.local && r.allowed; });
+  var importantOk = rows.filter(function (r) { return r.locked && !r.local; });
+  var fresh = rows.filter(function (r) { return r.isNew; });
+  var chk = function (ok, t, s) { return '<div class="net-chk"><span class="' + (ok ? 'ok' : 'bad') + '">' + (ok ? '✓' : '!') + '</span><div><b>' + t + '</b><small>' + s + '</small></div></div>'; };
+  var m = openModal('<header><h1>เปิดระบบ Whitelist?</h1><span class="muted">เครื่องที่ไม่อยู่ในรายชื่อจะใช้เน็ตร้านไม่ได้ทันที</span></header><div class="body col" style="gap:10px"><b>ตรวจก่อนเปิด</b>' +
+    chk(hereOk, 'เครื่องหน้าร้านนี้อยู่ในรายชื่อ', hereOk ? 'ปลอดภัย' : 'ต้องอนุญาตเครื่องนี้ก่อน ไม่งั้นหน้าร้านจะใช้เน็ตไม่ได้') +
+    chk(importantOk.some(function (r) { return r.allowed; }), 'มีเครื่องสำคัญอื่นอยู่ในรายชื่อ', importantOk.length ? importantOk.map(function (r) { return esc(r.name); }).join(', ') : 'แนะนำ: มือถือเจ้าของ · แท็บเล็ตจอลูกค้า (ติ๊ก "เครื่องสำคัญ")') +
+    (fresh.length ? chk(false, 'มีเครื่องใหม่ ' + fresh.length + ' เครื่องที่ยังไม่ได้เลือก', 'จะใช้เน็ตไม่ได้หลังเปิด') : '') +
+    '<div class="net-sumline"><span>เครื่องที่ใช้เน็ตได้หลังเปิด</span><b>' + allowed.length + ' เครื่อง</b></div>' +
+    '<div class="muted" style="font-size:13px">ถ้าเปิดแล้วเน็ตหาย: เข้า 192.168.1.1 → Basic Setup → Security Configuration → MAC Address Filtering → เอาติ๊ก Enable ออก</div></div>' +
+    '<footer><button class="btn" data-x="no">กลับไปเลือกเครื่อง</button><button class="btn primary" data-x="ok"' + (hereOk ? '' : ' disabled') + '>เปิด Whitelist</button></footer>');
+  $('[data-x=no]', m).onclick = function () { closeModal(); };
+  $('[data-x=ok]', m).onclick = function () { closeModal(); netDo('/mode', { enabled: true }, 'กำลังเปิด Whitelist…').then(function () { toast('เปิด Whitelist แล้ว'); }).catch(function () {}); };
+}
+
+function netSetupModal() {
+  var m = openModal('<header><h1>ตั้งค่าการเชื่อมเราเตอร์</h1></header><div class="body col" style="gap:12px">' + netSetupFields() +
+    '<div class="row" style="gap:8px;flex-wrap:wrap"><button type="button" class="btn sm" data-x="test">ทดสอบระบบ</button><button type="button" class="btn sm" data-x="probe">เก็บหน้าเว็บเราเตอร์ (ส่งให้ผู้ดูแล)</button></div>' +
+    '<div id="net-out" class="muted" style="font-size:13px;line-height:1.6"></div></div>' +
+    '<footer><button class="btn" data-x="no">ปิด</button><button class="btn primary" data-x="ok">บันทึก · เชื่อมใหม่</button></footer>');
+  var out = $('#net-out', m);
+  $('[data-x=no]', m).onclick = function () { closeModal(); };
+  $('[data-x=test]', m).onclick = function () {
+    out.textContent = 'กำลังทดสอบ (อ่าน · เพิ่มรายการทดสอบ · ลบออก)…';
+    netCall('/test', {}).then(function (r) { out.innerHTML = '<span class="brand-text">ผ่าน ✓</span><br>' + r.steps.map(esc).join('<br>'); }).catch(function (e) { out.innerHTML = '<span class="warn-text">' + esc(e.message) + '</span>'; });
+  };
+  $('[data-x=probe]', m).onclick = function () {
+    out.textContent = 'กำลังเก็บหน้าเว็บของเราเตอร์…';
+    netCall('/probe', {}, 180000).then(function (r) { out.innerHTML = 'เก็บแล้ว ' + r.pages + ' หน้า ที่โฟลเดอร์<br><span class="mono">' + esc(r.folder) + '</span>'; }).catch(function (e) { out.innerHTML = '<span class="warn-text">' + esc(e.message) + '</span>'; });
+  };
+  $('[data-x=ok]', m).onclick = function () { netPair(m); };
+}
+
+function netPair(scope) {
+  var g = function (id) { return ($('#' + id, scope || document) || {}).value || ''; };
+  if (!g('net-pass')) return toast('ใส่รหัสผ่านเราเตอร์', true);
+  var b = netBox();
+  if (b && !scope) netBusy(true, 'กำลังล็อกอินเราเตอร์…');
+  netCall('/pair', { host: g('net-host').trim(), user: g('net-user').trim(), pass: g('net-pass') }).then(function (r) {
+    store('em_netkey', r.key);
+    if (scope) closeModal();
+    netBusy(false);
+    toast('เชื่อมเราเตอร์แล้ว · เจอ ' + (r.devices || []).length + ' เครื่อง');
+    loadNet();
+  }).catch(function (e) { netBusy(false); toast(e.message, true); });
+}
+
+var NET_ACTIONS = {
+  netReload: function () { loadNet(); },
+  netPair: function () { netPair(null); },
+  netSetup: function () { netSetupModal(); },
+  netNew: function (el) { netDeviceModal(netRow(el.getAttribute('data-mac')), 'new'); },
+  netEdit: function (el) { netDeviceModal(netRow(el.getAttribute('data-mac')), 'edit'); },
+  netManual: function () { netDeviceModal({}, 'manual'); },
+  netDecline: function (el) { var r = netRow(el.getAttribute('data-mac')); api('saveNetDevice', S.token, { mac: r.mac, name: r.host || '', allowed: false }).then(loadNet).catch(fail); },
+  netToggle: function (el) {
+    var r = netRow(el.getAttribute('data-mac'));
+    if (r.allowed && r.locked) return toast('เครื่องสำคัญ — ปิดสิทธิ์ไม่ได้', true);
+    var to = !r.allowed;
+    netDo(to ? '/allow' : '/block', { mac: r.mac, name: r.name }, to ? 'กำลังอนุญาต…' : 'กำลังปิดสิทธิ์…')
+      .then(function () { return api('saveNetDevice', S.token, { mac: r.mac, name: r.name, allowed: to }); }).then(function () { toast((r.name || r.mac) + (to ? ' ใช้เน็ตได้' : ' ใช้เน็ตไม่ได้แล้ว')); }).catch(function () {});
+  },
+  netMode: function () {
+    var st = S.net.st, on = st.enabled && st.policy === 'white';
+    if (!on) return netEnableModal();
+    confirm2('ปิดระบบ Whitelist', 'ทุกเครื่องจะใช้เน็ตร้านได้ (รายชื่อยังเก็บไว้)', 'ปิด Whitelist').then(function (ok) {
+      if (ok) netDo('/mode', { enabled: false }, 'กำลังปิด Whitelist…').then(function () { toast('ปิด Whitelist แล้ว'); }).catch(function () {});
+    });
+  }
+};
 
 function printShift(s) {
   var r = function (k, v) { return '<tr><td>' + k + '</td><td style="text-align:right">' + v + '</td></tr>'; };
@@ -5562,6 +5822,7 @@ function renderSettings() {
     '<label class="sr" for="nu-role">สิทธิ์</label><select id="nu-role"><option value="cashier">แคชเชียร์</option><option value="owner">เจ้าของ</option></select>' +
     '<label class="sr" for="nu-pin">PIN</label><input id="nu-pin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN 4–6 หลัก" style="width:120px">' +
     '<button class="btn" type="submit">+ เพิ่ม</button></form></div>' + '') +
+    sec('net', '<div id="netbox" class="net-wrap"><div class="card pad muted">กำลังเชื่อมตัวช่วยอินเทอร์เน็ต…</div></div>') +
     sec('connect', '<div class="card pad col set-card" style="gap:10px">' + '<h2>การเชื่อมต่อ</h2><div class="muted" style="font-size:13px;word-break:break-all">' + esc(conn().url.replace(/(macros\/s\/.{6}).*(.{6}\/exec)/, '$1…$2')) + '</div>' +
     '<div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="copyConnect">คัดลอกลิงก์ตั้งค่าเครื่องอื่น</button><button class="btn sm ghost" data-act="connect">เปลี่ยน</button></div>' +
     '<div class="muted" style="font-size:12px">ลิงก์นี้มี API key — ส่งให้เฉพาะเครื่องของร้าน</div>' +
@@ -5577,7 +5838,7 @@ function renderSettings() {
 }
 
 var SET_TABS = [['shop', 'ร้าน / ใบเสร็จ', 'ชื่อร้าน · พร้อมเพย์ · พิมพ์ · ล็อกจอ'], ['customer', 'จอลูกค้า / สไลด์', 'ข้อความต้อนรับ · โปร · รูปสไลด์'],
-  ['look', 'ธีมสี & LINE', 'โหมดสี · สีหลัก'], ['device', 'เครื่องหน้าร้าน', 'ลงทะเบียน · ลิ้นชักเก็บเงิน'], ['users', 'ผู้ใช้ / PIN', 'พนักงาน · สิทธิ์'],
+  ['look', 'ธีมสี & LINE', 'โหมดสี · สีหลัก'], ['device', 'เครื่องหน้าร้าน', 'ลงทะเบียน · ลิ้นชักเก็บเงิน'], ['users', 'ผู้ใช้ / PIN', 'พนักงาน · สิทธิ์'], ['net', 'อินเทอร์เน็ตร้าน', 'Whitelist · เครื่องที่ใช้เน็ตได้'],
   ['connect', 'การเชื่อมต่อ / ติดตั้ง', 'ลิงก์ตั้งค่าเครื่อง · ไฟล์ติดตั้ง'], ['backup', 'สำรองข้อมูล & บันทึก', 'Backup · ประวัติการทำงาน']];
 
 function drawerSettings() {
@@ -5903,7 +6164,7 @@ document.addEventListener('click', function (e) {
   var el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;
   if (topModal() && !topModal().contains(el)) return;
-  var fn = ACTIONS[el.getAttribute('data-act')] || ACC_ACTIONS[el.getAttribute('data-act')];
+  var fn = ACTIONS[el.getAttribute('data-act')] || ACC_ACTIONS[el.getAttribute('data-act')] || NET_ACTIONS[el.getAttribute('data-act')];
   if (fn) fn(el, e);
 });
 

@@ -878,4 +878,29 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   ok(sh2.shiftId, 'shift 2');
 }
 
+{
+  // Shop internet: device names by MAC (owner only)
+  const h = makeContext({ now: '2026-11-15T03:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m = (fn, ...a) => { const r = c(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  h.createOwner('O', '1111');
+  const T = m('login', m('status').users[0].userId, '1111', 'Dnet0000000000000001').token;
+  m('addUser', T, 'มิว', 'cashier', '2222');
+  const mew = m('listUsers', T).find(u => u.name === 'มิว');
+  const TC = m('login', mew.userId, '2222', 'Dnet0000000000000001').token;
+  ok(!c('netDevices', TC).ok, 'cashier cannot see the network list');
+  ok(!c('saveNetDevice', T, { mac: '12:34' }).ok, 'bad MAC refused');
+  m('saveNetDevice', T, { mac: '3c-52-82-1a-4f-09', name: 'POS หน้าร้าน', type: 'pc', locked: true, allowed: true });
+  m('saveNetDevice', T, { mac: '3C:52:82:1A:4F:09', ownerId: mew.userId });
+  m('saveNetDevice', T, { mac: 'D2:6F:3B:90:AE:14', name: 'HUAWEI-P30', allowed: false });
+  let list = m('netDevices', T);
+  eq(list.map(d => [d.mac, d.name, d.type, d.locked, d.allowed, d.ownerId]), [['3C:52:82:1A:4F:09', 'POS หน้าร้าน', 'pc', true, true, mew.userId], ['D2:6F:3B:90:AE:14', 'HUAWEI-P30', 'other', false, false, '']], 'devices saved, MAC normalised, partial update keeps fields');
+  m('deleteNetDevice', T, 'D2:6F:3B:90:AE:14');
+  eq(m('netDevices', T).length, 1, 'deleted device hidden');
+  m('saveNetDevice', T, { mac: 'D2:6F:3B:90:AE:14', name: 'มือถือแบงค์', allowed: true });
+  eq(m('netDevices', T).find(d => d.mac === 'D2:6F:3B:90:AE:14').name, 'มือถือแบงค์', 'saved again after delete');
+}
+
 console.log('server tests passed:', pass);
