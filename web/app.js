@@ -5043,15 +5043,27 @@ function macModel(host) {
   var h = String(host || '').replace(/[_]+/g, ' ').trim();
   if (!h) return '';
   var m;
+  // Phones name themselves "<owner>'s <model>"; the router shows it as owner-s-model.
+  var own = h.match(/^(.+?)[- ]s[- ](.+)$/i);
+  if (own) h = own[2];
   if (/^(DESKTOP|LAPTOP)-/i.test(h)) return 'คอม Windows';
   if ((m = h.match(/\b(iPhone|iPad|iMac|MacBook(?:[- ]?(?:Air|Pro))?|Apple[- ]?TV|Apple[- ]?Watch)\b/i))) return m[1].replace(/-/g, ' ');
-  if ((m = h.match(/\bGalaxy[- ]?([A-Z]\d{1,3}[A-Za-z+]*(?:[- ](?:Ultra|Plus|FE|5G))?|Tab[- ]?[A-Z]\d*\w*|Note\s?\d+\w*|Z[- ]?(?:Flip|Fold)\s?\d*)/i))) return 'Samsung Galaxy ' + m[1].replace(/-/g, ' ');
+  if ((m = h.match(/\bGalaxy[- ]?([A-Z]\d{1,3}[A-Za-z+]*(?:[- ](?:Ultra|Plus|FE|5G))?|Tab[- ]?[A-Z]\d*\w*|Note\s?\d+\w*|Z[- ]?(?:Flip|Fold)[- ]?\d*)/i))) return 'Samsung Galaxy ' + m[1].replace(/-/g, ' ');
+  // Samsung default names without "Galaxy": S26-Ultra, A55, Z-Flip6, Z-Fold5
+  if ((m = h.match(/^(Z[- ]?(?:Flip|Fold)[- ]?\d*|[SAMF]\d{2,3}(?:[- ]?(?:Ultra|Plus|\+|FE|5G))*)$/i))) return 'Samsung Galaxy ' + m[1].replace(/-/g, ' ');
   if ((m = h.match(/\b(SM-[A-Z]\d{3,4}[A-Z]?)\b/i))) return 'Samsung ' + m[1].toUpperCase();
   if ((m = h.match(/\b(Redmi[- ]?(?:Note[- ]?)?\d+\w*(?:[- ]Pro\+?)?|POCO[- ]?[A-Z]\d+\w*|Mi[- ]?\d+\w*|Xiaomi[- ]?\d+\w*)/i))) return 'Xiaomi ' + m[1].replace(/-/g, ' ');
-  if ((m = h.match(/\b(OPPO|vivo|realme|HUAWEI|HONOR|Infinix|TECNO|Nokia|Pixel|OnePlus|Moto)[- ]?([A-Za-z]{0,6}\d+[A-Za-z0-9+]*(?:[- ](?:Pro|Lite|Plus|5G))?)/i))) return m[1] + ' ' + m[2].replace(/-/g, ' ');
+  if ((m = h.match(/\b(OPPO|vivo|realme|HUAWEI|HONOR|Infinix|TECNO|Nokia|Pixel|OnePlus|Moto)[- ]?([A-Za-z]{0,6}\d+[A-Za-z0-9+]*(?:[- ](?:Pro|Lite|Plus|Ultra|5G))*)/i))) return m[1] + ' ' + m[2].replace(/-/g, ' ');
+  // Factory model codes some phones use as their name
+  if ((m = h.match(/^(V2\d{3}[A-Z]?)$/i))) return 'vivo (รหัสรุ่น ' + m[1].toUpperCase() + ')';
+  if ((m = h.match(/^(CPH\d{4})$/i))) return 'OPPO (รหัสรุ่น ' + m[1].toUpperCase() + ')';
+  if ((m = h.match(/^(RMX\d{4})$/i))) return 'realme (รหัสรุ่น ' + m[1].toUpperCase() + ')';
+  if ((m = h.match(/^(\d{4}[A-Z0-9]{3,6}[A-Z]{1,2})$/)) && /^2\d/.test(m[1])) return 'Xiaomi (รหัสรุ่น ' + m[1] + ')';
   if (/^android[- ]/i.test(h)) return 'Android';
   return '';
 }
+/** "supaporn-s-Z-Flip6" -> "supaporn" */
+function macOwner(host) { var o = String(host || '').match(/^(.+?)[-_ ]s[-_ ].+$/i); return o && !/^(DESKTOP|LAPTOP)$/i.test(o[1]) ? o[1] : ''; }
 function netMacInfo(mac, host) {
   var v = macVendor(mac), model = macModel(host), type = v ? v.type : '';
   if (/iPad|Tab\b|Galaxy Tab|MatePad|Pad\b/i.test(model + ' ' + host)) type = 'tablet';
@@ -5059,18 +5071,22 @@ function netMacInfo(mac, host) {
   else if (!type && model) type = /Windows/.test(model) ? 'pc' : 'phone';
   else if (!type && netRandomMac(mac)) type = 'phone';
   var brand = v ? v.brand : netRandomMac(mac) ? '' : '';
-  return { brand: brand, model: model, type: type, typeTh: MAC_TYPE_TH[type] || '', random: netRandomMac(mac) };
+  if (type === 'pc' && v && v.type === 'net') brand = v.brand + ' (ตัวรับ WiFi)';
+  return { brand: brand, model: model, owner: macOwner(host), type: type, typeTh: MAC_TYPE_TH[type] || '', random: netRandomMac(mac) };
 }
 function netMacInfoText(r) {
   var i = r.info || {};
   var parts = [];
   if (i.model) parts.push('<b>' + esc(i.model) + '</b>');
+  if (i.owner) parts.push('ของ ' + esc(i.owner));
   if (i.brand && !(i.model && i.model.toLowerCase().indexOf(i.brand.split(' ')[0].toLowerCase()) >= 0)) parts.push(esc(i.brand));
   if (i.typeTh) parts.push(i.brand === 'Apple' && !i.model ? 'น่าจะเป็น iPhone / iPad / Mac' : 'น่าจะเป็น' + esc(i.typeTh));
   if (!i.brand && !i.model && i.random) parts.push('MAC แบบสุ่ม (มือถือรุ่นใหม่) — ดูยี่ห้อจาก MAC ไม่ได้');
   if (!parts.length) parts.push('ไม่ทราบยี่ห้อ');
   return parts.join(' · ');
 }
+/** Name to offer for a device: "Samsung Galaxy Z Flip6 ของ supaporn", else the model, else what the device calls itself. */
+function netSuggestName(r) { var i = r.info || {}; return i.model && i.owner ? i.model + ' ของ ' + i.owner : (i.model && !/^คอม Windows$/.test(i.model) ? i.model : '') || r.host || ''; }
 function netTypeFromInfo(i) { return { phone: 'phone', pc: 'pc', tablet: 'tablet', cam: 'camera' }[(i || {}).type] || ''; }
 
 function netCall(path, body, timeoutMs) {
@@ -5291,7 +5307,7 @@ function netDeviceModal(r, mode) {
   var title = mode === 'new' ? 'เครื่องใหม่ · ตั้งชื่อ + อนุญาต' : mode === 'manual' ? 'เพิ่มเครื่องเอง' : 'แก้ข้อมูลเครื่อง';
   var m = openModal('<header><h1>' + title + '</h1>' + (r.mac && mode !== 'manual' ? '<span class="muted">' + esc(r.ip || '') + ' · <span class="mono">' + esc(r.mac) + '</span></span><div class="net-info">' + netMacInfoText(r) + '</div>' : '') + '</header><form class="body col" style="gap:12px">' +
     (mode === 'manual' ? '<div class="field"><label for="nd-mac">MAC address</label><input id="nd-mac" class="mono" placeholder="เช่น A4:83:E7:22:91:BC" autocomplete="off"></div>' : '') +
-    '<div class="field"><label for="nd-name">ชื่อเครื่อง</label><input id="nd-name" class="big-input" value="' + esc(sv.name || (mode === 'edit' ? r.name : '') || '') + '" placeholder="' + esc(r.host || 'เช่น มือถือแบงค์') + '"></div>' +
+    '<div class="field"><label for="nd-name">ชื่อเครื่อง</label><input id="nd-name" class="big-input" value="' + esc(sv.name || (mode === 'edit' ? r.name : '') || '') + '" placeholder="' + esc(netSuggestName(r) || 'เช่น มือถือแบงค์') + '"></div>' +
     '<div class="field"><span class="lbl">ประเภท</span>' + chipRadio('ndtype', NET_TYPES.map(function (t) { return { v: t[0], t: t[1] }; }), sv.type || r.type || netTypeFromInfo(r.info) || 'other') + '</div>' +
     '<div class="field"><span class="lbl">เป็นของใคร (ไม่บังคับ)</span>' + chipRadio('ndowner', [{ v: '', t: 'ไม่ระบุ' }].concat(users.filter(function (u) { return u.active !== false; }).map(function (u) { return { v: u.userId, t: u.name }; })), sv.ownerId || '') + '</div>' +
     '<label class="row" style="gap:8px"><input type="checkbox" id="nd-lock"' + (sv.locked || r.local ? ' checked' : '') + (r.local ? ' disabled' : '') + '> เครื่องสำคัญ — กันปิดสิทธิ์ (เช่น มือถือเจ้าของ, แท็บเล็ตจอลูกค้า)</label>' +
@@ -5308,7 +5324,7 @@ function netDeviceModal(r, mode) {
     var mac = mode === 'manual' ? $('#nd-mac', m).value.trim() : r.mac;
     var clean = String(mac || '').replace(/[^0-9a-fA-F]/g, '');
     if (clean.length !== 12) return toast('MAC ต้องมี 12 หลัก (0-9, A-F)', true);
-    var d = { mac: mac, name: $('#nd-name', m).value.trim() || r.host || '', type: radioVal(m, 'ndtype'), ownerId: radioVal(m, 'ndowner'), locked: $('#nd-lock', m).checked || !!r.local };
+    var d = { mac: mac, name: $('#nd-name', m).value.trim() || netSuggestName(r) || '', type: radioVal(m, 'ndtype'), ownerId: radioVal(m, 'ndowner'), locked: $('#nd-lock', m).checked || !!r.local };
     if (!d.name) return toast('ใส่ชื่อเครื่อง', true);
     closeModal();
     var step = mode === 'edit' ? Promise.resolve() : netDo('/allow', { mac: mac, name: d.name }, 'กำลังเพิ่มในเราเตอร์…');
