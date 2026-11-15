@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.0'
+$Version = '1.2'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -168,6 +168,12 @@ function Token-From($prof, [string]$src, [string]$page) {
   return ''
 }
 
+# The router's login page, or its 'Waiting...' page that sends a logged-out visitor back to /.
+function Logged-Out($prof, [string]$html) {
+  if ($prof.loginPageMarker -and $html -match $prof.loginPageMarker) { return $true }
+  return ($html -match '(?i)<title>\s*Waiting|top\.location\.replace\(pageName\)')
+}
+
 function Sha256Hex([string]$s) {
   $h = [System.Security.Cryptography.SHA256]::Create()
   return (($h.ComputeHash([Text.Encoding]::UTF8.GetBytes($s)) | ForEach-Object { $_.ToString('x2') }) -join '')
@@ -192,12 +198,13 @@ function Connect-Router($cfg, [bool]$force) {
     $body = Fill $prof.loginBody @{ user = (UrlEnc $cfg.user); pass = (UrlEnc $pw); token = $token }
     $res = Invoke-Router 'POST' $prof.loginUrl $body $prof.loginCookie
     $homeHtml = Invoke-Router 'GET' $prof.homePage '' ''
-    if ($homeHtml -notmatch $prof.loginPageMarker) {
+    if (-not (Logged-Out $prof $homeHtml) -and -not (Logged-Out $prof (Invoke-Router 'GET' $prof.filterPage '' ''))) {
       $script:JarAt = Get-Date
       Log ('login ok (' + $mode + ')')
       return $prof
     }
-    Log ('login failed with ' + $mode)
+    $sn = ([string]$res -replace '\s+', ' '); if ($sn.Length -gt 300) { $sn = $sn.Substring(0, 300) }
+    Log ('login failed with ' + $mode + ' - router answered: ' + $sn)
   }
   $script:Jar = $null
   throw 'login failed: check the router user name and password, and close 192.168.1.1 in every browser'
@@ -262,7 +269,7 @@ function Parse-Devices([string]$page) {
 function Get-State($cfg) {
   $prof = Connect-Router $cfg $false
   $page = Invoke-Router 'GET' $prof.filterPage '' ''
-  if ($page -match $prof.loginPageMarker) { $prof = Connect-Router $cfg $true; $page = Invoke-Router 'GET' $prof.filterPage '' '' }
+  if ((Logged-Out $prof $page)) { $prof = Connect-Router $cfg $true; $page = Invoke-Router 'GET' $prof.filterPage '' '' }
   $f = Parse-Filter $prof $page
   $devs = @()
   foreach ($u in @($prof.devicesUrls)) {
@@ -299,19 +306,19 @@ function Post-Change($cfg, [string]$urlTpl, [string]$bodyTpl, $vals, [scriptbloc
   $tried = @()
   foreach ($src in (Token-Sources $prof)) {
     $page = Invoke-Router 'GET' $prof.filterPage '' ''
-    if ($page -match $prof.loginPageMarker) { $prof = Connect-Router $cfg $true; $page = Invoke-Router 'GET' $prof.filterPage '' '' }
+    if ((Logged-Out $prof $page)) { $prof = Connect-Router $cfg $true; $page = Invoke-Router 'GET' $prof.filterPage '' '' }
     $token = Token-From $prof $src $page
     if (-not $token) { $tried += ($src + ':none'); continue }
     Log ('token from ' + $src + ' (' + $token.Length + ' chars)')
     $res = Post-Once $cfg $prof $urlTpl $bodyTpl $vals.Clone() $token
-    if ($res -match $prof.loginPageMarker) {
+    if ((Logged-Out $prof $res)) {
       # The router dropped our session (it allows one login at a time). Log in again and resend once.
       Log 'router logged us out (is 192.168.1.1 open in a browser?) - logging in again'
       $prof = Connect-Router $cfg $true
       $page = Invoke-Router 'GET' $prof.filterPage '' ''
       $token = Token-From $prof $src $page
       if ($token) { $res = Post-Once $cfg $prof $urlTpl $bodyTpl $vals.Clone() $token }
-      if ($res -match $prof.loginPageMarker) { throw 'login lost: the router keeps logging this PC out - close 192.168.1.1 in every browser' }
+      if ((Logged-Out $prof $res)) { throw 'login lost: the router keeps logging this PC out - close 192.168.1.1 in every browser' }
     }
     $after = Get-State $cfg
     if (& $check $after) {
