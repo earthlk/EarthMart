@@ -497,7 +497,7 @@ function Handle($rq) {
   if ($rq.path -eq '/pair') {
     if (-not $data -or -not $data.host -or -not $data.user -or -not $data.pass) { Send $rq.stream 400 @{ ok = $false; error = 'host, user and password are needed' }; return }
     $try = [pscustomobject]@{ host = [string]$data.host; user = [string]$data.user; pass = (Protect-Text ([string]$data.pass)); key = '' }
-    $script:Jar = $null
+    $script:Jar = $null; $script:LoginPauseUntil = $null
     $st = Get-State $try
     $key = $cfg.key
     if (-not $key) { $key = ([guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')) }
