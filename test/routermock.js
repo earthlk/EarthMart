@@ -29,9 +29,10 @@ module.exports = function startRouter(opts) {
       if (u.pathname === '/html/bbsp/common/GetLanUserDevInfo.asp') {
         return send('var UserDevinfo = new Array(' + st.devices.map(d => 'new USERDevice("InternetGatewayDevice.LANDevice.1.X_HW_UserDev.1","' + d[0] + '","' + hex(d[1]) + '","' + d[2] + '","' + d[3] + '")').join(',') + ',null);');
       }
+      if (u.pathname === '/html/ssmp/common/getRandString.asp') { st.pageToken = 'aa' + Math.random().toString(16).slice(2).padEnd(14, '0') + 'feed0001feed0001feed0001feed0001'; return send(st.pageToken); }
       if (u.pathname === '/html/bbsp/macfilter/macfilter.asp') {
         st.pageToken = 'be' + Math.random().toString(16).slice(2).padEnd(14, '0') + 'c0ffee11c0ffee11c0ffee11c0ffee11';
-        return send('<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '"><script>var MacFilterRight = "' + st.enabled + '"; var MacFilterPolicy = "' + st.policy + '";\n' +
+        return send((st.noPageToken ? '' : '<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '">') + '<script>var MacFilterRight = "' + st.enabled + '"; var MacFilterPolicy = "' + st.policy + '";\n' +
           'var MacFilter = new Array(' + st.list.map(e => 'new stMacFilter("InternetGatewayDevice.X_HW_Security.MacFilter.' + e.n + '","' + hex(e.mac) + '","' + e.name + '")').join(',') + ',null);</script>');
       }
       const f = qs.parse(body);

@@ -116,14 +116,49 @@ function Get-Token($prof) {
   return ''
 }
 
-function Get-PageToken($prof, [string]$page) {
+function Find-HexToken($prof, [string]$page, [bool]$loose) {
   $k = [regex]::Escape([string]$prof.tokenInPage)
   # <input ... id="hwonttoken" value="HEX"> (attributes in either order)
   $m = [regex]::Match($page, ('(?s)' + $k + '.{0,120}?["'']([0-9a-fA-F]{16,})["'']'))
   if (-not $m.Success) { $m = [regex]::Match($page, ('["'']([0-9a-fA-F]{16,})["''][^<>]{0,120}' + $k)) }
+  if (-not $m.Success -and $loose) { $m = [regex]::Match($page, '(?i)(?:token|rand)[^"''<>\r\n]{0,40}["'']([0-9a-fA-F]{32,64})["'']') }
+  if (-not $m.Success -and $loose) { $m = [regex]::Match($page, '["'']([0-9a-fA-F]{48})["'']') }
   if ($m.Success) { return $m.Groups[1].Value }
+  return ''
+}
+
+function Get-PageToken($prof, [string]$page) {
+  $t = Find-HexToken $prof $page $false
+  if ($t) { return $t }
   Log 'page token not found, using GetRandCount'
   return (Get-Token $prof)
+}
+
+# Where a change token can come from, best guess first. The first one the router accepts is remembered.
+function Token-Sources($prof) {
+  $list = @('page', 'pageloose', 'home')
+  foreach ($u in @($prof.changeTokenUrls)) { if ($u) { $list += ('url:' + $u) } }
+  $list += 'rand'
+  if ($script:GoodToken) { $list = @($script:GoodToken) + @($list | Where-Object { $_ -ne $script:GoodToken }) }
+  return $list
+}
+
+function Token-From($prof, [string]$src, [string]$page) {
+  if ($src -eq 'page') { return (Find-HexToken $prof $page $false) }
+  if ($src -eq 'pageloose') { return (Find-HexToken $prof $page $true) }
+  if ($src -eq 'home') { return (Find-HexToken $prof (Invoke-Router 'GET' $prof.homePage '' '') $true) }
+  if ($src -eq 'rand') { return (Get-Token $prof) }
+  if ($src.StartsWith('url:')) {
+    $u = $src.Substring(4)
+    foreach ($meth in @('POST', 'GET')) {
+      try {
+        $r = (Invoke-Router $meth $u '' '').Trim().TrimStart([char]0xFEFF)
+        if ($r -match '^[0-9a-fA-F]{16,}$') { return $r }
+        $t = Find-HexToken $prof $r $true; if ($t) { return $t }
+      } catch { }
+    }
+  }
+  return ''
 }
 
 function Sha256Hex([string]$s) {
@@ -236,10 +271,7 @@ function Get-State($cfg) {
 
 function Rel($p) { return $p.TrimStart('/') }
 
-function Post-Change($cfg, [string]$urlTpl, [string]$bodyTpl, $vals) {
-  $prof = Connect-Router $cfg $false
-  $page = Invoke-Router 'GET' $prof.filterPage '' ''
-  $token = Get-PageToken $prof $page
+function Post-Once($cfg, $prof, [string]$urlTpl, [string]$bodyTpl, $vals, [string]$token) {
   $vals['token'] = $token
   $vals['filterPath'] = $prof.filterPath
   $vals['filterPageRel'] = Rel $prof.filterPage
@@ -248,8 +280,37 @@ function Post-Change($cfg, [string]$urlTpl, [string]$bodyTpl, $vals) {
   Log ('POST ' + $url)
   $script:RefPage = $prof.filterPage
   try { $res = Invoke-Router 'POST' $url $body '' } finally { $script:RefPage = $null }
-  $short = ($res -replace '\s+', ' '); if ($short.Length -gt 200) { $short = $short.Substring(0, 200) }
-  Log ('router said: ' + $short)
+  $short = ($res -replace '\s+', ' ')
+  $tm = [regex]::Match($short, '(?i)<title>([^<]{0,80})'); $rb = [regex]::Match($short, '(?i)<body[^>]*>(.{0,160})')
+  Log ('router said: ' + $short.Length + ' chars, title=' + $tm.Groups[1].Value + ' body=' + $rb.Groups[1].Value)
+}
+
+# Send a change, trying each token source until $check says the router took it.
+function Post-Change($cfg, [string]$urlTpl, [string]$bodyTpl, $vals, [scriptblock]$check) {
+  $prof = Connect-Router $cfg $false
+  $tried = @()
+  foreach ($src in (Token-Sources $prof)) {
+    $page = Invoke-Router 'GET' $prof.filterPage '' ''
+    if ($page -match $prof.loginPageMarker) { $prof = Connect-Router $cfg $true; $page = Invoke-Router 'GET' $prof.filterPage '' '' }
+    $token = Token-From $prof $src $page
+    if (-not $token) { $tried += ($src + ':none'); continue }
+    Log ('token from ' + $src + ' (' + $token.Length + ' chars)')
+    Post-Once $cfg $prof $urlTpl $bodyTpl $vals.Clone() $token
+    $after = Get-State $cfg
+    if (& $check $after) {
+      if ($script:GoodToken -ne $src) { Log ('token source that works: ' + $src) }
+      $script:GoodToken = $src
+      return $after
+    }
+    $tried += ($src + ':rejected')
+  }
+  Log ('no token source worked: ' + ($tried -join ', '))
+  try {
+    $dump = Join-Path $tmp 'earthmart-filterpage.txt'
+    Set-Content -Path $dump -Value (Invoke-Router 'GET' $prof.filterPage '' '') -Encoding UTF8
+    Log ('filter page saved to ' + $dump)
+  } catch { }
+  return $null
 }
 
 function Normalize-Mac([string]$mac) {
@@ -266,9 +327,8 @@ function Add-Entry($cfg, [string]$mac, [string]$name) {
   if ($prof.maxEntries -and $st.entries.Count -ge [int]$prof.maxEntries) { throw ('the router list is full (' + $prof.maxEntries + ')') }
   $safe = ($name -replace '[^A-Za-z0-9 _.-]', '').Trim()
   if (-not $safe) { $safe = 'EM-' + $mac.Replace(':', '').Substring(6) }
-  Post-Change $cfg $prof.addUrl $prof.addBody @{ mac = (UrlEnc $mac); name = (UrlEnc $safe) }
-  $after = Get-State $cfg
-  if (-not ($after.entries | Where-Object { $_.mac -eq $mac })) { throw 'the router did not keep the new entry' }
+  $after = Post-Change $cfg $prof.addUrl $prof.addBody @{ mac = (UrlEnc $mac); name = (UrlEnc $safe) } { param($a) [bool]($a.entries | Where-Object { $_.mac -eq $mac }) }
+  if (-not $after) { throw 'the router did not keep the new entry' }
   return $after
 }
 
@@ -278,18 +338,16 @@ function Remove-Entry($cfg, [string]$mac) {
   $st = Get-State $cfg
   $e = $st.entries | Where-Object { $_.mac -eq $mac } | Select-Object -First 1
   if (-not $e) { return $st }
-  Post-Change $cfg $prof.delUrl $prof.delBody @{ entry = $e.entry }
-  $after = Get-State $cfg
-  if ($after.entries | Where-Object { $_.mac -eq $mac }) { throw 'the router did not remove the entry' }
+  $after = Post-Change $cfg $prof.delUrl $prof.delBody @{ entry = $e.entry } { param($a) -not ($a.entries | Where-Object { $_.mac -eq $mac }) }
+  if (-not $after) { throw 'the router did not remove the entry' }
   return $after
 }
 
 function Set-Mode($cfg, [bool]$enabled) {
   $prof = Get-Profile
   $en = '0'; if ($enabled) { $en = '1' }
-  Post-Change $cfg $prof.modeUrl $prof.modeBody @{ enabled = $en; policy = $prof.policyWhitelist }
-  $after = Get-State $cfg
-  if ($after.enabled -ne $enabled -or ($enabled -and $after.policy -ne 'white')) { throw 'the router did not switch the filter as asked' }
+  $after = Post-Change $cfg $prof.modeUrl $prof.modeBody @{ enabled = $en; policy = $prof.policyWhitelist } { param($a) $a.enabled -eq $enabled -and (-not $enabled -or $a.policy -eq 'white') }
+  if (-not $after) { throw 'the router did not switch the filter as asked' }
   return $after
 }
 

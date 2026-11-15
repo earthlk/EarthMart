@@ -13,6 +13,10 @@
     "plain"
   ],
   "tokenInPage": "hwonttoken",
+  "changeTokenUrls": [
+    "/html/ssmp/common/getRandString.asp",
+    "/html/ssmp/common/GetRandToken.asp"
+  ],
   "devicesUrls": [
     "/html/bbsp/common/GetLanUserDevInfo.asp",
     "/html/bbsp/common/lanuserinfo.asp",
