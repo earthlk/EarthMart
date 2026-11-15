@@ -5136,9 +5136,7 @@ function netCapBind(scope, lazy) {
 function drawNetLogin(saved) {
   var box = netBox(); if (!box) return;
   box.innerHTML = '<div class="card pad col" style="gap:12px;max-width:520px"><h2>ล็อกอินเราเตอร์</h2>' +
-    '<div class="muted" style="line-height:1.6">เราเตอร์ AIS ให้พิมพ์ตัวอักษรในภาพทุกครั้งที่ล็อกอิน · ล็อกอินแล้วโปรแกรมจะค้างการเชื่อมไว้ให้ ไม่ต้องพิมพ์บ่อย<br>หลุดเมื่อ: ปิดคอม หรือมีคนเปิดหน้า 192.168.1.1 ในเบราว์เซอร์</div>' +
-    '<div class="field"><label for="net-user">ชื่อผู้ใช้เราเตอร์</label><input id="net-user" value="admin" autocomplete="off"></div>' +
-    '<div class="field"><label for="net-pass">รหัสผ่านเราเตอร์</label><input id="net-pass" type="password" autocomplete="off" placeholder="เว้นว่าง = ใช้รหัสที่บันทึกไว้"><small class="muted">ใส่เมื่อเชื่อมไม่ผ่าน หรือเพิ่งเปลี่ยนรหัสที่ 192.168.1.1</small></div>' +
+    '<div class="muted" style="line-height:1.6">เราเตอร์ AIS ให้พิมพ์ตัวอักษรในภาพทุกครั้งที่ล็อกอิน · ใช้รหัสผ่านที่บันทึกไว้ (เปลี่ยนได้ที่ "ตั้งค่าการเชื่อม") · ล็อกอินแล้วโปรแกรมจะค้างการเชื่อมไว้ให้ ไม่ต้องพิมพ์บ่อย<br>หลุดเมื่อ: ปิดคอม หรือมีคนเปิดหน้า 192.168.1.1 ในเบราว์เซอร์</div>' +
     netCapHtml() + '<div class="row" style="gap:8px"><button class="btn primary" data-act="netLogin">ล็อกอิน</button><button class="btn" data-act="netSetup">ตั้งค่าการเชื่อม</button></div></div>' + netSavedList(saved || []);
   netCapBind(box);
   var c = $('#net-code', box);
