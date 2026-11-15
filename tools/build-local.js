@@ -13,8 +13,8 @@ html = html.replace(/<script src="([^"?:]+)(\?[^"]*)?"><\/script>/g, (m, src) =>
   if (!fs.existsSync(f)) throw new Error('missing ' + src);
   return '<script>/* ' + src + ' */\n' + safe(fs.readFileSync(f, 'utf8')) + '\n</script>';
 });
-const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
-html = html.replace('<head>', '<head>\n  <!-- EarthMart POS · single-file build ' + stamp + ' UTC · open this file directly; it connects to the shop\'s Apps Script -->\n  <script>window.EM_LOCAL = true; window.EM_BUILD = "' + stamp + '";</script>');
+const stamp = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 16).replace('T', ' '); // Thai time (UTC+7)
+html = html.replace('<head>', '<head>\n  <!-- EarthMart POS · single-file build ' + stamp + ' (Thai time) · open this file directly; it connects to the shop\'s Apps Script -->\n  <script>window.EM_LOCAL = true; window.EM_BUILD = "' + stamp + '";</script>');
 if (/<script src="(?!https?:)/.test(html) || /href="styles\.css/.test(html)) throw new Error('something was not inlined');
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, html);
