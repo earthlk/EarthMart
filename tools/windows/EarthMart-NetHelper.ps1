@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '2.0'
+$Version = '2.1'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -340,12 +340,12 @@ function Parse-Filter($prof, [string]$page) {
   # "x.MacFilterRight", 1, 1 in submit code - that is not the current value, so prefer the var line).
   # enabledField / policyField may list several names: the first  var <name> = 'N'  found wins.
   $m1 = $null; foreach ($f in @($prof.enabledField)) { $x = [regex]::Match($t, ('\bvar\s+' + $f + '\s*=\s*[''"]?(\d)')); if ($x.Success) { $m1 = $x; break } }
-  if (-not $m1) { $m1 = [regex]::Match($t, (@($prof.enabledField)[0] + '\W{1,6}(\d)')) }
-  if ($m1.Success) { $enabled = ($m1.Groups[1].Value -eq '1') }
+  $known = $true
+  if ($m1) { $enabled = ($m1.Groups[1].Value -eq '1') } else { $known = $false }
   $m2 = $null; foreach ($f in @($prof.policyField)) { $x = [regex]::Match($t, ('\bvar\s+' + $f + '\s*=\s*[''"]?(\d)')); if ($x.Success) { $m2 = $x; break } }
-  if (-not $m2) { $m2 = [regex]::Match($t, (@($prof.policyField)[0] + '\W{1,6}(\d)')) }
-  if ($m2.Success) { if ($m2.Groups[1].Value -eq [string]$prof.policyWhitelist) { $policy = 'white' } else { $policy = 'black' } }
-  return [pscustomobject]@{ enabled = $enabled; policy = $policy; entries = @($entries) }
+  if (-not $m2) { $known = $false }
+  if ($m2) { if ($m2.Groups[1].Value -eq [string]$prof.policyWhitelist) { $policy = 'white' } else { $policy = 'black' } }
+  return [pscustomobject]@{ enabled = $enabled; policy = $policy; known = $known; entries = @($entries) }
 }
 
 function Parse-Devices([string]$page) {
@@ -397,7 +397,7 @@ function Get-State($cfg) {
       }
     } catch { Log ('topo names: ' + $_.Exception.Message) }
   }
-  return [pscustomobject]@{ enabled = $f.enabled; policy = $f.policy; entries = $f.entries; devices = @($devs); page = $page }
+  return [pscustomobject]@{ enabled = $f.enabled; policy = $f.policy; known = $f.known; entries = $f.entries; devices = @($devs); page = $page }
 }
 
 # {HostName:"Galaxy-A12",MAC:"fa:f6:33:28:8f:11",IP:"192.168.1.102",...} -> MAC => name
@@ -488,6 +488,14 @@ function Add-Entry($cfg, [string]$mac, [string]$name) {
   $mac = Normalize-Mac $mac
   $st = Get-State $cfg
   $ssids = @($prof.ssids | Where-Object { $_ }); if (-not $ssids.Count) { $ssids = @('') }
+  # Never add to a list that is in blacklist mode: there an entry BLOCKS the device.
+  if (-not $st.known) { Save-FilterPage $st; throw 'mode unknown: cannot read the filter mode from the router page - not changing anything' }
+  if ($st.policy -ne 'white') {
+    Log 'filter list is in blacklist mode - switching it off and to whitelist before adding'
+    $r = Post-Change $cfg $prof.modeUrl $prof.modeBody @{ enabled = '0'; policy = $prof.policyWhitelist } { param($a) -not $a.enabled -and $a.policy -eq 'white' }
+    if (-not $r) { throw 'the router did not switch the filter as asked' }
+    $st = $r
+  }
   $have = @($st.entries | Where-Object { $_.mac -eq $mac })
   $todo = @($ssids | Where-Object { $s = $_; -not ($have | Where-Object { $_.ssid -eq $s -or (-not $s) -or (-not $_.ssid) }) })
   if (-not $todo.Count) { return $st }
@@ -518,9 +526,24 @@ function Remove-Entry($cfg, [string]$mac) {
   return $after
 }
 
+function Save-FilterPage($st) { try { Set-Content -Path (Join-Path $tmp 'earthmart-filterpage.txt') -Value $st.page -Encoding UTF8 } catch { } }
+
 function Set-Mode($cfg, [bool]$enabled) {
   $prof = Get-Profile
   $en = '0'; if ($enabled) { $en = '1' }
+  if ($enabled) {
+    # Turning the whitelist on must not lock this PC out: it has to be on the list for every SSID.
+    $st = Get-State $cfg
+    if (-not $st.known) { Save-FilterPage $st; throw 'mode unknown: cannot read the filter mode from the router page - not changing anything' }
+    $mine = @(Get-LocalMacs)
+    $ssids = @($prof.ssids | Where-Object { $_ })
+    $ok = $false
+    foreach ($m in $mine) {
+      $rows = @($st.entries | Where-Object { $_.mac -eq $m })
+      if ($rows.Count -and (-not $ssids.Count -or -not ($ssids | Where-Object { $s = $_; -not ($rows | Where-Object { $_.ssid -eq $s }) }))) { $ok = $true }
+    }
+    if (-not $ok) { throw ('this PC is not on the list for every Wi-Fi (' + ($ssids -join ', ') + ') - allow it first') }
+  }
   $after = Post-Change $cfg $prof.modeUrl $prof.modeBody @{ enabled = $en; policy = $prof.policyWhitelist } { param($a) $a.enabled -eq $enabled -and (-not $enabled -or $a.policy -eq 'white') }
   if (-not $after) { throw 'the router did not switch the filter as asked' }
   return $after
@@ -566,6 +589,7 @@ function Probe-Router($cfg) {
 
 # MAC addresses of this PC's network cards (so the page can protect this PC from being blocked).
 function Get-LocalMacs {
+  if ($env:EM_TEST_LOCAL_MACS) { return @($env:EM_TEST_LOCAL_MACS -split ',') }
   $out = @()
   try {
     foreach ($n in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
@@ -630,7 +654,7 @@ function Public-State($st) {
     if ($r) { if ($e.ssid) { $r.ssids += $e.ssid } }
     else { $rows += [pscustomobject]@{ mac = $e.mac; name = $e.name; entry = $e.entry; ssids = @(@($e.ssid) | Where-Object { $_ }) } }
   }
-  return [pscustomobject]@{ ok = $true; enabled = $st.enabled; policy = $st.policy; entries = @($rows); devices = $st.devices; at = (Get-Date -Format 'HH:mm:ss') }
+  return [pscustomobject]@{ ok = $true; enabled = $st.enabled; policy = $st.policy; known = $st.known; entries = @($rows); devices = $st.devices; at = (Get-Date -Format 'HH:mm:ss') }
 }
 
 function Handle($rq) {

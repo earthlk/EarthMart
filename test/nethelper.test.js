@@ -11,7 +11,7 @@ const PWSH = process.env.PWSH || 'pwsh';
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'emnet-'));
   fs.copyFileSync(path.join(__dirname, '..', 'tools', 'windows', 'net-profile.json'), path.join(dir, 'net-profile.json'));
   const port = 18765 + Math.floor(Math.random() * 500);
-  const ps = spawn(PWSH, ['-NoProfile', '-File', path.join(__dirname, '..', 'tools', 'windows', 'EarthMart-NetHelper.ps1'), '-Port', String(port), '-Dir', dir], { stdio: 'inherit' });
+  const ps = spawn(PWSH, ['-NoProfile', '-File', path.join(__dirname, '..', 'tools', 'windows', 'EarthMart-NetHelper.ps1'), '-Port', String(port), '-Dir', dir], { stdio: 'inherit', env: Object.assign({}, process.env, { EM_TEST_LOCAL_MACS: '3C:52:82:1A:4F:09' }) });
   const H = 'http://127.0.0.1:' + port;
   let key = '';
   const call = async (p, body, k) => {
@@ -44,6 +44,22 @@ const PWSH = process.env.PWSH || 'pwsh';
     s = await call('/allow', { mac: 'A4:83:E7:22:91:BC', name: 'Earth phone' });
     s = await call('/allow', { mac: 'A4:83:E7:22:91:BC', name: 'Earth phone' });
     assert.strictEqual(s.entries.length, 2, 'allowing twice keeps one entry');
+    // safety: a list in blacklist mode is switched off + whitelist before anything is added
+    r.st.enabled = 1; r.st.policy = 0;
+    s = await call('/allow', { mac: '9C:2E:A1:00:00:07', name: 'Guest' });
+    assert.deepStrictEqual([r.st.enabled, r.st.policy, s.enabled, s.policy], [0, 1, false, 'white'], 'blacklist list turned off and set to whitelist before adding');
+    s = await call('/block', { mac: '9C:2E:A1:00:00:07' });
+    // safety: unknown page format -> change nothing
+    r.st.hideVars = true;
+    const unk = await call('/allow', { mac: '9C:2E:A1:00:00:08', name: 'X' });
+    assert.ok(!unk.ok && /mode unknown/.test(unk.error) && !r.st.macs().includes('9C:2E:A1:00:00:08'), 'unknown filter mode: nothing added');
+    r.st.hideVars = false;
+    // safety: whitelist cannot be turned on unless this PC is on every SSID
+    const keep = r.st.list.slice();
+    r.st.list = r.st.list.filter(e => !(e.mac === '3C:52:82:1A:4F:09' && e.ssid === 'SSID-5'));
+    const lock = await call('/mode', { enabled: true });
+    assert.ok(!lock.ok && /this PC is not on the list/.test(lock.error) && r.st.enabled === 0, 'refuses to lock this PC out (missing on 5G)');
+    r.st.list = keep;
     s = await call('/mode', { enabled: true });
     assert.deepStrictEqual([s.enabled, s.policy, r.st.enabled, r.st.policy], [true, 'white', 1, 1], 'whitelist on');
     s = await call('/block', { mac: 'A4:83:E7:22:91:BC' });

@@ -5114,6 +5114,8 @@ function netErrTh(m) {
   if (/login failed/.test(m)) return 'ล็อกอินเราเตอร์ไม่ได้ — ปิดหน้า 192.168.1.1 ในเบราว์เซอร์ก่อน แล้วตรวจชื่อผู้ใช้ / รหัสผ่าน';
   if (/not reachable/.test(m)) return 'ติดต่อเราเตอร์ไม่ได้ — เครื่องนี้ต่อเน็ตร้านอยู่ไหม';
   if (/did not keep|did not remove|did not switch/.test(m)) return 'เราเตอร์ไม่รับคำสั่ง — กด "ทดสอบระบบ" ในตั้งค่าการเชื่อม';
+  if (/^mode unknown/.test(m)) return 'อ่านโหมดตัวกรองจากเราเตอร์ไม่ได้ — ไม่ได้เปลี่ยนอะไร (ส่งไฟล์ %TEMP%\\earthmart-filterpage.txt ให้ผู้ดูแล)';
+  if (/this PC is not on the list/.test(m)) return 'เครื่องหน้าร้านนี้ยังไม่อยู่ในรายชื่อของ WiFi ครบทั้ง 2.4G และ 5G — อนุญาตเครื่องนี้ก่อน';
   if (/list is full/.test(m)) return 'รายชื่อในเราเตอร์เต็มแล้ว';
   if (/12 hex/.test(m)) return 'MAC ต้องมี 12 หลัก (0-9, A-F)';
   return m;
@@ -5239,7 +5241,7 @@ function netRows() {
   var get = function (mac) { return byMac[mac] || (byMac[mac] = { mac: mac }); };
   (st.devices || []).forEach(function (d) { var r = get(d.mac); r.ip = d.ip; r.host = d.name; r.online = d.online; });
   (n.saved || []).forEach(function (d) { var r = get(d.mac); r.saved = d; });
-  (st.entries || []).forEach(function (e) { var r = get(e.mac); r.allowed = true; r.routerName = e.name; });
+  (st.entries || []).forEach(function (e) { var r = get(e.mac); r.allowed = true; r.routerName = e.name; r.ssids = e.ssids || []; });
   return Object.keys(byMac).map(function (k) {
     var r = byMac[k];
     r.local = n.local.indexOf(r.mac) >= 0;
@@ -5265,6 +5267,7 @@ function drawNet() {
   box.innerHTML = '<div class="net-grid"><div class="col" style="gap:14px;min-width:0">' +
     '<div class="card pad net-master"><button type="button" class="switch big' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '" aria-label="เปิดระบบ Whitelist" data-act="netMode"></button>' +
     '<div class="grow"><b style="font-size:18px">เปิดระบบ Whitelist</b><div class="muted" style="font-size:13px">ใช้เน็ตร้านได้เฉพาะเครื่องที่อนุญาต · ปิดสวิตช์ = ทุกเครื่องใช้ได้ปกติ</div>' +
+    (st.known === false ? '<div class="warn-text" style="font-size:13px">อ่านโหมดตัวกรองจากเราเตอร์ไม่ได้ — ระบบจะไม่เปลี่ยนอะไรในเราเตอร์จนกว่าจะแก้</div>' : '') +
     (st.enabled && st.policy === 'black' ? '<div class="warn-text" style="font-size:13px">เราเตอร์ตั้งเป็น Blacklist อยู่ (ตั้งจากหน้า 192.168.1.1) — เปิดสวิตช์เพื่อเปลี่ยนเป็น Whitelist</div>' : '') + '</div>' +
     '<div class="net-counts"><div><b>' + onlineN + '</b><small>ใช้งานอยู่</small></div><div><b class="brand-text">' + listed.filter(function (r) { return r.allowed; }).length + '</b><small>อนุญาต</small></div><div><b class="warn-text">' + listed.filter(function (r) { return !r.allowed; }).length + '</b><small>ไม่อนุญาต</small></div><div><b class="amber">' + fresh.length + '</b><small>เครื่องใหม่</small></div></div></div>' +
     (fresh.length ? '<div class="net-new"><div class="row" style="gap:8px"><span class="net-badge">' + fresh.length + '</span><b>เครื่องใหม่ที่ยังไม่อยู่ในรายชื่อ</b><span class="muted" style="font-size:13px">' + (on ? 'ตอนนี้ใช้เน็ตไม่ได้ จนกว่าจะกดอนุญาต' : 'เปิด Whitelist แล้วจะใช้เน็ตไม่ได้') + '</span></div>' +
@@ -5342,7 +5345,8 @@ function netDeviceModal(r, mode) {
 function netEnableModal() {
   var rows = netRows();
   var allowed = rows.filter(function (r) { return r.allowed; });
-  var hereOk = rows.some(function (r) { return r.local && r.allowed; });
+  // Wi-Fi rows are per SSID: this PC must be on both 2.4G (SSID-1) and 5G (SSID-5), or the router locks it out.
+  var hereOk = rows.some(function (r) { return r.local && r.allowed && (!(r.ssids || []).length || r.ssids.length >= 2); });
   var importantOk = rows.filter(function (r) { return r.locked && !r.local; });
   var fresh = rows.filter(function (r) { return r.isNew; });
   var chk = function (ok, t, s) { return '<div class="net-chk"><span class="' + (ok ? 'ok' : 'bad') + '">' + (ok ? '✓' : '!') + '</span><div><b>' + t + '</b><small>' + s + '</small></div></div>'; };

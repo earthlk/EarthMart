@@ -39,7 +39,7 @@ module.exports = function startRouter(opts) {
       }
       if (u.pathname === '/html/bbsp/wlanmacfilter/wlanmacfilter.asp') {
         st.pageToken = 'be' + Math.random().toString(16).slice(2).padEnd(14, '0') + 'c0ffee11c0ffee11c0ffee11c0ffee11';
-        return send((st.noPageToken ? '' : '<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '">') + '<script>function SubmitForm(){ a.push(new stSpecParaArray("x.WlanMacFilterRight", 1, 1)); b.push(new stSpecParaArray("x.WlanMacFilterPolicy", 0, 1)); }\nvar WhiteList = 0;\nvar enableFilter = \'' + st.enabled + '\';\nvar Mode = \'' + st.policy + '\';\n' +
+        return send((st.noPageToken ? '' : '<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '">') + '<script>function SubmitForm(){ a.push(new stSpecParaArray("x.WlanMacFilterRight", 1, 1)); b.push(new stSpecParaArray("x.WlanMacFilterPolicy", 0, 1)); }\nvar WhiteList = 0;\n' + (st.hideVars ? '' : 'var enableFilter = \'' + st.enabled + '\';\nvar Mode = \'' + st.policy + '\';\n') +
           'var WlanMacFilter = new Array(' + st.list.map(e => 'new stWlanMacFilter("InternetGatewayDevice.X_HW_Security.WLANMacFilter.' + e.n + '","' + e.ssid + '","' + hex(e.mac) + '","' + e.name + '","1")').join(',') + ',null);</script>');
       }
       const f = qs.parse(body);
