@@ -170,7 +170,7 @@ a{color:var(--brand-text)}
 .ed-name:hover{border-color:var(--line-strong)}
 .seg-sm{display:flex;padding:3px;gap:3px;background:var(--surface-muted);border-radius:8px}
 .seg-sm button{flex:1;height:32px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:13px;cursor:pointer}
-.seg-sm button.on{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg-sm button.on{background:var(--chip-on);color:var(--chip-on-ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .grid3 input,.grid3 select{height:36px;font-size:14px;padding:0 8px}
 .sec-title{display:flex;justify-content:space-between;align-items:baseline;margin-top:4px}
@@ -205,7 +205,7 @@ a{color:var(--brand-text)}
 .stk-tab{flex:1;display:flex;flex-direction:column;min-height:0}
 .tabs{display:flex;gap:4px;padding:8px 14px 0;border-bottom:1px solid var(--line)}
 .tab{height:44px;padding:0 16px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--muted);font-size:15px;cursor:pointer}
-.tab.on{border-bottom-color:var(--brand-line);color:var(--ink);font-weight:600}
+.tab.on{border-bottom-color:var(--brand-line);border-bottom-width:3px;color:var(--brand-text);font-weight:700;background:var(--brand-soft)}
 .chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line)}
 .chips .chip{height:32px;font-size:13px;padding:0 12px}
 .stk-tools{padding:10px 14px;border-bottom:1px solid var(--line)}
@@ -317,7 +317,7 @@ a{color:var(--brand-text)}
 .down{color:var(--warn);font-weight:600}
 .alert-row td{background:var(--warn-soft)}
 .badge-n{display:inline-block;min-width:18px;height:18px;line-height:18px;border-radius:9px;background:var(--brand);color:var(--brand-ink);font-size:11px;font-weight:700;text-align:center;padding:0 4px}
-.btn.on{border-color:var(--brand-line);color:var(--brand-text)}
+.btn.on{background:var(--chip-on);border-color:var(--chip-on);color:var(--chip-on-ink);font-weight:600}
 .paybar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--surface-muted);margin-bottom:8px}
 .paybar span{display:block;height:100%}
 .pb-cash{background:var(--brand)}
@@ -692,7 +692,6 @@ a{color:var(--brand-text)}
 .money-strip>div{flex:1;display:flex;flex-direction:column;gap:2px}
 .money-strip small{font-size:12px;color:var(--muted)}
 .money-strip b{font-size:22px}
-.chip.on{border:2px solid var(--brand);background:var(--brand-soft)}
 /* Credit: customer picker */
 .cust-chips{display:flex;flex-wrap:wrap;gap:8px;max-height:220px;overflow:auto}
 .cust-chip{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 14px;min-width:112px;border:1px solid var(--line-strong);border-radius:12px;background:var(--surface);cursor:pointer;font:inherit;color:var(--ink)}
