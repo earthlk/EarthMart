@@ -7,18 +7,26 @@
   "loginUrl": "/login.cgi",
   "loginBody": "UserName={user}&PassWord={pass}&Language=english&x.X_HW_Token={token}",
   "loginCookie": "Cookie=body:Language:english:id=-1",
-  "passModes": ["base64", "sha256", "plain"],
+  "passModes": [
+    "base64",
+    "sha256",
+    "plain"
+  ],
   "tokenInPage": "hwonttoken",
-  "devicesUrls": ["/html/bbsp/common/GetLanUserDevInfo.asp", "/html/bbsp/common/lanuserinfo.asp", "/html/amp/wlaninfo/getassociateddeviceinfo.asp"],
+  "devicesUrls": [
+    "/html/bbsp/common/GetLanUserDevInfo.asp",
+    "/html/bbsp/common/lanuserinfo.asp",
+    "/html/amp/wlaninfo/getassociateddeviceinfo.asp"
+  ],
   "filterPage": "/html/bbsp/macfilter/macfilter.asp",
   "filterPath": "InternetGatewayDevice.X_HW_Security.MacFilter",
   "enabledField": "MacFilterRight",
   "policyField": "MacFilterPolicy",
   "policyWhitelist": "1",
   "maxEntries": 0,
-  "addUrl": "/add.cgi?x={filterPath}&RequestFile={filterPageRel}",
-  "addBody": "x.SourceMACAddress={mac}&x.DeviceName={name}&x.X_HW_Token={token}",
-  "delUrl": "/del.cgi?RequestFile={filterPageRel}",
+  "addUrl": "/html/bbsp/macfilter/add.cgi?x={filterPath}&RequestFile={filterPageRel}",
+  "addBody": "x.SourceMACAddress={mac}&x.DeviceAlias={name}&x.X_HW_Token={token}",
+  "delUrl": "/html/bbsp/macfilter/del.cgi?x={filterPath}&RequestFile={filterPageRel}",
   "delBody": "{entry}=&x.X_HW_Token={token}",
   "modeUrl": "/set.cgi?x=InternetGatewayDevice.X_HW_Security&RequestFile={filterPageRel}",
   "modeBody": "x.MacFilterRight={enabled}&x.MacFilterPolicy={policy}&x.X_HW_Token={token}"
