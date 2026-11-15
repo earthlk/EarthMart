@@ -183,9 +183,13 @@ function Connect-Router($cfg, [bool]$force) {
   $prof = Get-Profile
   $script:Base = 'http://' + $cfg.host
   if (-not $force -and $script:Jar -and ((Get-Date) - $script:JarAt).TotalSeconds -lt 120) { return $prof }
+  # After a failed login, wait before trying again: the router locks logins (and asks for a captcha) after a few misses.
+  if (-not $force -and $script:LoginPauseUntil -and (Get-Date) -lt $script:LoginPauseUntil) { throw ('login paused until ' + $script:LoginPauseUntil.ToString('HH:mm') + ' after a failed login (router locks after a few tries)') }
   $script:Jar = New-Object System.Net.CookieContainer
   $pass = Unprotect-Text $cfg.pass
-  $null = Invoke-Router 'GET' $prof.loginPage '' ''
+  $lp = Invoke-Router 'GET' $prof.loginPage '' ''
+  $cm = [regex]::Match($lp, '(?is).{0,120}(captcha|checkcode|verifycode).{0,160}')
+  if ($cm.Success) { Log ('login page mentions a captcha: ' + ($cm.Value -replace '\s+', ' ')) }
   $modes = @($prof.passModes)
   foreach ($mode in $modes) {
     $token = Get-Token $prof
@@ -203,10 +207,14 @@ function Connect-Router($cfg, [bool]$force) {
       Log ('login ok (' + $mode + ')')
       return $prof
     }
-    $sn = ([string]$res -replace '\s+', ' '); if ($sn.Length -gt 300) { $sn = $sn.Substring(0, 300) }
+    $sn = ([string]$res -replace '\s+', ' ')
+    $sn = [regex]::Replace($sn, '(?i)<!DOCTYPE[^>]*>|<meta[^>]*>|<link[^>]*>', '')
+    if ($sn.Length -gt 700) { $sn = $sn.Substring(0, 700) }
     Log ('login failed with ' + $mode + ' - router answered: ' + $sn)
+    if ($sn -match '(?i)retri|captcha|checkcode|locked|try again') { break }
   }
   $script:Jar = $null
+  $script:LoginPauseUntil = (Get-Date).AddMinutes(10)
   throw 'login failed: check the router user name and password, and close 192.168.1.1 in every browser'
 }
 
