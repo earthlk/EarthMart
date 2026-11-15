@@ -37,6 +37,10 @@ module.exports = function startRouter(opts) {
       if (u.pathname === '/html/amp/wificoverinfo/getTopoInfo.asp') {
         return send('[{"ApMac":"f8:de:73:5e:05:51","Width":"0.51","StaList":[' + (st.topo || []).map(d => '{HostName:"' + d[1] + '",MAC:"' + d[0].toLowerCase() + '",IP:"' + (d[2] || '') + '"}').join(',') + ']}]');
       }
+      if (u.pathname === '/html/bbsp/wlanmacfilter/wlanmacfilter.asp' && st.rawPage) {
+        st.pageToken = 'ab' + Math.random().toString(16).slice(2).padEnd(14, '0') + 'cafe0001cafe0001cafe0001cafe0001';
+        return send(st.rawPage.replace('{TOKEN}', st.pageToken));
+      }
       if (u.pathname === '/html/bbsp/wlanmacfilter/wlanmacfilter.asp') {
         st.pageToken = 'be' + Math.random().toString(16).slice(2).padEnd(14, '0') + 'c0ffee11c0ffee11c0ffee11c0ffee11';
         return send((st.noPageToken ? '' : '<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '">') + '<script>function SubmitForm(){ a.push(new stSpecParaArray("x.WlanMacFilterRight", 1, 1)); b.push(new stSpecParaArray("x.WlanMacFilterPolicy", 0, 1)); }\nvar WhiteList = 0;\n' + (st.hideVars ? '' : 'var enableFilter = \'' + st.enabled + '\';\nvar Mode = \'' + st.policy + '\';\n') +

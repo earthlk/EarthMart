@@ -34,7 +34,7 @@
     "FilterMode"
   ],
   "policyWhitelist": "1",
-  "maxEntries": 0,
+  "maxEntries": 32,
   "addUrl": "/html/bbsp/wlanmacfilter/add.cgi?x={filterPath}&RequestFile={filterPageRel}",
   "addBody": "x.SourceMACAddress={mac}&x.SSIDName={ssid}&x.DeviceName={name}&x.Enable=1&x.X_HW_Token={token}",
   "delUrl": "/html/bbsp/wlanmacfilter/del.cgi?x={filterPath}&RequestFile={filterPageRel}",

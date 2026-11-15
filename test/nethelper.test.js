@@ -92,6 +92,12 @@ const PWSH = process.env.PWSH || 'pwsh';
     r.st.ssids = ['SSID-1', 'SSID-5'];
     s = await call('/mode', { enabled: false });
     assert.strictEqual(s.enabled, false, 'whitelist off');
+    // the real AIS page (trimmed, anonymised): on, whitelist, 5 devices each on SSID-1 and SSID-5
+    r.st.rawPage = fs.readFileSync(path.join(__dirname, 'fixtures', 'wlanmacfilter-ais.asp'), 'utf8');
+    s = await call('/state');
+    assert.deepStrictEqual([s.enabled, s.policy, s.known], [true, 'white', true], 'real page: filter on, whitelist');
+    assert.deepStrictEqual(s.entries.map(e => [e.mac, e.name, e.ssids.join('+')]), [['02:00:00:00:00:01', 'Phone A', 'SSID-1+SSID-5'], ['02:00:00:00:00:02', 'Phone B', 'SSID-1+SSID-5'], ['02:00:00:00:00:03', 'Shop PC', 'SSID-1+SSID-5'], ['02:00:00:00:00:04', 'Phone C', 'SSID-1+SSID-5'], ['02:00:00:00:00:05', 'Phone D', 'SSID-1+SSID-5']], 'real page: entries with names and both SSIDs');
+    r.st.rawPage = null;
     const pb = await call('/probe', {});
     assert.ok(pb.ok && pb.pages >= 3 && pb.macPages.length >= 1, 'probe saves pages');
     const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'net-config.json'), 'utf8'));

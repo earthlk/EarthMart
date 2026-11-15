@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '2.1'
+$Version = '2.2'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -320,6 +320,7 @@ function Parse-Filter($prof, [string]$page) {
   $ms = [regex]::Matches($t, $pathRx)
   for ($i = 0; $i -lt $ms.Count; $i++) {
     $start = $ms[$i].Index
+    if ($start -gt 0 -and $t[$start - 1] -eq '"') { $start-- }  # start on the opening quote so "..." pairs line up
     $end = $t.Length; if ($i + 1 -lt $ms.Count) { $end = $ms[$i + 1].Index }
     $chunk = $t.Substring($start, [Math]::Min($end - $start, 600))
     $mac = [regex]::Match($chunk, $macRx)
@@ -327,7 +328,8 @@ function Parse-Filter($prof, [string]$page) {
     $name = ''
     foreach ($q in [regex]::Matches($chunk, '"([^"]*)"')) {
       $v = $q.Groups[1].Value
-      if ($v -and $v -notmatch $macRx -and $v -notmatch '^InternetGatewayDevice' -and $v -notmatch '^\d+$' -and $v -notmatch '^(?i)SSID-?\d+$' -and $v.Length -lt 64) { $name = $v; break }
+      # (the chunk starts inside the domain string, so the first "..." can be the "," between fields)
+      if ($v -match '\w' -and $v -notmatch $macRx -and $v -notmatch '^InternetGatewayDevice' -and $v -notmatch '^\d+$' -and $v -notmatch '^(?i)SSID-?\d+$' -and $v.Length -lt 64) { $name = $v; break }
     }
     $ssid = ''; $sm = [regex]::Match($chunk, '(?i)"SSID-?(\d+)"'); if ($sm.Success) { $ssid = 'SSID-' + $sm.Groups[1].Value }
     $entry = $ms[$i].Value
