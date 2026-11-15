@@ -5042,6 +5042,9 @@ function netCall(path, body, timeoutMs) {
 }
 function netErrTh(m) {
   m = String(m || '');
+  if (/^captcha needed/.test(m)) return 'ต้องล็อกอินเราเตอร์ใหม่ — พิมพ์ตัวอักษรในภาพ';
+  if (/wrong letters/.test(m)) return 'ล็อกอินไม่ผ่าน — ตัวอักษรในภาพหรือรหัสผ่านไม่ถูก ลองใหม่กับภาพใหม่';
+  if (/router locked/.test(m)) return 'เราเตอร์ล็อกการเข้าชั่วคราว (ลองผิดหลายครั้ง) — รอ 1 นาทีแล้วลองใหม่';
   if (/login paused/.test(m)) return 'พักการล็อกอินเราเตอร์ 10 นาที หลังล็อกอินไม่ผ่าน (กันเราเตอร์ล็อก)';
   if (/login lost/.test(m)) return 'เราเตอร์ตัดการเชื่อม — ปิดหน้า 192.168.1.1 ในเบราว์เซอร์ทุกเครื่อง (เราเตอร์ให้เข้าได้ทีละคน) แล้วลองใหม่';
   if (/login failed/.test(m)) return 'ล็อกอินเราเตอร์ไม่ได้ — ปิดหน้า 192.168.1.1 ในเบราว์เซอร์ก่อน แล้วตรวจชื่อผู้ใช้ / รหัสผ่าน';
@@ -5058,7 +5061,7 @@ function loadNet() {
   var box = netBox();
   if (!box) return;
   clearInterval(S.netTimer);
-  S.netTimer = setInterval(function () { if (S.view === 'settings' && (S.setTab || 'shop') === 'net' && !$('.modal')) loadNet(); else if (S.view !== 'settings') clearInterval(S.netTimer); }, 60000);
+  S.netTimer = setInterval(function () { if (S.view === 'settings' && (S.setTab || 'shop') === 'net' && !$('.modal') && !$('#net-code', netBox() || document)) loadNet(); else if (S.view !== 'settings') clearInterval(S.netTimer); }, 60000);
   var saved = api('netDevices', S.token).catch(function () { return []; });
   var users = api('listUsers', S.token).catch(function () { return []; });
   netCall('/ping', null, 3000).then(function (p) {
@@ -5070,6 +5073,7 @@ function loadNet() {
     });
   }).catch(function (e) {
     if (e.code === 'KEY' || e.code === 'SETUP') return saved.then(drawNetSetup);
+    if (e.code === 'CAPTCHA') return saved.then(drawNetLogin);
     Promise.all([saved, users]).then(function (r) { drawNetOffline(r[0], e); });
   });
 }
@@ -5094,13 +5098,76 @@ function drawNetSetup(saved) {
   box.innerHTML = '<div class="card pad col" style="gap:12px;max-width:560px"><h2>ตั้งค่าการเชื่อมเราเตอร์</h2><div class="muted">ทำครั้งเดียวบนเครื่องหน้าร้าน · ใช้รหัส admin ของเราเตอร์ AIS (หน้า 192.168.1.1)</div>' +
     netSetupFields() + '<div class="muted" style="font-size:13px;line-height:1.6">รหัสผ่านเก็บในเครื่องหน้าร้านนี้เท่านั้น (ไม่ส่งขึ้น Google / GitHub)</div>' +
     '<button class="btn primary" data-act="netPair">เชื่อมเราเตอร์</button></div>' + netSavedList(saved || []);
+  netCapBind(box);
 }
 
 function netSetupFields() {
   var p = S.netPing || {};
   return '<div class="field"><label for="net-host">ที่อยู่เราเตอร์</label><input id="net-host" value="' + esc(p.host || '192.168.1.1') + '"></div>' +
     '<div class="field"><label for="net-user">ชื่อผู้ใช้</label><input id="net-user" value="admin" autocomplete="off"></div>' +
-    '<div class="field"><label for="net-pass">รหัสผ่าน</label><input id="net-pass" type="password" autocomplete="off"></div>';
+    '<div class="field"><label for="net-pass">รหัสผ่าน</label><input id="net-pass" type="password" autocomplete="off"></div>' + netCapHtml();
+}
+
+/** The router asks for the letters in a picture on every login (AIS). */
+function netCapHtml() {
+  return '<div class="field"><label for="net-code">ตัวอักษรในภาพ</label><div class="net-cap"><span class="net-capimg"><img id="net-capimg" alt="ตัวอักษรในภาพ (CAPTCHA)"></span>' +
+    '<button type="button" class="btn sm" data-act="netCap" aria-label="ขอภาพใหม่">ภาพใหม่</button></div>' +
+    '<input id="net-code" class="mono" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="พิมพ์ตามภาพ ตัวเล็ก/ใหญ่ให้ตรง"></div>';
+}
+function netCapLoad(scope) {
+  scope = scope || document;
+  var img = $('#net-capimg', scope), code = $('#net-code', scope), h = $('#net-host', scope);
+  if (!img) return Promise.resolve();
+  img.removeAttribute('src'); img.parentNode.classList.add('loading');
+  if (code) code.value = '';
+  return netCall('/captcha', h && h.value.trim() ? { host: h.value.trim() } : {}, 20000).then(function (r) {
+    img.parentNode.classList.remove('loading');
+    if (r.image) img.src = r.image;
+  }).catch(function (e) { img.parentNode.classList.remove('loading'); toast(e.message, true); });
+}
+function netCapBind(scope, lazy) {
+  var h = $('#net-host', scope);
+  if (h) h.addEventListener('change', function () { netCapLoad(scope); });
+  // A new picture starts a new login, so don't fetch one while the router session is still good.
+  if (!lazy) netCapLoad(scope);
+}
+
+/** Session gone (the router logs out after a while, or someone opened 192.168.1.1): log in again with the captcha. */
+function drawNetLogin(saved) {
+  var box = netBox(); if (!box) return;
+  box.innerHTML = '<div class="card pad col" style="gap:12px;max-width:520px"><h2>ล็อกอินเราเตอร์</h2>' +
+    '<div class="muted" style="line-height:1.6">เราเตอร์ AIS ให้พิมพ์ตัวอักษรในภาพทุกครั้งที่ล็อกอิน · ล็อกอินแล้วโปรแกรมจะค้างการเชื่อมไว้ให้ ไม่ต้องพิมพ์บ่อย<br>หลุดเมื่อ: ปิดคอม หรือมีคนเปิดหน้า 192.168.1.1 ในเบราว์เซอร์</div>' +
+    netCapHtml() + '<div class="row" style="gap:8px"><button class="btn primary" data-act="netLogin">ล็อกอิน</button><button class="btn" data-act="netSetup">ตั้งค่าการเชื่อม</button></div></div>' + netSavedList(saved || []);
+  netCapBind(box);
+  var c = $('#net-code', box);
+  if (c) c.addEventListener('keydown', function (e) { if (e.key === 'Enter') NET_ACTIONS.netLogin(); });
+}
+
+/** Ask for the captcha in a dialog, then run again what needed the router. */
+function netLoginModal() {
+  return new Promise(function (resolve, reject) {
+    var m = openModal('<header><h1>ล็อกอินเราเตอร์ใหม่</h1><span class="muted">การเชื่อมกับเราเตอร์หลุด · พิมพ์ตัวอักษรในภาพเพื่อทำต่อ</span></header><form class="body col" style="gap:12px">' + netCapHtml() +
+      '</form><footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">ล็อกอิน · ทำต่อ</button></footer>');
+    netCapLoad(m);
+    $('[data-x=no]', m).onclick = function () { closeModal(); reject(new Error('')); };
+    var go = function () {
+      var code = $('#net-code', m).value.trim();
+      if (!code) return toast('พิมพ์ตัวอักษรในภาพ', true);
+      var b = $('[data-x=ok]', m); b.disabled = true;
+      netCall('/login', { code: code }).then(function (st) { closeModal(); resolve(st); })
+        .catch(function (e) { b.disabled = false; toast(e.message, true); netCapLoad(m); });
+    };
+    $('[data-x=ok]', m).onclick = go;
+    $('form', m).onsubmit = function (e) { e.preventDefault(); go(); };
+  });
+}
+
+/** Call the helper; if the router wants the captcha, ask once and retry. */
+function netCallLogin(path, body) {
+  return netCall(path, body).catch(function (e) {
+    if (e.code !== 'CAPTCHA') throw e;
+    return netLoginModal().then(function () { return netCall(path, body); });
+  });
 }
 
 function netRows() {
@@ -5164,8 +5231,8 @@ function netBusy(on, text) {
 /** Apply a router change, then refresh. */
 function netDo(path, body, label) {
   netBusy(true, label);
-  return netCall(path, body).then(function (st) { S.net.st = st; netBusy(false); drawNet(); return st; })
-    .catch(function (e) { netBusy(false); toast(e.message, true); throw e; });
+  return netCallLogin(path, body).then(function (st) { S.net.st = st; netBusy(false); drawNet(); return st; })
+    .catch(function (e) { netBusy(false); if (e.message) toast(e.message, true); throw e; });
 }
 
 function netRow(mac) { return netRows().filter(function (r) { return r.mac === mac; })[0] || { mac: mac }; }
@@ -5230,10 +5297,16 @@ function netSetupModal() {
     '<div id="net-out" class="muted" style="font-size:13px;line-height:1.6"></div></div>' +
     '<footer><button class="btn" data-x="no">ปิด</button><button class="btn primary" data-x="ok">บันทึก · เชื่อมใหม่</button></footer>');
   var out = $('#net-out', m);
+  netCapBind(m, !!(S.netPing && S.netPing.loggedIn));
   $('[data-x=no]', m).onclick = function () { closeModal(); };
   $('[data-x=test]', m).onclick = function () {
     out.textContent = 'กำลังทดสอบ (อ่าน · เพิ่มรายการทดสอบ · ลบออก)…';
-    netCall('/test', {}).then(function (r) { out.innerHTML = '<span class="brand-text">ผ่าน ✓</span><br>' + r.steps.map(esc).join('<br>'); }).catch(function (e) { out.innerHTML = '<span class="warn-text">' + esc(e.message) + '</span>'; });
+    netCall('/test', {}).catch(function (e) {
+      if (e.code !== 'CAPTCHA') throw e;
+      var code = $('#net-code', m).value.trim();
+      if (!code) throw new Error('ต้องล็อกอินเราเตอร์ก่อน — พิมพ์ตัวอักษรในภาพด้านบน แล้วกดทดสอบอีกครั้ง');
+      return netCall('/login', { code: code }).then(function () { return netCall('/test', {}); });
+    }).then(function (r) { out.innerHTML = '<span class="brand-text">ผ่าน ✓</span><br>' + r.steps.map(esc).join('<br>'); }).catch(function (e) { out.innerHTML = '<span class="warn-text">' + esc(e.message) + '</span>'; });
   };
   $('[data-x=probe]', m).onclick = function () {
     out.textContent = 'กำลังเก็บหน้าเว็บของเราเตอร์…';
@@ -5247,16 +5320,25 @@ function netPair(scope) {
   if (!g('net-pass')) return toast('ใส่รหัสผ่านเราเตอร์', true);
   var b = netBox();
   if (b && !scope) netBusy(true, 'กำลังล็อกอินเราเตอร์…');
-  netCall('/pair', { host: g('net-host').trim(), user: g('net-user').trim(), pass: g('net-pass') }).then(function (r) {
+  if ($('#net-code', scope || document) && !g('net-code').trim()) return toast('พิมพ์ตัวอักษรในภาพ', true);
+  netCall('/pair', { host: g('net-host').trim(), user: g('net-user').trim(), pass: g('net-pass'), code: g('net-code').trim() }).then(function (r) {
     store('em_netkey', r.key);
     if (scope) closeModal();
     netBusy(false);
     toast('เชื่อมเราเตอร์แล้ว · เจอ ' + (r.devices || []).length + ' เครื่อง');
     loadNet();
-  }).catch(function (e) { netBusy(false); toast(e.message, true); });
+  }).catch(function (e) { netBusy(false); toast(e.message, true); netCapLoad(scope || netBox()); });
 }
 
 var NET_ACTIONS = {
+  netCap: function (el) { netCapLoad(el.closest('.modal') || netBox()); },
+  netLogin: function () {
+    var box = netBox(), c = $('#net-code', box);
+    if (!c || !c.value.trim()) return toast('พิมพ์ตัวอักษรในภาพ', true);
+    netBusy(true, 'กำลังล็อกอินเราเตอร์…');
+    netCall('/login', { code: c.value.trim() }).then(function () { netBusy(false); toast('ล็อกอินเราเตอร์แล้ว'); loadNet(); })
+      .catch(function (e) { netBusy(false); toast(e.message, true); netCapLoad(box); });
+  },
   netReload: function () { loadNet(); },
   netPair: function () { netPair(null); },
   netSetup: function () { netSetupModal(); },

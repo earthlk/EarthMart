@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.2'
+$Version = '1.3'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -66,6 +66,7 @@ function Save-Config($cfg) {
 # ---------------------------------------------------------------- router session
 
 $script:Jar = $null
+$script:LoggedIn = $false
 $script:JarAt = [DateTime]::MinValue
 $script:Base = ''
 
@@ -99,6 +100,32 @@ function Invoke-Router([string]$method, [string]$path, [string]$body, [string]$e
   $r = New-Object IO.StreamReader($resp.GetResponseStream())
   $text = $r.ReadToEnd(); $r.Close(); $resp.Close()
   return $text
+}
+
+function Invoke-RouterBytes([string]$path) {
+  $req = [System.Net.HttpWebRequest]::Create($script:Base + $path)
+  $req.Method = 'GET'; $req.CookieContainer = $script:Jar; $req.Timeout = 15000
+  $req.UserAgent = 'Mozilla/5.0 EarthMart'; $req.Referer = $script:Base + '/'
+  try { $resp = $req.GetResponse() } catch [System.Net.WebException] { throw ('router not reachable: ' + $_.Exception.Message) }
+  $ms = New-Object IO.MemoryStream
+  $resp.GetResponseStream().CopyTo($ms); $type = $resp.ContentType; $resp.Close()
+  if (-not $type -or $type -notmatch '^image/') { $type = 'image/jpeg' }
+  return [pscustomobject]@{ type = $type; bytes = $ms.ToArray() }
+}
+
+# Fresh captcha picture for the login (the router asks for one on every login).
+function Get-Captcha([string]$hostName) {
+  $prof = Get-Profile
+  if (-not $prof.captchaUrl) { return $null }
+  $script:Base = 'http://' + $hostName
+  $script:Jar = New-Object System.Net.CookieContainer
+  $script:LoggedIn = $false
+  $c = New-Object System.Net.Cookie('Cookie', 'body:Language:english:id=-1', '/', $hostName.Split(':')[0])
+  $script:Jar.Add($c)
+  $null = Invoke-Router 'GET' $prof.loginPage '' ''
+  $ms = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+  $img = Invoke-RouterBytes (Fill $prof.captchaUrl @{ rand = $ms })
+  return ('data:' + $img.type + ';base64,' + [Convert]::ToBase64String($img.bytes))
 }
 
 function Decode-Js([string]$t) {
@@ -179,18 +206,24 @@ function Sha256Hex([string]$s) {
   return (($h.ComputeHash([Text.Encoding]::UTF8.GetBytes($s)) | ForEach-Object { $_.ToString('x2') }) -join '')
 }
 
-function Connect-Router($cfg, [bool]$force) {
+function Connect-Router($cfg, [bool]$force, [string]$code = '') {
   $prof = Get-Profile
+  $cap = [bool]$prof.captchaUrl
   $script:Base = 'http://' + $cfg.host
-  if (-not $force -and $script:Jar -and ((Get-Date) - $script:JarAt).TotalSeconds -lt 120) { return $prof }
-  # After a failed login, wait before trying again: the router locks logins (and asks for a captcha) after a few misses.
-  if (-not $force -and $script:LoginPauseUntil -and (Get-Date) -lt $script:LoginPauseUntil) { throw ('login paused until ' + $script:LoginPauseUntil.ToString('HH:mm') + ' after a failed login (router locks after a few tries)') }
-  $script:Jar = New-Object System.Net.CookieContainer
+  if (-not $force -and $script:LoggedIn -and ($cap -or ((Get-Date) - $script:JarAt).TotalSeconds -lt 120)) { return $prof }
+  if ($cap) {
+    # A person has to read the captcha: the page shows it (from /captcha) and sends the letters here.
+    if (-not $code -or -not $script:Jar) { $script:LoggedIn = $false; throw 'captcha needed: type the letters from the picture to log in to the router' }
+  } else {
+    # After a failed login, wait before trying again: the router locks logins after a few misses.
+    if (-not $force -and $script:LoginPauseUntil -and (Get-Date) -lt $script:LoginPauseUntil) { throw ('login paused until ' + $script:LoginPauseUntil.ToString('HH:mm') + ' after a failed login (router locks after a few tries)') }
+    $script:Jar = New-Object System.Net.CookieContainer
+    $null = Invoke-Router 'GET' $prof.loginPage '' ''
+  }
+  $script:LoggedIn = $false
   $pass = Unprotect-Text $cfg.pass
-  $lp = Invoke-Router 'GET' $prof.loginPage '' ''
-  $cm = [regex]::Match($lp, '(?is).{0,120}(captcha|checkcode|verifycode).{0,160}')
-  if ($cm.Success) { Log ('login page mentions a captcha: ' + ($cm.Value -replace '\s+', ' ')) }
   $modes = @($prof.passModes)
+  if ($cap) { $modes = @($modes[0]) }
   foreach ($mode in $modes) {
     $token = Get-Token $prof
     $pw = ''
@@ -199,11 +232,12 @@ function Connect-Router($cfg, [bool]$force) {
       $inner = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Sha256Hex $pass)))
       $pw = Sha256Hex ($cfg.user + $inner + $token)
     } else { $pw = $pass }
-    $body = Fill $prof.loginBody @{ user = (UrlEnc $cfg.user); pass = (UrlEnc $pw); token = $token }
+    $body = Fill $prof.loginBody @{ user = (UrlEnc $cfg.user); pass = (UrlEnc $pw); token = $token; code = (UrlEnc $code.Trim()) }
     $res = Invoke-Router 'POST' $prof.loginUrl $body $prof.loginCookie
     $homeHtml = Invoke-Router 'GET' $prof.homePage '' ''
     if (-not (Logged-Out $prof $homeHtml) -and -not (Logged-Out $prof (Invoke-Router 'GET' $prof.filterPage '' ''))) {
       $script:JarAt = Get-Date
+      $script:LoggedIn = $true
       Log ('login ok (' + $mode + ')')
       return $prof
     }
@@ -211,11 +245,24 @@ function Connect-Router($cfg, [bool]$force) {
     $sn = [regex]::Replace($sn, '(?i)<!DOCTYPE[^>]*>|<meta[^>]*>|<link[^>]*>', '')
     if ($sn.Length -gt 700) { $sn = $sn.Substring(0, 700) }
     Log ('login failed with ' + $mode + ' - router answered: ' + $sn)
-    if ($sn -match '(?i)retri|captcha|checkcode|locked|try again') { break }
+    if ($sn -match '(?i)retri|locked') { $script:Jar = $null; throw 'router locked: too many tries, wait a minute and try again' }
+    if ($sn -match '(?i)captcha|checkcode') { break }
   }
   $script:Jar = $null
+  if ($cap) { throw 'login failed: wrong letters or password - try again with the new picture' }
   $script:LoginPauseUntil = (Get-Date).AddMinutes(10)
   throw 'login failed: check the router user name and password, and close 192.168.1.1 in every browser'
+}
+
+# Keep the router session alive so the captcha is needed only now and then.
+function Keep-Alive {
+  if (-not $script:LoggedIn) { return }
+  try {
+    $prof = Get-Profile
+    $u = $prof.keepAliveUrl; if (-not $u) { $u = $prof.filterPage }
+    $html = Invoke-Router 'GET' $u '' ''
+    if (Logged-Out $prof $html) { $script:LoggedIn = $false; Log 'router session ended (someone else logged in, or it timed out)' }
+  } catch { }
 }
 
 # ---------------------------------------------------------------- reading
@@ -398,7 +445,7 @@ function Test-Router($cfg) {
 
 # Save the router's pages so the page format can be checked (owner sends the folder to whoever maintains EarthMart).
 function Probe-Router($cfg) {
-  $prof = Connect-Router $cfg $true
+  $prof = Connect-Router $cfg $false
   $out = Join-Path $Dir 'router-probe'
   if (-not (Test-Path $out)) { New-Item -ItemType Directory -Path $out | Out-Null }
   $seen = @{}; $queue = New-Object System.Collections.Queue
@@ -491,13 +538,22 @@ function Handle($rq) {
     $prof = $null; try { $prof = Get-Profile } catch { }
     $pn = ''; if ($prof) { $pn = $prof.name }
     $hostName = ''; if ($cfg) { $hostName = $cfg.host }
-    Send $rq.stream 200 @{ ok = $true; version = $Version; configured = [bool]$cfg; host = $hostName; profile = $pn; localMacs = @(Get-LocalMacs) }
+    Send $rq.stream 200 @{ ok = $true; version = $Version; loggedIn = [bool]$script:LoggedIn; configured = [bool]$cfg; host = $hostName; profile = $pn; localMacs = @(Get-LocalMacs) }
+    return
+  }
+  if ($rq.path -eq '/captcha') {
+    $h = ''; if ($data -and $data.host) { $h = [string]$data.host } elseif ($cfg) { $h = $cfg.host }
+    if (-not $h) { $h = '192.168.1.1' }
+    $img = Get-Captcha $h
+    Send $rq.stream 200 @{ ok = $true; image = $img }
     return
   }
   if ($rq.path -eq '/pair') {
     if (-not $data -or -not $data.host -or -not $data.user -or -not $data.pass) { Send $rq.stream 400 @{ ok = $false; error = 'host, user and password are needed' }; return }
     $try = [pscustomobject]@{ host = [string]$data.host; user = [string]$data.user; pass = (Protect-Text ([string]$data.pass)); key = '' }
-    $script:Jar = $null; $script:LoginPauseUntil = $null
+    $script:LoginPauseUntil = $null; $script:LoggedIn = $false
+    if (-not (Get-Profile).captchaUrl) { $script:Jar = $null }
+    $null = Connect-Router $try $true ([string]$data.code)
     $st = Get-State $try
     $key = $cfg.key
     if (-not $key) { $key = ([guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')) }
@@ -511,6 +567,7 @@ function Handle($rq) {
   if (-not $cfg) { Send $rq.stream 400 @{ ok = $false; error = 'not set up yet'; code = 'SETUP' }; return }
   if ($rq.headers['x-em-key'] -ne $cfg.key) { Send $rq.stream 401 @{ ok = $false; error = 'wrong key'; code = 'KEY' }; return }
   switch ($rq.path) {
+    '/login' { $null = Connect-Router $cfg $true ([string]$data.code); Send $rq.stream 200 (Public-State (Get-State $cfg)) }
     '/state' { Send $rq.stream 200 (Public-State (Get-State $cfg)) }
     '/allow' { Send $rq.stream 200 (Public-State (Add-Entry $cfg ([string]$data.mac) ([string]$data.name))) }
     '/block' { Send $rq.stream 200 (Public-State (Remove-Entry $cfg ([string]$data.mac))) }
@@ -524,14 +581,24 @@ function Handle($rq) {
 $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, $Port)
 try { $listener.Start() } catch { Log ('port ' + $Port + ' busy - another helper is running'); exit 0 }
 Log ('helper ' + $Version + ' listening on 127.0.0.1:' + $Port + ' dir=' + $Dir)
+$keepEvery = 60
+try { $ka = (Get-Profile).keepAliveSeconds; if ($ka) { $keepEvery = [int]$ka } } catch { }
+$nextKeep = (Get-Date).AddSeconds($keepEvery)
 while ($true) {
+  if (-not $listener.Pending()) {
+    if ((Get-Date) -ge $nextKeep) { Keep-Alive; $nextKeep = (Get-Date).AddSeconds($keepEvery) }
+    Start-Sleep -Milliseconds 100
+    continue
+  }
   $client = $listener.AcceptTcpClient()
   try {
     $rq = Read-Request $client
     if ($rq) {
       try { Handle $rq } catch {
-        Log ('error ' + $rq.path + ': ' + $_.Exception.Message)
-        try { Send $rq.stream 500 @{ ok = $false; error = $_.Exception.Message } } catch { }
+        if ($_.Exception.Message -notmatch '^captcha needed') { Log ('error ' + $rq.path + ': ' + $_.Exception.Message) }
+        $msg = $_.Exception.Message; $ec = ''
+        if ($msg -match '^captcha needed') { $ec = 'CAPTCHA' } elseif ($msg -match '^login failed: wrong letters') { $ec = 'CAPTCHA_BAD' } elseif ($msg -match '^router locked') { $ec = 'LOCKED' }
+        try { Send $rq.stream 500 @{ ok = $false; error = $msg; code = $ec } } catch { }
       }
     }
   } catch { Log ('request failed: ' + $_.Exception.Message) }

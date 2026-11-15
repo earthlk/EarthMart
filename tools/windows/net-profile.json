@@ -4,13 +4,11 @@
   "homePage": "/index.asp",
   "loginPageMarker": "(?i)txt_Password|id=\"loginbutton\"|name=\"PassWord\"|<title>Waiting|top\\.location\\.replace\\(pageName\\)",
   "tokenUrl": "/asp/GetRandCount.asp",
-  "loginUrl": "/login.cgi",
-  "loginBody": "UserName={user}&PassWord={pass}&Language=english&x.X_HW_Token={token}",
+  "loginUrl": "/login.cgi?&CheckCodeErrFile=login.asp",
+  "loginBody": "UserName={user}&PassWord={pass}&Language=english&CheckCode={code}&x.X_HW_Token={token}",
   "loginCookie": "Cookie=body:Language:english:id=-1",
   "passModes": [
-    "base64",
-    "sha256",
-    "plain"
+    "base64"
   ],
   "tokenInPage": "hwonttoken",
   "changeTokenUrls": [
@@ -33,5 +31,7 @@
   "delUrl": "/html/bbsp/macfilter/del.cgi?x={filterPath}&RequestFile={filterPageRel}",
   "delBody": "{entry}=&x.X_HW_Token={token}",
   "modeUrl": "/html/bbsp/macfilter/set.cgi?x=InternetGatewayDevice.X_HW_Security&RequestFile={filterPageRel}",
-  "modeBody": "x.MacFilterPolicy={policy}&x.MacFilterRight={enabled}&x.X_HW_Token={token}"
+  "modeBody": "x.MacFilterPolicy={policy}&x.MacFilterRight={enabled}&x.X_HW_Token={token}",
+  "captchaUrl": "/getCheckCode.cgi?&rand={rand}",
+  "keepAliveSeconds": 60
 }

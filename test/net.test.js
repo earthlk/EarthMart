@@ -54,13 +54,26 @@ const server = http.createServer((req, res) => {
     await page.waitForSelector('[data-form=openShift]');
     await page.click('nav button[data-v=settings]');
     await page.click('[data-act=setTab][data-t=net]');
-    // 1. connect with the router password
+    // a fresh captcha picture: returns the letters the pretend router expects
+    const until = async f => { for (let i = 0; i < 100 && !f(); i++) await new Promise(x => setTimeout(x, 100)); assert.ok(f(), 'timed out'); };
+    const fresh = async trigger => {
+      const n = r.st.codes || 0;
+      await trigger();
+      await until(() => (r.st.codes || 0) > n);
+      await page.waitForFunction(() => /^data:/.test((document.querySelector('#net-capimg') || {}).src || ''));
+      await new Promise(x => setTimeout(x, 300));
+      return r.st.code;
+    };
+    // 1. connect with the router password + captcha
     await page.waitForSelector('#net-pass');
     await page.fill('#net-host', '127.0.0.1:' + r.port);
     await page.fill('#net-pass', 'wrong');
-    await page.click('[data-act=netPair]');
-    await page.waitForSelector('.toast:has-text("ล็อกอินเราเตอร์ไม่ได้")');
+    await page.fill('#net-code', await fresh(() => page.click('[data-act=netCap]')));
+    let code = await fresh(() => page.click('[data-act=netPair]'));
+    await page.waitForSelector('.toast:has-text("ล็อกอินไม่ผ่าน")');
+    await shot('n0-captcha');
     await page.fill('#net-pass', 'secret');
+    await page.fill('#net-code', code);
     await page.click('[data-act=netPair]');
     await page.waitForSelector('.net-newrow');
     assert.strictEqual(await page.$$eval('.net-newrow', x => x.length), 4, 'all connected devices show up as new');
@@ -100,7 +113,14 @@ const server = http.createServer((req, res) => {
     await shot('n4-whitelist-on');
     const saved = call('netDevices', T);
     assert.deepStrictEqual(saved.map(d => [d.name, d.allowed]).sort(), [['HUAWEI-P30', false], ['POS หน้าร้าน', true], ['มือถือเอิร์ธ', true], ['มือถือแบงค์', false]].sort(), 'names kept in the shop sheet');
-    // 5. self test from the connection settings
+    // 5. the router drops the session (someone opened 192.168.1.1): log in again with the captcha
+    r.st.sid = 'someone-else';
+    code = await fresh(() => page.click('[data-act=netReload]'));
+    await page.waitForSelector('h2:has-text("ล็อกอินเราเตอร์")');
+    await page.fill('#net-code', code);
+    await page.click('[data-act=netLogin]');
+    await page.waitForSelector('.net-table :text("มือถือแบงค์")');
+    // 6. self test from the connection settings
     await page.click('[data-act=netSetup]');
     await page.click('.modal [data-x=test]');
     await page.waitForSelector('#net-out:has-text("ผ่าน")');

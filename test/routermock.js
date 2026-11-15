@@ -17,10 +17,12 @@ module.exports = function startRouter(opts) {
       const u = new URL(req.url, 'http://x');
       const send = (txt, headers) => { res.writeHead(200, Object.assign({ 'Content-Type': 'text/html' }, headers || {})); res.end(txt); };
       if (u.pathname === '/') return send(loginPage);
+      if (u.pathname === '/getCheckCode.cgi') { st.code = Math.random().toString(36).slice(2, 8); st.codes = (st.codes || 0) + 1; res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9])); }
       if (u.pathname === '/asp/GetRandCount.asp') { if (st.sid && authed(req)) { st.rand = (Date.now().toString(16) + 'f00d').padEnd(32, '9'); return send('\ufeff' + st.rand); } return send('\ufeff' + st.token); }
       if (u.pathname === '/login.cgi') {
         const f = qs.parse(body);
-        const ok = (req.headers.cookie || '').indexOf('Cookie=body:Language:english:id=-1') >= 0 && f.UserName === 'admin' && Buffer.from(f.PassWord || '', 'base64').toString() === st.pass && f['x.X_HW_Token'] === st.token;
+        const ok = f.CheckCode && f.CheckCode === st.code && (req.headers.cookie || '').indexOf('Cookie=body:Language:english:id=-1') >= 0 && f.UserName === 'admin' && Buffer.from(f.PassWord || '', 'base64').toString() === st.pass && f['x.X_HW_Token'] === st.token;
+        st.code = null;
         if (!ok) return send('<script>top.location="/";</script>');
         st.sid = 'S' + Date.now().toString(36);
         return send('<script>top.location="/index.asp";</script>', { 'Set-Cookie': 'sid=' + st.sid + '; path=/' });
