@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.4'
+$Version = '1.5'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -89,8 +89,14 @@ function Open-Router([string]$method, [string]$path, [string]$body, [string]$ext
     $req.Method = $method
     $req.AllowAutoRedirect = $false
     $req.Timeout = 15000
-    $req.UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) EarthMart'
-    $req.Accept = 'text/html,application/xhtml+xml,image/avif,image/webp,image/apng,*/*;q=0.8'
+    # Look like Chrome: the router hands a different (non-matching) captcha to unusual clients.
+    $req.UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+    if ($script:WantImage) { $req.Accept = 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8' }
+    else { $req.Accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8' }
+    $req.Headers.Add('Accept-Language', 'th-TH,th;q=0.9')
+    $req.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
+    $req.KeepAlive = $true
+    if ($method -eq 'POST') { $req.Headers.Add('Origin', $script:Base) }
     $req.Referer = $script:Base + '/'
     if ($script:RefPage) { $req.Referer = $script:Base + $script:RefPage }
     if ($script:Jar -and $script:Jar.Count) { $req.Headers.Add('Cookie', (($script:Jar.Keys | ForEach-Object { $_ + '=' + $script:Jar[$_] }) -join '; ')) }
@@ -126,7 +132,8 @@ function Invoke-Router([string]$method, [string]$path, [string]$body, [string]$e
 }
 
 function Invoke-RouterBytes([string]$path) {
-  $resp = Open-Router 'GET' $path '' ''
+  $script:WantImage = $true
+  try { $resp = Open-Router 'GET' $path '' '' } finally { $script:WantImage = $false }
   $ms = New-Object IO.MemoryStream
   $resp.GetResponseStream().CopyTo($ms); $type = $resp.ContentType; $resp.Close()
   if (-not $type -or $type -notmatch '^image/') { $type = 'image/jpeg' }
