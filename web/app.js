@@ -5027,6 +5027,52 @@ var NET_TYPES = [['phone', 'มือถือ'], ['pc', 'คอม'], ['tablet'
 function netTypeTh(t) { return (NET_TYPES.filter(function (x) { return x[0] === t; })[0] || NET_TYPES[4])[1]; }
 function netRandomMac(mac) { return (parseInt(String(mac).charAt(1), 16) & 2) === 2; }
 
+/* Brand from the MAC prefix (web/macvendors.js) + model from the name the device gives itself. */
+var MAC_TYPE_TH = { phone: 'มือถือ', pc: 'คอม / โน้ตบุ๊ก', tv: 'ทีวี / กล่องทีวี', net: 'อุปกรณ์เน็ต (เราเตอร์ / ตัวขยาย)', cam: 'กล้องวงจรปิด', printer: 'ปริ้นเตอร์', pos: 'เครื่อง POS / รูดบัตร', iot: 'อุปกรณ์ IoT / สมาร์ทโฮม', game: 'เครื่องเล่นเกม', tablet: 'แท็บเล็ต' };
+var macIndex = null;
+function macVendor(mac) {
+  if (!macIndex) {
+    macIndex = {};
+    var V = window.MAC_VENDORS || {};
+    Object.keys(V).forEach(function (k) { for (var i = 0; i < V[k].length; i += 6) macIndex[V[k].substr(i, 6)] = k; });
+  }
+  var k = macIndex[String(mac || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase().slice(0, 6)];
+  return k ? { brand: k.split('|')[0], type: k.split('|')[1] } : null;
+}
+function macModel(host) {
+  var h = String(host || '').replace(/[_]+/g, ' ').trim();
+  if (!h) return '';
+  var m;
+  if (/^(DESKTOP|LAPTOP)-/i.test(h)) return 'คอม Windows';
+  if ((m = h.match(/\b(iPhone|iPad|iMac|MacBook(?:[- ]?(?:Air|Pro))?|Apple[- ]?TV|Apple[- ]?Watch)\b/i))) return m[1].replace(/-/g, ' ');
+  if ((m = h.match(/\bGalaxy[- ]?([A-Z]\d{1,3}[A-Za-z+]*(?:[- ](?:Ultra|Plus|FE|5G))?|Tab[- ]?[A-Z]\d*\w*|Note\s?\d+\w*|Z[- ]?(?:Flip|Fold)\s?\d*)/i))) return 'Samsung Galaxy ' + m[1].replace(/-/g, ' ');
+  if ((m = h.match(/\b(SM-[A-Z]\d{3,4}[A-Z]?)\b/i))) return 'Samsung ' + m[1].toUpperCase();
+  if ((m = h.match(/\b(Redmi[- ]?(?:Note[- ]?)?\d+\w*(?:[- ]Pro\+?)?|POCO[- ]?[A-Z]\d+\w*|Mi[- ]?\d+\w*|Xiaomi[- ]?\d+\w*)/i))) return 'Xiaomi ' + m[1].replace(/-/g, ' ');
+  if ((m = h.match(/\b(OPPO|vivo|realme|HUAWEI|HONOR|Infinix|TECNO|Nokia|Pixel|OnePlus|Moto)[- ]?([A-Za-z]{0,6}\d+[A-Za-z0-9+]*(?:[- ](?:Pro|Lite|Plus|5G))?)/i))) return m[1] + ' ' + m[2].replace(/-/g, ' ');
+  if (/^android[- ]/i.test(h)) return 'Android';
+  return '';
+}
+function netMacInfo(mac, host) {
+  var v = macVendor(mac), model = macModel(host), type = v ? v.type : '';
+  if (/iPad|Tab\b|Galaxy Tab|MatePad|Pad\b/i.test(model + ' ' + host)) type = 'tablet';
+  else if (/^(iMac|MacBook)|คอม Windows/i.test(model)) type = 'pc';
+  else if (!type && model) type = /Windows/.test(model) ? 'pc' : 'phone';
+  else if (!type && netRandomMac(mac)) type = 'phone';
+  var brand = v ? v.brand : netRandomMac(mac) ? '' : '';
+  return { brand: brand, model: model, type: type, typeTh: MAC_TYPE_TH[type] || '', random: netRandomMac(mac) };
+}
+function netMacInfoText(r) {
+  var i = r.info || {};
+  var parts = [];
+  if (i.model) parts.push('<b>' + esc(i.model) + '</b>');
+  if (i.brand && !(i.model && i.model.toLowerCase().indexOf(i.brand.split(' ')[0].toLowerCase()) >= 0)) parts.push(esc(i.brand));
+  if (i.typeTh) parts.push(i.brand === 'Apple' && !i.model ? 'น่าจะเป็น iPhone / iPad / Mac' : 'น่าจะเป็น' + esc(i.typeTh));
+  if (!i.brand && !i.model && i.random) parts.push('MAC แบบสุ่ม (มือถือรุ่นใหม่) — ดูยี่ห้อจาก MAC ไม่ได้');
+  if (!parts.length) parts.push('ไม่ทราบยี่ห้อ');
+  return parts.join(' · ');
+}
+function netTypeFromInfo(i) { return { phone: 'phone', pc: 'pc', tablet: 'tablet', cam: 'camera' }[(i || {}).type] || ''; }
+
 function netCall(path, body, timeoutMs) {
   var ctl = window.AbortController ? new AbortController() : null;
   var t = ctl ? setTimeout(function () { ctl.abort(); }, timeoutMs || 60000) : null;
@@ -5181,8 +5227,9 @@ function netRows() {
     r.local = n.local.indexOf(r.mac) >= 0;
     r.locked = r.local || !!(r.saved && r.saved.locked);
     r.name = (r.saved && r.saved.name) || (r.local ? 'เครื่องหน้าร้านนี้' : '') || r.routerName || r.host || '';
-    r.type = (r.saved && r.saved.type) || (r.local ? 'pc' : '');
+    r.type = (r.saved && r.saved.type) || (r.local ? 'pc' : '') || netTypeFromInfo(netMacInfo(r.mac, r.host || r.routerName));
     r.isNew = !r.allowed && !r.saved;
+    r.info = netMacInfo(r.mac, r.host || r.routerName);
     return r;
   });
 }
@@ -5203,14 +5250,14 @@ function drawNet() {
     '<div class="net-counts"><div><b class="brand-text">' + listed.filter(function (r) { return r.allowed; }).length + '</b><small>อนุญาต</small></div><div><b class="warn-text">' + listed.filter(function (r) { return !r.allowed; }).length + '</b><small>ไม่อนุญาต</small></div><div><b class="amber">' + fresh.length + '</b><small>เครื่องใหม่</small></div></div></div>' +
     (fresh.length ? '<div class="net-new"><div class="row" style="gap:8px"><span class="net-badge">' + fresh.length + '</span><b>เครื่องใหม่ที่ยังไม่อยู่ในรายชื่อ</b><span class="muted" style="font-size:13px">' + (on ? 'ตอนนี้ใช้เน็ตไม่ได้ จนกว่าจะกดอนุญาต' : 'เปิด Whitelist แล้วจะใช้เน็ตไม่ได้') + '</span></div>' +
       fresh.map(function (r) {
-        return '<div class="net-newrow"><div class="grow"><b>' + esc(r.host || 'ไม่ทราบชื่อ') + '</b> <small class="muted">· ชื่อที่เครื่องบอกมา</small><div class="muted" style="font-size:12px">' + esc(r.ip || '') + ' · <span class="mono">' + esc(r.mac) + '</span>' + (netRandomMac(r.mac) ? ' · MAC แบบสุ่ม' : '') + '</div></div>' +
+        return '<div class="net-newrow"><div class="grow"><b>' + esc(r.host || 'ไม่ทราบชื่อ') + '</b> <small class="muted">· ชื่อที่เครื่องบอกมา</small><div class="net-info">' + netMacInfoText(r) + '</div><div class="muted" style="font-size:12px">' + esc(r.ip || '') + ' · <span class="mono">' + esc(r.mac) + '</span></div></div>' +
           '<button class="btn sm" data-act="netDecline" data-mac="' + r.mac + '">ไม่อนุญาต</button><button class="btn sm primary" data-act="netNew" data-mac="' + r.mac + '">ตั้งชื่อ + อนุญาต</button></div>';
       }).join('') + '</div>' : '') +
     '<div class="card pad" style="min-width:0"><div class="row" style="gap:8px;margin-bottom:6px"><b style="font-size:17px">เครื่องในรายชื่อ</b><span class="grow"></span><button class="btn sm" data-act="netManual">+ เพิ่มเครื่องเอง (ใส่ MAC)</button></div>' +
     '<table class="table net-table"><thead><tr><th>ชื่อเครื่อง</th><th>IP ตอนนี้</th><th>MAC</th><th>สิทธิ์</th><th></th></tr></thead><tbody>' +
     (listed.map(function (r) {
       return '<tr class="' + (r.allowed ? '' : 'off') + '"><td><button type="button" class="linkish" data-act="netEdit" data-mac="' + r.mac + '"><i class="net-dot' + (r.online ? ' on' : '') + '"></i><b>' + esc(r.name || r.mac) + '</b> ' + (r.locked ? lock : '') + '</button>' +
-        '<div class="muted" style="font-size:12px;padding-left:18px">' + netTypeTh(r.type) + (r.saved && r.saved.ownerId && users[r.saved.ownerId] ? ' · ' + esc(users[r.saved.ownerId]) : '') + (r.online ? '' : ' · ออฟไลน์') + '</div></td>' +
+        '<div class="muted" style="font-size:12px;padding-left:18px">' + netTypeTh(r.type) + ' · ' + netMacInfoText(r).replace(/<\/?b>/g, '') + (r.saved && r.saved.ownerId && users[r.saved.ownerId] ? ' · ' + esc(users[r.saved.ownerId]) : '') + (r.online ? '' : ' · ออฟไลน์') + '</div></td>' +
         '<td class="muted num">' + esc(r.ip || '—') + '</td><td class="mono muted">' + esc(r.mac) + '</td><td class="' + (r.allowed ? 'brand-text' : 'warn-text') + '"><b>' + (r.allowed ? 'อนุญาต' : 'ไม่อนุญาต') + '</b></td>' +
         '<td class="r"><button type="button" class="switch' + (r.allowed ? ' on' : '') + '" role="switch" aria-checked="' + !!r.allowed + '" aria-label="อนุญาต ' + esc(r.name || r.mac) + '" data-act="netToggle" data-mac="' + r.mac + '"' + (r.locked && r.allowed ? ' disabled title="เครื่องสำคัญ — ปิดสิทธิ์ไม่ได้"' : '') + '></button></td></tr>';
     }).join('') || '<tr><td colspan="5" class="muted">ยังไม่มีเครื่องในรายชื่อ · กด "ตั้งชื่อ + อนุญาต" ที่เครื่องใหม่</td></tr>') + '</tbody></table></div></div>' +
@@ -5242,10 +5289,10 @@ function netDeviceModal(r, mode) {
   var users = (S.net && S.net.users) || [];
   var sv = r.saved || {};
   var title = mode === 'new' ? 'เครื่องใหม่ · ตั้งชื่อ + อนุญาต' : mode === 'manual' ? 'เพิ่มเครื่องเอง' : 'แก้ข้อมูลเครื่อง';
-  var m = openModal('<header><h1>' + title + '</h1>' + (r.mac && mode !== 'manual' ? '<span class="muted">' + esc(r.ip || '') + ' · <span class="mono">' + esc(r.mac) + '</span></span>' : '') + '</header><form class="body col" style="gap:12px">' +
+  var m = openModal('<header><h1>' + title + '</h1>' + (r.mac && mode !== 'manual' ? '<span class="muted">' + esc(r.ip || '') + ' · <span class="mono">' + esc(r.mac) + '</span></span><div class="net-info">' + netMacInfoText(r) + '</div>' : '') + '</header><form class="body col" style="gap:12px">' +
     (mode === 'manual' ? '<div class="field"><label for="nd-mac">MAC address</label><input id="nd-mac" class="mono" placeholder="เช่น A4:83:E7:22:91:BC" autocomplete="off"></div>' : '') +
     '<div class="field"><label for="nd-name">ชื่อเครื่อง</label><input id="nd-name" class="big-input" value="' + esc(sv.name || (mode === 'edit' ? r.name : '') || '') + '" placeholder="' + esc(r.host || 'เช่น มือถือแบงค์') + '"></div>' +
-    '<div class="field"><span class="lbl">ประเภท</span>' + chipRadio('ndtype', NET_TYPES.map(function (t) { return { v: t[0], t: t[1] }; }), sv.type || r.type || 'phone') + '</div>' +
+    '<div class="field"><span class="lbl">ประเภท</span>' + chipRadio('ndtype', NET_TYPES.map(function (t) { return { v: t[0], t: t[1] }; }), sv.type || r.type || netTypeFromInfo(r.info) || 'other') + '</div>' +
     '<div class="field"><span class="lbl">เป็นของใคร (ไม่บังคับ)</span>' + chipRadio('ndowner', [{ v: '', t: 'ไม่ระบุ' }].concat(users.filter(function (u) { return u.active !== false; }).map(function (u) { return { v: u.userId, t: u.name }; })), sv.ownerId || '') + '</div>' +
     '<label class="row" style="gap:8px"><input type="checkbox" id="nd-lock"' + (sv.locked || r.local ? ' checked' : '') + (r.local ? ' disabled' : '') + '> เครื่องสำคัญ — กันปิดสิทธิ์ (เช่น มือถือเจ้าของ, แท็บเล็ตจอลูกค้า)</label>' +
     (r.mac && netRandomMac(r.mac) ? '<div class="muted" style="font-size:13px;padding:10px 12px;border-radius:10px;background:var(--surface-muted)">MAC นี้เป็นแบบสุ่ม — ถ้าเป็นมือถือพนักงาน ให้ปิด MAC แบบสุ่มสำหรับ WiFi ร้านก่อน ไม่งั้นพรุ่งนี้อาจขึ้นเป็นเครื่องใหม่</div>' : '') +

@@ -884,3 +884,6 @@ a{color:var(--brand-text)}
 .net-capimg.loading::after{content:'กำลังโหลดภาพ…';font-size:12px;color:var(--muted,#888)}
 #net-code:not(:placeholder-shown){letter-spacing:.12em;font-size:18px}
 .net-capimg:not(.loading):has(img:not([src]))::after{content:'กด "ภาพใหม่" เมื่อจะเชื่อมใหม่';font-size:12px;color:var(--muted,#888);padding:0 8px}
+
+.net-info{font-size:13px;margin:2px 0;color:var(--text,#222)}
+.net-info b{font-weight:600}
