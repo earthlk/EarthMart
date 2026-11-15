@@ -79,7 +79,14 @@ function Invoke-Router([string]$method, [string]$path, [string]$body, [string]$e
   $req.UserAgent = 'Mozilla/5.0 EarthMart'
   $req.Referer = $script:Base + '/'
   if ($script:RefPage) { $req.Referer = $script:Base + $script:RefPage }
-  if ($extraCookie) { $req.Headers.Add('Cookie', $extraCookie) }
+  if ($extraCookie -and $script:Jar) {
+    # Put it in the jar: a hand-written Cookie header is dropped when a CookieContainer is used.
+    $i = $extraCookie.IndexOf('=')
+    if ($i -gt 0) {
+      $c = New-Object System.Net.Cookie($extraCookie.Substring(0, $i), $extraCookie.Substring($i + 1), '/', ([Uri]$url).Host)
+      $script:Jar.Add($c)
+    }
+  }
   if ($method -eq 'POST') {
     $bytes = [Text.Encoding]::UTF8.GetBytes([string]$body)
     $req.ContentType = 'application/x-www-form-urlencoded'
@@ -193,7 +200,7 @@ function Connect-Router($cfg, [bool]$force) {
     Log ('login failed with ' + $mode)
   }
   $script:Jar = $null
-  throw 'login failed: check the router user name and password'
+  throw 'login failed: check the router user name and password, and close 192.168.1.1 in every browser'
 }
 
 # ---------------------------------------------------------------- reading
@@ -283,6 +290,7 @@ function Post-Once($cfg, $prof, [string]$urlTpl, [string]$bodyTpl, $vals, [strin
   $short = ($res -replace '\s+', ' ')
   $tm = [regex]::Match($short, '(?i)<title>([^<]{0,80})'); $rb = [regex]::Match($short, '(?i)<body[^>]*>(.{0,160})')
   Log ('router said: ' + $short.Length + ' chars, title=' + $tm.Groups[1].Value + ' body=' + $rb.Groups[1].Value)
+  return [string]$res
 }
 
 # Send a change, trying each token source until $check says the router took it.
@@ -295,7 +303,16 @@ function Post-Change($cfg, [string]$urlTpl, [string]$bodyTpl, $vals, [scriptbloc
     $token = Token-From $prof $src $page
     if (-not $token) { $tried += ($src + ':none'); continue }
     Log ('token from ' + $src + ' (' + $token.Length + ' chars)')
-    Post-Once $cfg $prof $urlTpl $bodyTpl $vals.Clone() $token
+    $res = Post-Once $cfg $prof $urlTpl $bodyTpl $vals.Clone() $token
+    if ($res -match $prof.loginPageMarker) {
+      # The router dropped our session (it allows one login at a time). Log in again and resend once.
+      Log 'router logged us out (is 192.168.1.1 open in a browser?) - logging in again'
+      $prof = Connect-Router $cfg $true
+      $page = Invoke-Router 'GET' $prof.filterPage '' ''
+      $token = Token-From $prof $src $page
+      if ($token) { $res = Post-Once $cfg $prof $urlTpl $bodyTpl $vals.Clone() $token }
+      if ($res -match $prof.loginPageMarker) { throw 'login lost: the router keeps logging this PC out - close 192.168.1.1 in every browser' }
+    }
     $after = Get-State $cfg
     if (& $check $after) {
       if ($script:GoodToken -ne $src) { Log ('token source that works: ' + $src) }

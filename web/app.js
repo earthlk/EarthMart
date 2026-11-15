@@ -5042,7 +5042,8 @@ function netCall(path, body, timeoutMs) {
 }
 function netErrTh(m) {
   m = String(m || '');
-  if (/login failed/.test(m)) return 'ล็อกอินเราเตอร์ไม่ได้ — ตรวจชื่อผู้ใช้ / รหัสผ่าน';
+  if (/login lost/.test(m)) return 'เราเตอร์ตัดการเชื่อม — ปิดหน้า 192.168.1.1 ในเบราว์เซอร์ทุกเครื่อง (เราเตอร์ให้เข้าได้ทีละคน) แล้วลองใหม่';
+  if (/login failed/.test(m)) return 'ล็อกอินเราเตอร์ไม่ได้ — ปิดหน้า 192.168.1.1 ในเบราว์เซอร์ก่อน แล้วตรวจชื่อผู้ใช้ / รหัสผ่าน';
   if (/not reachable/.test(m)) return 'ติดต่อเราเตอร์ไม่ได้ — เครื่องนี้ต่อเน็ตร้านอยู่ไหม';
   if (/did not keep|did not remove|did not switch/.test(m)) return 'เราเตอร์ไม่รับคำสั่ง — กด "ทดสอบระบบ" ในตั้งค่าการเชื่อม';
   if (/list is full/.test(m)) return 'รายชื่อในเราเตอร์เต็มแล้ว';

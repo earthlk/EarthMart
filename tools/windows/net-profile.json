@@ -2,7 +2,7 @@
   "name": "AIS Fibre - Huawei HG8045X6",
   "loginPage": "/",
   "homePage": "/index.asp",
-  "loginPageMarker": "(?i)txt_Password|id=\"loginbutton\"|name=\"PassWord\"",
+  "loginPageMarker": "(?i)txt_Password|id=\"loginbutton\"|name=\"PassWord\"|<title>Waiting|top\\.location\\.replace\\(pageName\\)",
   "tokenUrl": "/asp/GetRandCount.asp",
   "loginUrl": "/login.cgi",
   "loginBody": "UserName={user}&PassWord={pass}&Language=english&x.X_HW_Token={token}",
