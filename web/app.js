@@ -5086,6 +5086,8 @@ function netMacInfoText(r) {
   return parts.join(' · ');
 }
 /** Name to offer for a device: "Samsung Galaxy Z Flip6 ของ supaporn", else the model, else what the device calls itself. */
+/** Connected now (on the router's Wi-Fi list / marked online) or not. */
+function netOnlineTag(r) { return r.online ? '<span class="net-on">● ใช้งานอยู่</span>' : '<span class="net-off">○ ไม่ได้เชื่อมต่อ</span>'; }
 function netSuggestName(r) { var i = r.info || {}; return i.model && i.owner ? i.model + ' ของ ' + i.owner : (i.model && !/^คอม Windows$/.test(i.model) ? i.model : '') || r.host || ''; }
 function netTypeFromInfo(i) { return { phone: 'phone', pc: 'pc', tablet: 'tablet', cam: 'camera' }[(i || {}).type] || ''; }
 
@@ -5253,8 +5255,9 @@ function netRows() {
 function drawNet() {
   var box = netBox(); if (!box) return;
   var n = S.net, st = n.st, rows = netRows();
-  var listed = rows.filter(function (r) { return !r.isNew; }).sort(function (a, b) { return (b.allowed - a.allowed) || (b.locked - a.locked) || String(a.name).localeCompare(String(b.name)); });
-  var fresh = rows.filter(function (r) { return r.isNew; });
+  var listed = rows.filter(function (r) { return !r.isNew; }).sort(function (a, b) { return (b.allowed - a.allowed) || (!!b.online - !!a.online) || (b.locked - a.locked) || String(a.name).localeCompare(String(b.name)); });
+  var fresh = rows.filter(function (r) { return r.isNew; }).sort(function (a, b) { return (!!b.online - !!a.online) || String(a.host || '').localeCompare(String(b.host || '')); });
+  var onlineN = rows.filter(function (r) { return r.online; }).length;
   var on = st.enabled && st.policy === 'white';
   var users = {};
   (n.users || []).forEach(function (u) { users[u.userId] = u.name; });
@@ -5263,17 +5266,17 @@ function drawNet() {
     '<div class="card pad net-master"><button type="button" class="switch big' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '" aria-label="เปิดระบบ Whitelist" data-act="netMode"></button>' +
     '<div class="grow"><b style="font-size:18px">เปิดระบบ Whitelist</b><div class="muted" style="font-size:13px">ใช้เน็ตร้านได้เฉพาะเครื่องที่อนุญาต · ปิดสวิตช์ = ทุกเครื่องใช้ได้ปกติ</div>' +
     (st.enabled && st.policy === 'black' ? '<div class="warn-text" style="font-size:13px">เราเตอร์ตั้งเป็น Blacklist อยู่ (ตั้งจากหน้า 192.168.1.1) — เปิดสวิตช์เพื่อเปลี่ยนเป็น Whitelist</div>' : '') + '</div>' +
-    '<div class="net-counts"><div><b class="brand-text">' + listed.filter(function (r) { return r.allowed; }).length + '</b><small>อนุญาต</small></div><div><b class="warn-text">' + listed.filter(function (r) { return !r.allowed; }).length + '</b><small>ไม่อนุญาต</small></div><div><b class="amber">' + fresh.length + '</b><small>เครื่องใหม่</small></div></div></div>' +
+    '<div class="net-counts"><div><b>' + onlineN + '</b><small>ใช้งานอยู่</small></div><div><b class="brand-text">' + listed.filter(function (r) { return r.allowed; }).length + '</b><small>อนุญาต</small></div><div><b class="warn-text">' + listed.filter(function (r) { return !r.allowed; }).length + '</b><small>ไม่อนุญาต</small></div><div><b class="amber">' + fresh.length + '</b><small>เครื่องใหม่</small></div></div></div>' +
     (fresh.length ? '<div class="net-new"><div class="row" style="gap:8px"><span class="net-badge">' + fresh.length + '</span><b>เครื่องใหม่ที่ยังไม่อยู่ในรายชื่อ</b><span class="muted" style="font-size:13px">' + (on ? 'ตอนนี้ใช้เน็ตไม่ได้ จนกว่าจะกดอนุญาต' : 'เปิด Whitelist แล้วจะใช้เน็ตไม่ได้') + '</span></div>' +
       fresh.map(function (r) {
-        return '<div class="net-newrow"><div class="grow"><b>' + esc(r.host || 'ไม่ทราบชื่อ') + '</b> <small class="muted">· ชื่อที่เครื่องบอกมา</small><div class="net-info">' + netMacInfoText(r) + '</div><div class="muted" style="font-size:12px">' + esc(r.ip || '') + ' · <span class="mono">' + esc(r.mac) + '</span></div></div>' +
+        return '<div class="net-newrow' + (r.online ? '' : ' idle') + '"><div class="grow"><b>' + esc(r.host || 'ไม่ทราบชื่อ') + '</b> ' + netOnlineTag(r) + '<div class="net-info">' + netMacInfoText(r) + '</div><div class="muted" style="font-size:12px">' + esc(r.ip || '') + ' · <span class="mono">' + esc(r.mac) + '</span></div></div>' +
           '<button class="btn sm" data-act="netDecline" data-mac="' + r.mac + '">ไม่อนุญาต</button><button class="btn sm primary" data-act="netNew" data-mac="' + r.mac + '">ตั้งชื่อ + อนุญาต</button></div>';
       }).join('') + '</div>' : '') +
     '<div class="card pad" style="min-width:0"><div class="row" style="gap:8px;margin-bottom:6px"><b style="font-size:17px">เครื่องในรายชื่อ</b><span class="grow"></span><button class="btn sm" data-act="netManual">+ เพิ่มเครื่องเอง (ใส่ MAC)</button></div>' +
     '<table class="table net-table"><thead><tr><th>ชื่อเครื่อง</th><th>IP ตอนนี้</th><th>MAC</th><th>สิทธิ์</th><th></th></tr></thead><tbody>' +
     (listed.map(function (r) {
-      return '<tr class="' + (r.allowed ? '' : 'off') + '"><td><button type="button" class="linkish" data-act="netEdit" data-mac="' + r.mac + '"><i class="net-dot' + (r.online ? ' on' : '') + '"></i><b>' + esc(r.name || r.mac) + '</b> ' + (r.locked ? lock : '') + '</button>' +
-        '<div class="muted" style="font-size:12px;padding-left:18px">' + netTypeTh(r.type) + ' · ' + netMacInfoText(r).replace(/<\/?b>/g, '') + (r.saved && r.saved.ownerId && users[r.saved.ownerId] ? ' · ' + esc(users[r.saved.ownerId]) : '') + (r.online ? '' : ' · ออฟไลน์') + '</div></td>' +
+      return '<tr class="' + (r.allowed ? '' : 'off') + '"><td><button type="button" class="linkish" data-act="netEdit" data-mac="' + r.mac + '"><i class="net-dot' + (r.online ? ' on' : '') + '"></i><b>' + esc(r.name || r.mac) + '</b> ' + (r.locked ? lock : '') + '</button> ' + netOnlineTag(r) +
+        '<div class="muted" style="font-size:12px;padding-left:18px">' + netTypeTh(r.type) + ' · ' + netMacInfoText(r).replace(/<\/?b>/g, '') + (r.saved && r.saved.ownerId && users[r.saved.ownerId] ? ' · ' + esc(users[r.saved.ownerId]) : '') + '</div></td>' +
         '<td class="muted num">' + esc(r.ip || '—') + '</td><td class="mono muted">' + esc(r.mac) + '</td><td class="' + (r.allowed ? 'brand-text' : 'warn-text') + '"><b>' + (r.allowed ? 'อนุญาต' : 'ไม่อนุญาต') + '</b></td>' +
         '<td class="r"><button type="button" class="switch' + (r.allowed ? ' on' : '') + '" role="switch" aria-checked="' + !!r.allowed + '" aria-label="อนุญาต ' + esc(r.name || r.mac) + '" data-act="netToggle" data-mac="' + r.mac + '"' + (r.locked && r.allowed ? ' disabled title="เครื่องสำคัญ — ปิดสิทธิ์ไม่ได้"' : '') + '></button></td></tr>';
     }).join('') || '<tr><td colspan="5" class="muted">ยังไม่มีเครื่องในรายชื่อ · กด "ตั้งชื่อ + อนุญาต" ที่เครื่องใหม่</td></tr>') + '</tbody></table></div></div>' +

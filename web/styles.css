@@ -844,8 +844,8 @@ a{color:var(--brand-text)}
 .net-wrap{position:relative}
 .net-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;align-items:start}
 .net-master{display:flex;align-items:center;gap:16px}
-.net-counts{display:flex;gap:18px;text-align:center}
-.net-counts b{display:block;font-size:24px}.net-counts small{font-size:12px;color:var(--muted)}
+.net-counts{display:flex;gap:16px;text-align:center;flex-shrink:0}
+.net-counts b{display:block;font-size:24px}.net-counts small{font-size:12px;color:var(--muted);white-space:nowrap}
 .switch{position:relative;width:46px;height:26px;border-radius:13px;border:0;background:var(--line-strong);cursor:pointer;flex:none;padding:0}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .15s}
 .switch.on{background:var(--brand)}.switch.on::after{left:23px}
@@ -887,3 +887,6 @@ a{color:var(--brand-text)}
 
 .net-info{font-size:13px;margin:2px 0;color:var(--text,#222)}
 .net-info b{font-weight:600}
+.net-on{font-size:12px;font-weight:600;color:var(--brand,#1f6f4a);white-space:nowrap}
+.net-off{font-size:12px;color:var(--muted,#888);white-space:nowrap}
+.net-newrow.idle{opacity:.72}

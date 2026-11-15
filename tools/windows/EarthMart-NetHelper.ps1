@@ -385,7 +385,8 @@ function Get-State($cfg) {
       foreach ($k in $names.Keys) {
         $n = $names[$k].name
         $hit = $devs | Where-Object { $_.mac -eq $k } | Select-Object -First 1
-        if ($hit) { if (-not $hit.name -or $hit.name -match '^(?i)android[-_]|^(?i)unknown$|^[0-9A-Fa-f:.-]+$') { $hit.name = $n } }
+        # On the Wi-Fi topology = connected right now.
+        if ($hit) { $hit.online = $true; if (-not $hit.name -or $hit.name -match '^(?i)android[-_]|^(?i)unknown$|^[0-9A-Fa-f:.-]+$') { $hit.name = $n } }
         else { $devs += [pscustomobject]@{ mac = $k; ip = $names[$k].ip; name = $n; online = $true } }
       }
     } catch { Log ('topo names: ' + $_.Exception.Message) }
