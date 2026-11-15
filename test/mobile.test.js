@@ -107,9 +107,12 @@ const server = http.createServer((req, res) => {
   await shot('m9-reports');
   await page.click('.tabbar [data-v=home]');
   await page.click('[data-act=go][data-v=settings]');
-  await page.waitForSelector('.set-grid');
-  const cols = await page.evaluate(() => getComputedStyle(document.querySelector('.set-grid')).gridTemplateColumns.split(' ').length);
+  await page.waitForSelector('.set-page');
+  const cols = await page.evaluate(() => getComputedStyle(document.querySelector('.set-page')).gridTemplateColumns.split(' ').length);
   assert.strictEqual(cols, 1, 'settings in one column');
+  const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+  assert.ok(sw <= 392, 'settings: no sideways page scroll (' + sw + ')');
+  await shot('m10-settings');
   await page.click('.tabbar [data-v=home]');
   await page.click('[data-act=mBulk]');
   await page.waitForSelector('#bulk-rows');

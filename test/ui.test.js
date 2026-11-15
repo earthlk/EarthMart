@@ -167,13 +167,17 @@ call('importProducts', T, [
 
   // 6. Settings: choose serial drawer + test
   await page.click('nav button[data-v=settings]');
+  await page.waitForSelector('.set-nav');
+  await shot('06a-settings-shop');
+  await page.click('[data-act=setTab][data-t=device]');
   await page.click('[data-act=drawerPick][data-m=serial]');
   await page.waitForSelector('[data-act=drawerTest]:not([disabled])');
   await page.click('[data-act=drawerTest]');
   await page.waitForFunction(() => window.__serialWrites.length === 1);
   assert.deepStrictEqual(await page.evaluate(() => window.__serialWrites[0]), [0x1B, 0x70, 0x00, 0x19, 0xFA]);
-  await page.waitForSelector('#auditrows tr');
   await shot('06-settings');
+  await page.click('[data-act=setTab][data-t=backup]');
+  await page.waitForSelector('#auditrows tr');
 
   // 7. Cash sale now kicks the drawer automatically; no-sale button logs NO_SALE
   await page.click('nav button[data-v=sale]');
@@ -737,6 +741,7 @@ call('importProducts', T, [
 
   // upload a poster slide from Settings: resized, stored, cached on the counter, shown on the display
   await page.click('nav button[data-v=settings]');
+  await page.click('[data-act=setTab][data-t=customer]');
   await page.waitForSelector('#slidelist');
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64');
   await page.setInputFiles('#sl-file', { name: 'poster.png', mimeType: 'image/png', buffer: png });
@@ -751,6 +756,7 @@ call('importProducts', T, [
 
   // 9zzzz. Auto-print off: the pay dialog starts with "print receipt" unticked (can still tick it)
   await page.click('nav button[data-v=settings]');
+  await page.click('[data-act=setTab][data-t=shop]');
   await page.selectOption('#s-autoPrint', '0');
   await page.click('#s-autoPrint >> xpath=ancestor::form >> button[type=submit]');
   await page.waitForSelector('.toast:has-text("บันทึกแล้ว")');

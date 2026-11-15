@@ -5008,6 +5008,7 @@ var ACC_ACTIONS = {
   accSetup: function () { accSetupModal(loadAcct); },
   accPrint: function () { var b = $('#pl-print'); if (b) accPrintHtml('<h2>' + esc(S.settings.shopName || '') + '</h2>' + b.innerHTML); },
   accTaxCsv: accTaxCsv,
+  setTab: function (el) { S.setTab = el.getAttribute('data-t'); $all('.set-nav button').forEach(function (b) { b.classList.toggle('on', b === el); }); $all('.set-sec').forEach(function (x) { x.classList.toggle('hidden', x.getAttribute('data-sec') !== S.setTab); }); },
   accTaxPrint: function () { var b = $('#acc-body'); if (b) accPrintHtml('<h2>' + esc(S.settings.shopName || '') + ' · สรุปรายได้–รายจ่าย ' + (acc().taxHalf ? 'ม.ค.–มิ.ย. ' : 'ทั้งปี ') + beYear(acc().taxYear) + '</h2>' + b.innerHTML); },
   mExpense: function () { accCats().then(function () { expenseModal(null, function () { toast('บันทึกแล้ว'); }); }); }
 };
@@ -5521,8 +5522,12 @@ function renderSettings() {
   var pal = ['forest', 'ocean', 'sunset', 'berry', 'ruby', 'mono'];
   var palTh = { forest: 'ป่า', ocean: 'ทะเล', sunset: 'อัสดง', berry: 'เบอร์รี่', ruby: 'ทับทิม', mono: 'ขาวดำ' };
   var local = store('em_theme') || '';
-  return '<div class="page" style="flex-direction:column;gap:14px"><div class="set-grid">' +
-    '<form class="card pad col" data-form="settings" style="gap:10px"><h2>ร้าน</h2>' + f('shopName', 'ชื่อร้าน (บนใบเสร็จ)') + f('shopAddress', 'ที่อยู่') +
+  var tab = S.setTab || 'shop';
+  var sec = function (id, html) { return '<section class="set-sec' + (tab === id ? '' : ' hidden') + '" data-sec="' + id + '">' + html + '</section>'; };
+  return '<div class="page set-page"><nav class="card set-nav" aria-label="หมวดตั้งค่า">' + SET_TABS.map(function (t) {
+    return '<button type="button" data-act="setTab" data-t="' + t[0] + '" class="' + (tab === t[0] ? 'on' : '') + '"><b>' + t[1] + '</b><small>' + t[2] + '</small></button>';
+  }).join('') + '</nav><div class="set-body">' +
+    sec('shop', '<form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>ร้าน / ใบเสร็จ</h2>' + f('shopName', 'ชื่อร้าน (บนใบเสร็จ)') + f('shopAddress', 'ที่อยู่') +
     f('taxId', 'เลขผู้เสียภาษี', 'ถ้ามี') + f('promptPayId', 'พร้อมเพย์', 'เบอร์มือถือ / เลขบัตร 13 หลัก') + f('receiptFooter', 'ข้อความท้ายใบเสร็จ') +
     f('billPrefix', 'คำนำหน้าเลขบิล', 'เว้นว่างได้') +
     '<div class="field"><label for="s-autoPrint">พิมพ์ใบเสร็จอัตโนมัติหลังรับเงิน</label><select id="s-autoPrint" data-skey="autoPrint">' +
@@ -5530,14 +5535,14 @@ function renderSettings() {
     '<div class="field"><label for="s-autoLockMinutes">ล็อกหน้าจอเมื่อไม่มีใครใช้ (ต้องใส่ PIN ใหม่)</label><select id="s-autoLockMinutes" data-skey="autoLockMinutes">' +
       [['0', 'ไม่ล็อก'], ['5', '5 นาที'], ['10', '10 นาที'], ['15', '15 นาที'], ['30', '30 นาที'], ['60', '1 ชั่วโมง'], ['120', '2 ชั่วโมง']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.autoLockMinutes === undefined ? '5' : st.autoLockMinutes) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
-    '<h2 style="margin:8px 0 0">จอลูกค้า</h2>' + f('customerWelcome', 'ข้อความต้อนรับ', 'ยินดีต้อนรับค่ะ') + f('shopHours', 'เวลาเปิด–ปิด', 'เช่น เปิดทุกวัน 06:00–22:00') +
+      '<button class="btn primary" type="submit">บันทึก</button></form>') +
+    sec('customer', '<div class="set-cols"><form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>จอลูกค้า</h2>' + f('customerWelcome', 'ข้อความต้อนรับ', 'ยินดีต้อนรับค่ะ') + f('shopHours', 'เวลาเปิด–ปิด', 'เช่น เปิดทุกวัน 06:00–22:00') +
     f('customerPromoTitle', 'ข้อความโปร (หัวข้อ · เป็นสไลด์ข้อความ)', 'เว้นว่าง = ไม่แสดง') + f('customerPromoText', 'ข้อความโปร (รายละเอียด)', 'เช่น ซื้อ 2 ขวด 25 บาท') +
     '<div class="grid3">' + f('slideSeconds', 'วินาทีต่อสไลด์', '8', 'number') +
     '<div class="field"><label for="s-slidesAuto">สไลด์จากโปรโมชั่น</label><select id="s-slidesAuto" data-skey="slidesAuto"><option value="1">แสดง</option><option value="0"' + (st.slidesAuto === '0' ? ' selected' : '') + '>ไม่แสดง</option></select></div>' +
     '<div class="field"><label for="s-cdHints">บอกโปรตอนสแกน</label><select id="s-cdHints" data-skey="cdHints"><option value="1">เปิด</option><option value="0"' + (st.cdHints === '0' ? ' selected' : '') + '>ปิด</option></select></div></div>' +
-    '<button class="btn primary" type="submit">บันทึก</button></form>' +
-    '<form class="card pad col" data-form="settings" style="gap:10px"><h2>ธีม & LINE</h2>' +
-    '<div class="field"><label for="s-theme">โหมดสี (ทั้งร้าน)</label><select id="s-theme" data-skey="theme">' + ['light', 'dark', 'system'].map(function (t) {
+      '<button class="btn primary" type="submit">บันทึก</button></form>' + slidesCard() + '</div>') +
+    sec('look', '<form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>ธีมสี & LINE</h2>' + '<div class="field"><label for="s-theme">โหมดสี (ทั้งร้าน)</label><select id="s-theme" data-skey="theme">' + ['light', 'dark', 'system'].map(function (t) {
       return '<option value="' + t + '"' + (st.theme === t ? ' selected' : '') + '>' + { light: 'สว่าง', dark: 'มืด', system: 'ตามเครื่อง' }[t] + '</option>';
     }).join('') + '</select></div>' +
     '<div class="field"><label for="s-palette">สีหลัก</label><select id="s-palette" data-skey="palette">' + pal.map(function (p) {
@@ -5546,30 +5551,34 @@ function renderSettings() {
     '<div class="field"><label for="localtheme">โหมดสีเฉพาะเครื่องนี้</label><select id="localtheme" data-change="localTheme"><option value="">ตามร้าน</option>' +
     '<option value="light"' + (local === 'light' ? ' selected' : '') + '>สว่าง</option><option value="dark"' + (local === 'dark' ? ' selected' : '') + '>มืด</option></select></div>' +
     f('lineChannelToken', 'LINE Channel access token', 'เว้นว่าง = ไม่ส่ง', 'password') + f('lineTargetId', 'LINE ผู้รับ (userId / groupId)') +
-    '<button class="btn primary" type="submit">บันทึก</button></form>' +
-    '<div class="card pad col" style="gap:10px"><h2>เครื่องนี้</h2><div class="muted" style="font-size:13px;word-break:break-all">รหัส ' + esc(S.deviceId) + '</div>' +
+      '<button class="btn primary" type="submit">บันทึก</button></form>') +
+    sec('device', '<div class="card pad col set-card" style="gap:10px"><h2>เครื่องนี้</h2>' + '<div class="muted" style="font-size:13px;word-break:break-all">รหัส ' + esc(S.deviceId) + '</div>' +
     '<div>' + (S.isCounter ? '<span class="tag green">เครื่องหน้าร้าน</span>' : '<span class="tag warn">ยังไม่ได้ลงทะเบียน</span>') + '</div>' +
     (S.isCounter ? '<button class="btn warn" data-act="unregisterThis">ยกเลิกการลงทะเบียนเครื่องนี้</button>' : '<button class="btn primary" data-act="registerThis">ลงทะเบียนเป็นเครื่องหน้าร้าน</button>') +
     '<div id="devlist" class="muted" style="font-size:13px"></div><hr style="border:0;border-top:1px solid var(--line);width:100%">' +
-    drawerSettings() + '<hr style="border:0;border-top:1px solid var(--line);width:100%">' +
-    '<h2>การเชื่อมต่อ</h2><div class="muted" style="font-size:13px;word-break:break-all">' + esc(conn().url.replace(/(macros\/s\/.{6}).*(.{6}\/exec)/, '$1…$2')) + '</div>' +
+    drawerSettings() + '</div>') +
+    sec('users', '<div class="card pad set-card wide"><h2>พนักงาน & สิทธิ์</h2><div id="userlist" class="muted">กำลังโหลด…</div>' +
+    '<form class="row" data-form="addUser" style="margin-top:10px;flex-wrap:wrap"><label class="sr" for="nu-name">ชื่อ</label><input id="nu-name" placeholder="ชื่อ" style="width:140px">' +
+    '<label class="sr" for="nu-role">สิทธิ์</label><select id="nu-role"><option value="cashier">แคชเชียร์</option><option value="owner">เจ้าของ</option></select>' +
+    '<label class="sr" for="nu-pin">PIN</label><input id="nu-pin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN 4–6 หลัก" style="width:120px">' +
+    '<button class="btn" type="submit">+ เพิ่ม</button></form></div>' + '') +
+    sec('connect', '<div class="card pad col set-card" style="gap:10px">' + '<h2>การเชื่อมต่อ</h2><div class="muted" style="font-size:13px;word-break:break-all">' + esc(conn().url.replace(/(macros\/s\/.{6}).*(.{6}\/exec)/, '$1…$2')) + '</div>' +
     '<div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="copyConnect">คัดลอกลิงก์ตั้งค่าเครื่องอื่น</button><button class="btn sm ghost" data-act="connect">เปลี่ยน</button></div>' +
     '<div class="muted" style="font-size:12px">ลิงก์นี้มี API key — ส่งให้เฉพาะเครื่องของร้าน</div>' +
     '<hr style="border:0;border-top:1px solid var(--line);width:100%"><h2>ไฟล์เปิดในเครื่อง</h2>' +
     (window.EM_LOCAL ? '<div class="muted" style="font-size:13px">เครื่องนี้เปิดจากไฟล์ในคอม · เวอร์ชัน ' + esc(window.EM_BUILD || '') + ' (UTC)<br>ไฟล์ไม่อัปเดตเอง — มีฟีเจอร์ใหม่ให้ดาวน์โหลดชุดติดตั้งแล้วรัน Install-EarthMart.bat อีกครั้ง</div>' +
       '<a class="btn sm" href="https://earthlk.github.io/EarthMart/EarthMart-Setup.zip" target="_blank" rel="noopener">ดาวน์โหลดชุดติดตั้งล่าสุด</a>'
       : '<div class="muted" style="font-size:13px">ติดตั้งบนคอมเครื่องอื่น: แตก ZIP แล้วรัน Install-EarthMart.bat → ได้ไอคอนหน้าร้าน (kiosk) / หลังร้าน และเปิดเองตอนเปิดเครื่อง · ยังเชื่อมกับ Google Sheet ของร้าน</div>' +
-      '<div class="row" style="gap:6px;flex-wrap:wrap"><a class="btn sm" href="EarthMart-Setup.zip" download>ชุดติดตั้ง Windows (.zip)</a><a class="btn sm ghost" href="EarthMart-local.html" download="EarthMart.html">เฉพาะไฟล์ .html</a></div>') +
-    '<hr style="border:0;border-top:1px solid var(--line);width:100%">' +
-    '<h2>สำรองข้อมูล</h2><div class="muted" style="font-size:13px">Backup อัตโนมัติทุกวันตั้งได้ด้วย installTriggers() (ดูคู่มือ)</div>' +
-    '<button class="btn" data-act="backupNow">Backup ตอนนี้</button></div></div>' +
-    '<div class="set-grid2">' + slidesCard() + '<div class="card pad"><h2>พนักงาน & สิทธิ์</h2><div id="userlist" class="muted">กำลังโหลด…</div>' +
-    '<form class="row" data-form="addUser" style="margin-top:10px;flex-wrap:wrap"><label class="sr" for="nu-name">ชื่อ</label><input id="nu-name" placeholder="ชื่อ" style="width:140px">' +
-    '<label class="sr" for="nu-role">สิทธิ์</label><select id="nu-role"><option value="cashier">แคชเชียร์</option><option value="owner">เจ้าของ</option></select>' +
-    '<label class="sr" for="nu-pin">PIN</label><input id="nu-pin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN 4–6 หลัก" style="width:120px">' +
-    '<button class="btn" type="submit">+ เพิ่ม</button></form></div></div>' +
-    '<div class="card pad" style="max-height:420px;overflow:auto"><h2>บันทึกการทำงาน (ล่าสุด 100)</h2><table class="table"><tbody id="auditrows"><tr><td class="muted">กำลังโหลด…</td></tr></tbody></table></div></div>';
+      '<div class="row" style="gap:6px;flex-wrap:wrap"><a class="btn sm" href="EarthMart-Setup.zip" download>ชุดติดตั้ง Windows (.zip)</a><a class="btn sm ghost" href="EarthMart-local.html" download="EarthMart.html">เฉพาะไฟล์ .html</a></div>') +'</div>') +
+    sec('backup', '<div class="set-cols"><div class="card pad col set-card" style="gap:10px">' + '<h2>สำรองข้อมูล</h2><div class="muted" style="font-size:13px">Backup อัตโนมัติทุกวันตั้งได้ด้วย installTriggers() (ดูคู่มือ)</div>' +
+      '<button class="btn" data-act="backupNow">Backup ตอนนี้</button>' +'</div>' +
+      '<div class="card pad" style="max-height:calc(100vh - 140px);overflow:auto"><h2>บันทึกการทำงาน (ล่าสุด 100)</h2><table class="table"><tbody id="auditrows"><tr><td class="muted">กำลังโหลด…</td></tr></tbody></table></div></div>') +
+    '</div></div>';
 }
+
+var SET_TABS = [['shop', 'ร้าน / ใบเสร็จ', 'ชื่อร้าน · พร้อมเพย์ · พิมพ์ · ล็อกจอ'], ['customer', 'จอลูกค้า / สไลด์', 'ข้อความต้อนรับ · โปร · รูปสไลด์'],
+  ['look', 'ธีมสี & LINE', 'โหมดสี · สีหลัก'], ['device', 'เครื่องหน้าร้าน', 'ลงทะเบียน · ลิ้นชักเก็บเงิน'], ['users', 'ผู้ใช้ / PIN', 'พนักงาน · สิทธิ์'],
+  ['connect', 'การเชื่อมต่อ / ติดตั้ง', 'ลิงก์ตั้งค่าเครื่อง · ไฟล์ติดตั้ง'], ['backup', 'สำรองข้อมูล & บันทึก', 'Backup · ประวัติการทำงาน']];
 
 function drawerSettings() {
   if (!window.CashDrawer) return '';
