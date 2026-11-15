@@ -97,7 +97,7 @@ const server = http.createServer((req, res) => {
     await page.waitForSelector('.net-table :text("มือถือแบงค์")');
     await page.click('.net-newrow:has-text("HUAWEI-P30") [data-act=netDecline]');
     await page.waitForFunction(() => !document.querySelector('.net-newrow'));
-    assert.deepStrictEqual(r.st.list.map(e => e.mac).sort(), [HERE, 'A4:83:E7:22:91:BC', '7A:11:C8:5D:02:E9'].sort(), 'router whitelist has the allowed devices');
+    assert.deepStrictEqual(r.st.macs().sort(), [HERE, 'A4:83:E7:22:91:BC', '7A:11:C8:5D:02:E9'].sort(), 'router whitelist has the allowed devices');
     // 3. whitelist on (with the safety check)
     await page.click('[data-act=netMode]');
     await page.waitForSelector('.modal h1:has-text("เปิดระบบ Whitelist")');
@@ -109,7 +109,7 @@ const server = http.createServer((req, res) => {
     assert.ok(await page.$('tr:has-text("POS หน้าร้าน") .switch[disabled]'), 'this PC is protected');
     await page.click('tr:has-text("มือถือแบงค์") [data-act=netToggle]');
     await page.waitForSelector('tr:has-text("มือถือแบงค์") .switch:not(.on)');
-    assert.ok(!r.st.list.some(e => e.mac === '7A:11:C8:5D:02:E9'), 'blocked phone removed from the router list');
+    assert.ok(!r.st.list.some(e => e.mac === '7A:11:C8:5D:02:E9'), 'blocked phone removed from the router list (every SSID)');
     await shot('n4-whitelist-on');
     const saved = call('netDevices', T);
     assert.deepStrictEqual(saved.map(d => [d.name, d.allowed]).sort(), [['HUAWEI-P30', false], ['POS หน้าร้าน', true], ['มือถือเอิร์ธ', true], ['มือถือแบงค์', false]].sort(), 'names kept in the shop sheet');

@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.9'
+$Version = '2.0'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -327,21 +327,23 @@ function Parse-Filter($prof, [string]$page) {
     $name = ''
     foreach ($q in [regex]::Matches($chunk, '"([^"]*)"')) {
       $v = $q.Groups[1].Value
-      if ($v -and $v -notmatch $macRx -and $v -notmatch '^InternetGatewayDevice' -and $v -notmatch '^\d+$' -and $v.Length -lt 64) { $name = $v; break }
+      if ($v -and $v -notmatch $macRx -and $v -notmatch '^InternetGatewayDevice' -and $v -notmatch '^\d+$' -and $v -notmatch '^(?i)SSID-?\d+$' -and $v.Length -lt 64) { $name = $v; break }
     }
+    $ssid = ''; $sm = [regex]::Match($chunk, '(?i)"SSID-?(\d+)"'); if ($sm.Success) { $ssid = 'SSID-' + $sm.Groups[1].Value }
     $entry = $ms[$i].Value
     if (-not ($entries | Where-Object { $_.entry -eq $entry })) {
-      $entries += [pscustomobject]@{ entry = $entry; mac = $mac.Value.ToUpper().Replace('-', ':'); name = $name }
+      $entries += [pscustomobject]@{ entry = $entry; mac = $mac.Value.ToUpper().Replace('-', ':'); name = $name; ssid = $ssid }
     }
   }
   $enabled = $false; $policy = ''
   # The page states them as  var enableFilter = '1';  var Mode = '1';  (its script also mentions
   # "x.MacFilterRight", 1, 1 in submit code - that is not the current value, so prefer the var line).
-  $m1 = [regex]::Match($t, ('\bvar\s+' + $prof.enabledField + '\s*=\s*[''"]?(\d)'))
-  if (-not $m1.Success) { $m1 = [regex]::Match($t, ($prof.enabledField + '\W{1,6}(\d)')) }
+  # enabledField / policyField may list several names: the first  var <name> = 'N'  found wins.
+  $m1 = $null; foreach ($f in @($prof.enabledField)) { $x = [regex]::Match($t, ('\bvar\s+' + $f + '\s*=\s*[''"]?(\d)')); if ($x.Success) { $m1 = $x; break } }
+  if (-not $m1) { $m1 = [regex]::Match($t, (@($prof.enabledField)[0] + '\W{1,6}(\d)')) }
   if ($m1.Success) { $enabled = ($m1.Groups[1].Value -eq '1') }
-  $m2 = [regex]::Match($t, ('\bvar\s+' + $prof.policyField + '\s*=\s*[''"]?(\d)'))
-  if (-not $m2.Success) { $m2 = [regex]::Match($t, ($prof.policyField + '\W{1,6}(\d)')) }
+  $m2 = $null; foreach ($f in @($prof.policyField)) { $x = [regex]::Match($t, ('\bvar\s+' + $f + '\s*=\s*[''"]?(\d)')); if ($x.Success) { $m2 = $x; break } }
+  if (-not $m2) { $m2 = [regex]::Match($t, (@($prof.policyField)[0] + '\W{1,6}(\d)')) }
   if ($m2.Success) { if ($m2.Groups[1].Value -eq [string]$prof.policyWhitelist) { $policy = 'white' } else { $policy = 'black' } }
   return [pscustomobject]@{ enabled = $enabled; policy = $policy; entries = @($entries) }
 }
@@ -480,16 +482,26 @@ function Normalize-Mac([string]$mac) {
   return (($m -split '(..)' | Where-Object { $_ }) -join ':')
 }
 
+# Wi-Fi filter entries are per SSID (2.4G and 5G are separate SSIDs): one entry for each SSID in the profile.
 function Add-Entry($cfg, [string]$mac, [string]$name) {
   $prof = Get-Profile
   $mac = Normalize-Mac $mac
   $st = Get-State $cfg
-  if ($st.entries | Where-Object { $_.mac -eq $mac }) { return $st }
-  if ($prof.maxEntries -and $st.entries.Count -ge [int]$prof.maxEntries) { throw ('the router list is full (' + $prof.maxEntries + ')') }
+  $ssids = @($prof.ssids | Where-Object { $_ }); if (-not $ssids.Count) { $ssids = @('') }
+  $have = @($st.entries | Where-Object { $_.mac -eq $mac })
+  $todo = @($ssids | Where-Object { $s = $_; -not ($have | Where-Object { $_.ssid -eq $s -or (-not $s) -or (-not $_.ssid) }) })
+  if (-not $todo.Count) { return $st }
+  if ($prof.maxEntries -and ($st.entries.Count + $todo.Count) -gt [int]$prof.maxEntries) { throw ('the router list is full (' + $prof.maxEntries + ')') }
   $safe = ($name -replace '[^A-Za-z0-9 _.-]', '').Trim()
   if (-not $safe) { $safe = 'EM-' + $mac.Replace(':', '').Substring(6) }
-  $after = Post-Change $cfg $prof.addUrl $prof.addBody @{ mac = (UrlEnc $mac); name = (UrlEnc $safe) } { param($a) [bool]($a.entries | Where-Object { $_.mac -eq $mac }) }
-  if (-not $after) { throw 'the router did not keep the new entry' }
+  $after = $null; $ok = 0
+  foreach ($ssid in $todo) {
+    $before = @($st.entries | Where-Object { $_.mac -eq $mac }).Count
+    $r = Post-Change $cfg $prof.addUrl $prof.addBody @{ mac = (UrlEnc $mac); name = (UrlEnc $safe); ssid = (UrlEnc $ssid) } { param($a) @($a.entries | Where-Object { $_.mac -eq $mac }).Count -gt $before }
+    if ($r) { $ok++; $after = $r; $st = $r } else { Log ('add ' + $mac + ' to ' + $ssid + ' was not kept') }
+  }
+  if (-not $ok -and -not $have.Count) { throw 'the router did not keep the new entry' }
+  if (-not $after) { $after = Get-State $cfg }
   return $after
 }
 
@@ -497,9 +509,11 @@ function Remove-Entry($cfg, [string]$mac) {
   $prof = Get-Profile
   $mac = Normalize-Mac $mac
   $st = Get-State $cfg
-  $e = $st.entries | Where-Object { $_.mac -eq $mac } | Select-Object -First 1
-  if (-not $e) { return $st }
-  $after = Post-Change $cfg $prof.delUrl $prof.delBody @{ entry = $e.entry } { param($a) -not ($a.entries | Where-Object { $_.mac -eq $mac }) }
+  $es = @($st.entries | Where-Object { $_.mac -eq $mac })
+  if (-not $es.Count) { return $st }
+  # One request can delete several rows:  A=&B=&x.X_HW_Token=...
+  $joined = ($es | ForEach-Object { $_.entry }) -join '=&'
+  $after = Post-Change $cfg $prof.delUrl $prof.delBody @{ entry = $joined } { param($a) -not ($a.entries | Where-Object { $_.mac -eq $mac }) }
   if (-not $after) { throw 'the router did not remove the entry' }
   return $after
 }
@@ -517,6 +531,7 @@ function Test-Router($cfg) {
   $steps = @()
   $st = Get-State $cfg
   $steps += ('read: filter ' + $(if ($st.enabled) { 'on' } else { 'off' }) + ', ' + $st.entries.Count + ' entries, ' + $st.devices.Count + ' devices seen')
+  try { Set-Content -Path (Join-Path $tmp 'earthmart-filterpage.txt') -Value $st.page -Encoding UTF8 } catch { }
   $testMac = '02:EA:57:00:00:01'
   $null = Add-Entry $cfg $testMac 'EM-TEST'
   $steps += 'add test entry: ok'
@@ -608,7 +623,14 @@ function Read-Request($client) {
 }
 
 function Public-State($st) {
-  return [pscustomobject]@{ ok = $true; enabled = $st.enabled; policy = $st.policy; entries = $st.entries; devices = $st.devices; at = (Get-Date -Format 'HH:mm:ss') }
+  # One row per device for the page (the router keeps one row per SSID).
+  $rows = @()
+  foreach ($e in @($st.entries)) {
+    $r = $rows | Where-Object { $_.mac -eq $e.mac } | Select-Object -First 1
+    if ($r) { if ($e.ssid) { $r.ssids += $e.ssid } }
+    else { $rows += [pscustomobject]@{ mac = $e.mac; name = $e.name; entry = $e.entry; ssids = @(@($e.ssid) | Where-Object { $_ }) } }
+  }
+  return [pscustomobject]@{ ok = $true; enabled = $st.enabled; policy = $st.policy; entries = @($rows); devices = $st.devices; at = (Get-Date -Format 'HH:mm:ss') }
 }
 
 function Handle($rq) {

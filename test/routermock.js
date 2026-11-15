@@ -4,7 +4,7 @@ const http = require('http');
 const qs = require('querystring');
 module.exports = function startRouter(opts) {
   opts = opts || {};
-  const st = { pass: opts.pass || 'secret', token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', sid: '', enabled: 0, policy: 0, list: [], seq: 0, posts: [],
+  const st = { ssids: opts.ssids || ['SSID-1', 'SSID-5'], macs: () => Array.from(new Set(st.list.map(e => e.mac))), pass: opts.pass || 'secret', token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', sid: '', enabled: 0, policy: 0, list: [], seq: 0, posts: [],
     devices: opts.devices || [['192.168.1.20', '3C:52:82:1A:4F:09', 'POS-PC', 'Online'], ['192.168.1.34', 'A4:83:E7:22:91:BC', 'Earth-phone', 'Online'], ['192.168.1.57', 'D2:6F:3B:90:AE:14', 'HUAWEI-P30', 'Online']] };
   const hex = s => s.replace(/:/g, '\\x3a');
   const loginPage = '<html><input type="password" id="txt_Password" name="PassWord"><button id="loginbutton">Login</button></html>';
@@ -29,7 +29,7 @@ module.exports = function startRouter(opts) {
         return send('<script>top.location="/index.asp";</script>', { 'Set-Cookie': 'Cookie=sid=' + st.sid + ':Language:english:id=1;path=/' });
       }
       if (!authed(req)) return send(waiting);
-      if (u.pathname === '/index.asp') return send('<html><frame src="/html/bbsp/macfilter/macfilter.asp"><script>var menu="html/bbsp/common/lanuserinfo.asp";</script></html>');
+      if (u.pathname === '/index.asp') return send('<html><frame src="/html/bbsp/wlanmacfilter/wlanmacfilter.asp"><script>var menu="html/bbsp/common/lanuserinfo.asp";</script></html>');
       if (u.pathname === '/html/bbsp/common/GetLanUserDevInfo.asp') {
         return send('var UserDevinfo = new Array(' + st.devices.map(d => 'new USERDevice("InternetGatewayDevice.LANDevice.1.X_HW_UserDev.1","' + d[0] + '","' + hex(d[1]) + '","' + d[2] + '","' + d[3] + '")').join(',') + ',null);');
       }
@@ -37,17 +37,20 @@ module.exports = function startRouter(opts) {
       if (u.pathname === '/html/amp/wificoverinfo/getTopoInfo.asp') {
         return send('[{"ApMac":"f8:de:73:5e:05:51","Width":"0.51","StaList":[' + (st.topo || []).map(d => '{HostName:"' + d[1] + '",MAC:"' + d[0].toLowerCase() + '",IP:"' + (d[2] || '') + '"}').join(',') + ']}]');
       }
-      if (u.pathname === '/html/bbsp/macfilter/macfilter.asp') {
+      if (u.pathname === '/html/bbsp/wlanmacfilter/wlanmacfilter.asp') {
         st.pageToken = 'be' + Math.random().toString(16).slice(2).padEnd(14, '0') + 'c0ffee11c0ffee11c0ffee11c0ffee11';
-        return send((st.noPageToken ? '' : '<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '">') + '<script>function SubmitForm(){ a.push(new stSpecParaArray("x.MacFilterRight", 1, 1)); b.push(new stSpecParaArray("x.MacFilterPolicy", 0, 1)); }\nvar WhiteList = 0;\nvar enableFilter = \'' + st.enabled + '\';\nvar Mode = \'' + st.policy + '\';\n' +
-          'var MacFilter = new Array(' + st.list.map(e => 'new stMacFilter("InternetGatewayDevice.X_HW_Security.MacFilter.' + e.n + '","' + hex(e.mac) + '","' + e.name + '")').join(',') + ',null);</script>');
+        return send((st.noPageToken ? '' : '<input type="hidden" name="onttoken" id="hwonttoken" value="' + st.pageToken + '">') + '<script>function SubmitForm(){ a.push(new stSpecParaArray("x.WlanMacFilterRight", 1, 1)); b.push(new stSpecParaArray("x.WlanMacFilterPolicy", 0, 1)); }\nvar WhiteList = 0;\nvar enableFilter = \'' + st.enabled + '\';\nvar Mode = \'' + st.policy + '\';\n' +
+          'var WlanMacFilter = new Array(' + st.list.map(e => 'new stWlanMacFilter("InternetGatewayDevice.X_HW_Security.WLANMacFilter.' + e.n + '","' + e.ssid + '","' + hex(e.mac) + '","' + e.name + '","1")').join(',') + ',null);</script>');
       }
       const f = qs.parse(body);
       st.posts.push({ path: u.pathname + u.search, body: f });
       if (!st.pageToken || f['x.X_HW_Token'] !== st.pageToken) return send('token error');
-      if (u.pathname === '/html/bbsp/macfilter/add.cgi') { if (!f['x.SourceMACAddress']) return send('bad'); st.list.push({ n: ++st.seq, mac: String(f['x.SourceMACAddress']).toUpperCase(), name: f['x.DeviceAlias'] || '' }); return send('ok'); }
-      if (u.pathname === '/html/bbsp/macfilter/del.cgi') { const k = Object.keys(f).find(x => x.startsWith('InternetGatewayDevice.X_HW_Security.MacFilter.')); st.list = st.list.filter(e => 'InternetGatewayDevice.X_HW_Security.MacFilter.' + e.n !== k); return send('ok'); }
-      if (u.pathname === '/html/bbsp/macfilter/set.cgi') { st.enabled = Number(f['x.MacFilterRight']); st.policy = Number(f['x.MacFilterPolicy']); return send('ok'); }
+      if (u.pathname === '/html/bbsp/wlanmacfilter/add.cgi') {
+        if (!f['x.SourceMACAddress'] || st.ssids.indexOf(f['x.SSIDName']) < 0) return send('bad');
+        st.list.push({ n: ++st.seq, ssid: f['x.SSIDName'], mac: String(f['x.SourceMACAddress']).toUpperCase(), name: f['x.DeviceName'] || '' }); return send('ok');
+      }
+      if (u.pathname === '/html/bbsp/wlanmacfilter/del.cgi') { const ks = Object.keys(f).filter(x => x.startsWith('InternetGatewayDevice.X_HW_Security.WLANMacFilter.')); st.list = st.list.filter(e => ks.indexOf('InternetGatewayDevice.X_HW_Security.WLANMacFilter.' + e.n) < 0); return send('ok'); }
+      if (u.pathname === '/html/bbsp/wlanmacfilter/set.cgi') { st.enabled = Number(f['x.WlanMacFilterRight']); st.policy = Number(f['x.WlanMacFilterPolicy']); return send('ok'); }
       res.writeHead(404); res.end();
     });
   });

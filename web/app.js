@@ -5283,7 +5283,7 @@ function drawNet() {
     '<aside class="col" style="gap:14px"><div class="card pad"><div class="row" style="gap:8px"><i class="net-dot on"></i><b>เชื่อมเราเตอร์แล้ว</b></div><div style="font-size:14px;line-height:1.7;margin-top:6px"><span class="muted">รุ่น</span> ' + esc((S.netPing || {}).profile || '') +
     '<br><span class="muted">ที่อยู่</span> ' + esc((S.netPing || {}).host || '') + '<br><span class="muted">อัปเดตล่าสุด</span> ' + esc(st.at || '') + ' (ทุก 1 นาที)</div>' +
     '<div class="row" style="gap:8px;margin-top:10px"><button class="btn sm" data-act="netReload">รีเฟรช</button><button class="btn sm" data-act="netSetup">ตั้งค่าการเชื่อม</button></div></div>' +
-    '<div class="card pad net-tip"><b>กันล็อกตัวเอง</b><br>' + lock + ' เครื่องหน้าร้านนี้และเครื่องที่ติ๊ก "เครื่องสำคัญ" ปิดสิทธิ์ไม่ได้ · ถ้าตั้งผิด ยังเข้า 192.168.1.1 → Basic Setup → Security Configuration → MAC Address Filtering แล้วเอาติ๊ก Enable ออกได้เสมอ</div>' +
+    '<div class="card pad net-tip"><b>กันล็อกตัวเอง</b><br>' + lock + ' เครื่องหน้าร้านนี้และเครื่องที่ติ๊ก "เครื่องสำคัญ" ปิดสิทธิ์ไม่ได้ · ถ้าตั้งผิด ยังเข้า 192.168.1.1 → Basic Setup → Security Configuration → Wi-Fi MAC Address Filtering แล้วเอาติ๊ก Enable ออกได้เสมอ</div>' +
     '<div class="card pad net-tip"><b>มือถือที่สุ่ม MAC</b><br>iPhone / Android รุ่นใหม่เปลี่ยน MAC ต่อ WiFi · ปิด "ที่อยู่ส่วนตัว / MAC แบบสุ่ม" สำหรับ WiFi ร้านครั้งเดียว ไม่งั้นจะขึ้นเป็นเครื่องใหม่บ่อย</div></aside></div>';
 }
 
@@ -5351,7 +5351,7 @@ function netEnableModal() {
     chk(importantOk.some(function (r) { return r.allowed; }), 'มีเครื่องสำคัญอื่นอยู่ในรายชื่อ', importantOk.length ? importantOk.map(function (r) { return esc(r.name); }).join(', ') : 'แนะนำ: มือถือเจ้าของ · แท็บเล็ตจอลูกค้า (ติ๊ก "เครื่องสำคัญ")') +
     (fresh.length ? chk(false, 'มีเครื่องใหม่ ' + fresh.length + ' เครื่องที่ยังไม่ได้เลือก', 'จะใช้เน็ตไม่ได้หลังเปิด') : '') +
     '<div class="net-sumline"><span>เครื่องที่ใช้เน็ตได้หลังเปิด</span><b>' + allowed.length + ' เครื่อง</b></div>' +
-    '<div class="muted" style="font-size:13px">ถ้าเปิดแล้วเน็ตหาย: เข้า 192.168.1.1 → Basic Setup → Security Configuration → MAC Address Filtering → เอาติ๊ก Enable ออก</div></div>' +
+    '<div class="muted" style="font-size:13px">ถ้าเปิดแล้วเน็ตหาย: เข้า 192.168.1.1 → Basic Setup → Security Configuration → Wi-Fi MAC Address Filtering → เอาติ๊ก Enable ออก</div></div>' +
     '<footer><button class="btn" data-x="no">กลับไปเลือกเครื่อง</button><button class="btn primary" data-x="ok"' + (hereOk ? '' : ' disabled') + '>เปิด Whitelist</button></footer>');
   $('[data-x=no]', m).onclick = function () { closeModal(); };
   $('[data-x=ok]', m).onclick = function () { closeModal(); netDo('/mode', { enabled: true }, 'กำลังเปิด Whitelist…').then(function () { toast('เปิด Whitelist แล้ว'); }).catch(function () {}); };
