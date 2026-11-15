@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '2.3'
+$Version = '2.4'
 if (-not $Dir) { $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $ConfigFile = Join-Path $Dir 'net-config.json'
 $ProfileFile = Join-Path $Dir 'net-profile.json'
@@ -493,6 +493,14 @@ function Add-Entry($cfg, [string]$mac, [string]$name, $want) {
   $all = @($prof.ssids | Where-Object { $_ })
   $ssids = $all; if (-not $ssids.Count) { $ssids = @('') }
   $picked = @(@($want) | Where-Object { $_ -and ($all -contains $_) })
+  if (-not $picked.Count -and $prof.onePerDevice -and $all.Count) {
+    # One Wi-Fi per device: keep the one it already has, else this PC's own Wi-Fi, else the first with room.
+    $cur = @($st.entries | Where-Object { $_.mac -eq $mac -and $_.ssid } | ForEach-Object { $_.ssid })
+    $loc = ''; if (@(Get-LocalMacs) -contains $mac) { $loc = Ssid-IdOf $prof (Get-LocalSsid) }
+    if ($cur.Count) { $picked = @($cur[0]) }
+    elseif ($loc) { $picked = @($loc) }
+    else { $room = @($all | Where-Object { $x = $_; -not $prof.perSsidMax -or @($st.entries | Where-Object { $_.ssid -eq $x }).Count -lt [int]$prof.perSsidMax }); if ($room.Count) { $picked = @($room[0]) } else { $picked = @($all[0]) } }
+  }
   if ($picked.Count) { $ssids = $picked }
   # Never add to a list that is in blacklist mode: there an entry BLOCKS the device.
   if (-not $st.known) { Save-FilterPage $st; throw 'mode unknown: cannot read the filter mode from the router page - not changing anything' }
@@ -558,12 +566,18 @@ function Set-Mode($cfg, [bool]$enabled) {
     if (-not $st.known) { Save-FilterPage $st; throw 'mode unknown: cannot read the filter mode from the router page - not changing anything' }
     $mine = @(Get-LocalMacs)
     $ssids = @($prof.ssids | Where-Object { $_ })
+    $here = Get-LocalSsid; $hereId = Ssid-IdOf $prof $here
     $ok = $false
     foreach ($m in $mine) {
       $rows = @($st.entries | Where-Object { $_.mac -eq $m })
-      if ($rows.Count -and (-not $ssids.Count -or -not ($ssids | Where-Object { $s = $_; -not ($rows | Where-Object { $_.ssid -eq $s }) }))) { $ok = $true }
+      if ($prof.onePerDevice) {
+        # This PC must be on the Wi-Fi it is connected to now (if it is on cable, the Wi-Fi filter does not touch it).
+        if (-not $here) { $ok = $true }
+        elseif ($hereId -and ($rows | Where-Object { $_.ssid -eq $hereId })) { $ok = $true }
+      } elseif ($rows.Count -and (-not $ssids.Count -or -not ($ssids | Where-Object { $s = $_; -not ($rows | Where-Object { $_.ssid -eq $s }) }))) { $ok = $true }
     }
-    if (-not $ok) { throw ('this PC is not on the list for every Wi-Fi (' + ($ssids -join ', ') + ') - allow it first') }
+    if (-not $ok -and $here -and -not $hereId) { throw ('unknown wifi: this PC is on "' + $here + '", which is not in the program - not turning on') }
+    if (-not $ok) { throw ('this PC is not on the list for its Wi-Fi (' + $here + ') - allow it first') }
   }
   $after = Post-Change $cfg $prof.modeUrl $prof.modeBody @{ enabled = $en; policy = $prof.policyWhitelist } { param($a) $a.enabled -eq $enabled -and (-not $enabled -or $a.policy -eq 'white') }
   if (-not $after) { throw 'the router did not switch the filter as asked' }
@@ -609,6 +623,23 @@ function Probe-Router($cfg) {
 }
 
 # MAC addresses of this PC's network cards (so the page can protect this PC from being blocked).
+# Name of the Wi-Fi this PC is connected to (netsh), and its SSID id from the profile's ssidNames.
+function Get-LocalSsid {
+  if ($env:EM_TEST_LOCAL_SSID) { return $env:EM_TEST_LOCAL_SSID }
+  try {
+    foreach ($l in (& netsh wlan show interfaces 2>$null)) {
+      $m = [regex]::Match([string]$l, '^\s*SSID\s*:\s*(.+?)\s*$')
+      if ($m.Success) { return $m.Groups[1].Value }
+    }
+  } catch { }
+  return ''
+}
+function Ssid-IdOf($prof, [string]$name) {
+  if (-not $name -or -not $prof.ssidNames) { return '' }
+  foreach ($p in $prof.ssidNames.PSObject.Properties) { if ([string]$p.Value -ieq $name) { return $p.Name } }
+  return ''
+}
+
 function Get-LocalMacs {
   if ($env:EM_TEST_LOCAL_MACS) { return @($env:EM_TEST_LOCAL_MACS -split ',') }
   $out = @()
@@ -679,7 +710,9 @@ function Public-State($st) {
   $use = [ordered]@{}
   if ($prof) { foreach ($x in @($prof.ssids)) { if ($x) { $use[$x] = @($st.entries | Where-Object { $_.ssid -eq $x }).Count } } }
   $max = 0; if ($prof -and $prof.perSsidMax) { $max = [int]$prof.perSsidMax }
-  return [pscustomobject]@{ ok = $true; enabled = $st.enabled; policy = $st.policy; known = $st.known; ssidUse = $use; ssidMax = $max; entries = @($rows); devices = $st.devices; at = (Get-Date -Format 'HH:mm:ss') }
+  $names = $null; if ($prof) { $names = $prof.ssidNames }
+  $one = $false; if ($prof) { $one = [bool]$prof.onePerDevice }
+  return [pscustomobject]@{ ok = $true; enabled = $st.enabled; policy = $st.policy; known = $st.known; ssidUse = $use; ssidMax = $max; ssidNames = $names; onePerDevice = $one; entries = @($rows); devices = $st.devices; at = (Get-Date -Format 'HH:mm:ss') }
 }
 
 function Handle($rq) {
@@ -691,7 +724,7 @@ function Handle($rq) {
     $prof = $null; try { $prof = Get-Profile } catch { }
     $pn = ''; if ($prof) { $pn = $prof.name }
     $hostName = ''; if ($cfg) { $hostName = $cfg.host }
-    Send $rq.stream 200 @{ ok = $true; version = $Version; loggedIn = [bool]$script:LoggedIn; configured = [bool]$cfg; host = $hostName; profile = $pn; localMacs = @(Get-LocalMacs) }
+    Send $rq.stream 200 @{ ok = $true; version = $Version; loggedIn = [bool]$script:LoggedIn; configured = [bool]$cfg; host = $hostName; profile = $pn; localMacs = @(Get-LocalMacs); localSsid = (Get-LocalSsid) }
     return
   }
   if ($rq.path -eq '/captcha') {

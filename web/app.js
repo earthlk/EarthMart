@@ -5087,18 +5087,32 @@ function netMacInfoText(r) {
 }
 /** Name to offer for a device: "Samsung Galaxy Z Flip6 ของ supaporn", else the model, else what the device calls itself. */
 /* Wi-Fi bands: the router keeps one row per SSID, 8 devices each (SSID-1 = 2.4G, SSID-5 = 5G). */
-var NET_BAND_TH = { 'SSID-1': '2.4G', 'SSID-5': '5G' };
-function netBandTh(id) { return NET_BAND_TH[id] || id; }
+function netBandTh(id) {
+  var n = ((S.net && S.net.st && S.net.st.ssidNames) || {})[id], k = Number(String(id).replace(/\D/g, ''));
+  var band = k >= 1 && k <= 4 ? '2.4G' : k >= 5 && k <= 8 ? '5G' : '';
+  return n ? n + (band && n.indexOf(band) < 0 ? ' (' + band + ')' : '') : (band || id);
+}
+function netOnePer() { return !!(S.net && S.net.st && S.net.st.onePerDevice); }
+function netLocalSsidId() {
+  var name = (S.netPing || {}).localSsid || '', names = (S.net && S.net.st && S.net.st.ssidNames) || {};
+  return Object.keys(names).filter(function (k) { return String(names[k]).toLowerCase() === name.toLowerCase(); })[0] || '';
+}
 function netBands() { var u = (S.net && S.net.st && S.net.st.ssidUse) || {}; return Object.keys(u).length ? Object.keys(u) : ['SSID-1', 'SSID-5']; }
 function netBandRoom(id, mac) {
   var st = (S.net && S.net.st) || {}, max = st.ssidMax || 8;
   var mine = (st.entries || []).some(function (e) { return e.mac === mac && (e.ssids || []).indexOf(id) >= 0; });
   return mine || ((st.ssidUse || {})[id] || 0) < max;
 }
-function netBandLabel(ssids) { ssids = ssids || []; return ssids.length >= netBands().length ? 'ทั้ง 2.4G + 5G' : ssids.map(netBandTh).join(' + ') + ' อย่างเดียว'; }
+function netBandLabel(ssids) { ssids = ssids || []; if (netOnePer()) return 'WiFi ' + ssids.map(netBandTh).join(' + '); return ssids.length >= netBands().length ? 'ทั้ง 2.4G + 5G' : ssids.map(netBandTh).join(' + ') + ' อย่างเดียว'; }
 /** Default for switching a device on: both if there is room, else the band that has room. */
-function netPickBands(mac) {
+function netPickBands(mac, local) {
   var all = netBands(), ok = all.filter(function (b) { return netBandRoom(b, mac); });
+  if (netOnePer()) {
+    var mine = ((S.net.st.entries || []).filter(function (e) { return e.mac === mac; })[0] || {}).ssids || [];
+    if (mine.length) return [mine[0]];
+    if (local && netLocalSsidId()) return [netLocalSsidId()];
+    return ok.length ? [ok[0]] : [];
+  }
   return ok.length === all.length ? all : ok;
 }
 function netUseLine() {
@@ -5109,9 +5123,11 @@ function netUseLine() {
 /** Connected now (on the router's Wi-Fi list / marked online) or not. */
 function netOnlineTag(r) { return r.online ? '<span class="net-on">● ใช้งานอยู่</span>' : '<span class="net-off">○ ไม่ได้เชื่อมต่อ</span>'; }
 function netBandChips(r) {
-  var all = netBands(), cur = (r.allowed && (r.ssids || []).length ? r.ssids : netPickBands(r.mac)).slice().sort().join('+');
-  var opts = [{ v: all.join('+'), t: 'ทั้ง 2.4G + 5G' }].concat(all.map(function (b) { return { v: b, t: netBandTh(b) + ' อย่างเดียว' }; }));
-  if (r.local) return '<div class="muted" style="font-size:13px">เครื่องหน้าร้านนี้ใช้ได้ทั้ง 2 คลื่นเสมอ (กันเครื่องหลุดเน็ต)</div>';
+  var all = netBands(), cur = (r.allowed && (r.ssids || []).length ? r.ssids : netPickBands(r.mac, r.local)).slice().sort().join('+');
+  var opts = netOnePer() ? all.map(function (b) { return { v: b, t: netBandTh(b) }; })
+    : [{ v: all.join('+'), t: 'ทั้ง 2.4G + 5G' }].concat(all.map(function (b) { return { v: b, t: netBandTh(b) + ' อย่างเดียว' }; }));
+  if (r.local && netOnePer() && netLocalSsidId()) return '<div class="muted" style="font-size:13px">เครื่องหน้าร้านนี้ต่อ <b>' + esc(netBandTh(netLocalSsidId())) + '</b> อยู่ — ใช้ WiFi นี้ (กันเครื่องหลุดเน็ต)</div>';
+  if (r.local && !netOnePer()) return '<div class="muted" style="font-size:13px">เครื่องหน้าร้านนี้ใช้ได้ทั้ง 2 คลื่นเสมอ (กันเครื่องหลุดเน็ต)</div>';
   return '<div class="chip-radio">' + opts.map(function (o) {
     var ok = o.v.split('+').every(function (b) { return netBandRoom(b, r.mac); });
     return '<label class="' + (ok ? '' : 'disabled') + '"><input type="radio" name="ndband" value="' + o.v + '"' + (o.v === cur ? ' checked' : '') + (ok ? '' : ' disabled') + '><span>' + o.t + (ok ? '' : ' (เต็ม)') + '</span></label>';
@@ -5144,8 +5160,9 @@ function netErrTh(m) {
   if (/not reachable/.test(m)) return 'ติดต่อเราเตอร์ไม่ได้ — เครื่องนี้ต่อเน็ตร้านอยู่ไหม';
   if (/did not keep|did not remove|did not switch/.test(m)) return 'เราเตอร์ไม่รับคำสั่ง — กด "ทดสอบระบบ" ในตั้งค่าการเชื่อม';
   if (/^mode unknown/.test(m)) return 'อ่านโหมดตัวกรองจากเราเตอร์ไม่ได้ — ไม่ได้เปลี่ยนอะไร (ส่งไฟล์ %TEMP%\\earthmart-filterpage.txt ให้ผู้ดูแล)';
-  if (/this PC is not on the list/.test(m)) return 'เครื่องหน้าร้านนี้ยังไม่อยู่ในรายชื่อของ WiFi ครบทั้ง 2.4G และ 5G — อนุญาตเครื่องนี้ก่อน';
-  if (/^wifi full: (\S+)/.test(m)) { var b = netBandTh(m.match(/^wifi full: (\S+)/)[1]); return 'WiFi ' + b + ' เต็มแล้ว (8 เครื่อง) — เลือกให้ใช้อีกคลื่นอย่างเดียว หรือปิดสิทธิ์เครื่องอื่นก่อน'; }
+  if (/this PC is not on the list/.test(m)) return 'เครื่องหน้าร้านนี้ยังไม่อยู่ในรายชื่อของ WiFi ที่ต่ออยู่ — อนุญาตเครื่องนี้ก่อน';
+  if (/^unknown wifi/.test(m)) return 'เครื่องหน้าร้านนี้ต่อ WiFi ชื่อที่โปรแกรมไม่รู้จัก — ไม่เปิด Whitelist (กันเครื่องหลุดเน็ต)';
+  if (/^wifi full: (\S+)/.test(m)) { var b = netBandTh(m.match(/^wifi full: (\S+)/)[1]); return 'WiFi ' + b + ' เต็มแล้ว (8 เครื่อง) — เลือก WiFi ชื่ออื่น หรือปิดสิทธิ์เครื่องอื่นก่อน'; }
   if (/list is full/.test(m)) return 'รายชื่อในเราเตอร์เต็มแล้ว';
   if (/12 hex/.test(m)) return 'MAC ต้องมี 12 หลัก (0-9, A-F)';
   return m;
@@ -5297,7 +5314,7 @@ function drawNet() {
   box.innerHTML = '<div class="net-grid"><div class="col" style="gap:14px;min-width:0">' +
     '<div class="card pad net-master"><button type="button" class="switch big' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '" aria-label="เปิดระบบ Whitelist" data-act="netMode"></button>' +
     '<div class="grow"><b style="font-size:18px">เปิดระบบ Whitelist</b><div class="muted" style="font-size:13px">ใช้เน็ตร้านได้เฉพาะเครื่องที่อนุญาต · ปิดสวิตช์ = ทุกเครื่องใช้ได้ปกติ</div>' +
-    '<div style="font-size:13px;margin-top:2px">ที่ว่างในเราเตอร์ (เครื่องต่อ WiFi): ' + netUseLine() + '</div>' +
+    '<div style="font-size:13px;margin-top:2px">ที่ว่างในเราเตอร์ (8 เครื่องต่อ WiFi 1 ชื่อ): ' + netUseLine() + '</div>' +
     (st.known === false ? '<div class="warn-text" style="font-size:13px">อ่านโหมดตัวกรองจากเราเตอร์ไม่ได้ — ระบบจะไม่เปลี่ยนอะไรในเราเตอร์จนกว่าจะแก้</div>' : '') +
     (st.enabled && st.policy === 'black' ? '<div class="warn-text" style="font-size:13px">เราเตอร์ตั้งเป็น Blacklist อยู่ (ตั้งจากหน้า 192.168.1.1) — เปิดสวิตช์เพื่อเปลี่ยนเป็น Whitelist</div>' : '') + '</div>' +
     '<div class="net-counts"><div><b>' + onlineN + '</b><small>ใช้งานอยู่</small></div><div><b class="brand-text">' + listed.filter(function (r) { return r.allowed; }).length + '</b><small>อนุญาต</small></div><div><b class="warn-text">' + listed.filter(function (r) { return !r.allowed; }).length + '</b><small>ไม่อนุญาต</small></div><div><b class="amber">' + fresh.length + '</b><small>เครื่องใหม่</small></div></div></div>' +
@@ -5365,8 +5382,8 @@ function netDeviceModal(r, mode) {
     var d = { mac: mac, name: $('#nd-name', m).value.trim() || netSuggestName(r) || '', type: radioVal(m, 'ndtype'), ownerId: radioVal(m, 'ndowner'), locked: $('#nd-lock', m).checked || !!r.local };
     if (!d.name) return toast('ใส่ชื่อเครื่อง', true);
     closeModal();
-    var band = r.local ? netBands() : String(radioVal(m, 'ndband') || netPickBands(mac).join('+')).split('+').filter(Boolean);
-    if (!band.length) return toast('WiFi เต็มทั้ง 2 คลื่น — ปิดสิทธิ์เครื่องอื่นก่อน', true);
+    var band = r.local && !netOnePer() ? netBands() : r.local && netLocalSsidId() ? [netLocalSsidId()] : String(radioVal(m, 'ndband') || netPickBands(mac, r.local).join('+')).split('+').filter(Boolean);
+    if (!band.length) return toast('WiFi เต็มทุกชื่อแล้ว (8 เครื่องต่อชื่อ) — ปิดสิทธิ์เครื่องอื่นก่อน', true);
     var bandChanged = mode === 'edit' && r.allowed && band.slice().sort().join('+') !== (r.ssids || []).slice().sort().join('+');
     var step = mode === 'edit' && !bandChanged ? Promise.resolve() : netDo('/allow', { mac: mac, name: d.name, ssids: band }, mode === 'edit' ? 'กำลังเปลี่ยนคลื่น WiFi…' : 'กำลังเพิ่มในเราเตอร์…');
     step.then(function () { if (mode !== 'edit') d.allowed = true; return api('saveNetDevice', S.token, d); })
@@ -5381,7 +5398,11 @@ function netEnableModal() {
   var rows = netRows();
   var allowed = rows.filter(function (r) { return r.allowed; });
   // Wi-Fi rows are per SSID: this PC must be on both 2.4G (SSID-1) and 5G (SSID-5), or the router locks it out.
-  var hereOk = rows.some(function (r) { return r.local && r.allowed && (!(r.ssids || []).length || r.ssids.length >= 2); });
+  var hereOk = rows.some(function (r) {
+    if (!r.local || !r.allowed) return false;
+    if (netOnePer()) return !(S.netPing || {}).localSsid || (r.ssids || []).indexOf(netLocalSsidId()) >= 0;
+    return !(r.ssids || []).length || r.ssids.length >= 2;
+  });
   var importantOk = rows.filter(function (r) { return r.locked && !r.local; });
   var fresh = rows.filter(function (r) { return r.isNew; });
   var chk = function (ok, t, s) { return '<div class="net-chk"><span class="' + (ok ? 'ok' : 'bad') + '">' + (ok ? '✓' : '!') + '</span><div><b>' + t + '</b><small>' + s + '</small></div></div>'; };
@@ -5459,8 +5480,8 @@ var NET_ACTIONS = {
     var r = netRow(el.getAttribute('data-mac'));
     if (r.allowed && r.locked) return toast('เครื่องสำคัญ — ปิดสิทธิ์ไม่ได้', true);
     var to = !r.allowed;
-    var band = to ? (r.local ? netBands() : netPickBands(r.mac)) : null;
-    if (to && !band.length) return toast('WiFi เต็มทั้ง 2 คลื่น (8 เครื่องต่อคลื่น) — ปิดสิทธิ์เครื่องอื่นก่อน', true);
+    var band = to ? (r.local && !netOnePer() ? netBands() : netPickBands(r.mac, r.local)) : null;
+    if (to && !band.length) return toast('WiFi เต็มทุกชื่อแล้ว (8 เครื่องต่อชื่อ) — ปิดสิทธิ์เครื่องอื่นก่อน', true);
     netDo(to ? '/allow' : '/block', to ? { mac: r.mac, name: r.name, ssids: band } : { mac: r.mac, name: r.name }, to ? 'กำลังอนุญาต…' : 'กำลังปิดสิทธิ์…')
       .then(function () { return api('saveNetDevice', S.token, { mac: r.mac, name: r.name, allowed: to }); }).then(function () { toast((r.name || r.mac) + (to ? ' ใช้เน็ตได้' : ' ใช้เน็ตไม่ได้แล้ว')); }).catch(function () {});
   },

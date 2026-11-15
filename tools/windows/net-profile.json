@@ -60,10 +60,11 @@
     "modeUrl": "/html/bbsp/macfilter/set.cgi?x=InternetGatewayDevice.X_HW_Security&RequestFile={filterPageRel}",
     "modeBody": "x.MacFilterPolicy={policy}&x.MacFilterRight={enabled}&x.X_HW_Token={token}"
   },
-  "note": "Wi-Fi MAC filter (the LAN \"MAC Address Filtering\" page only covers wired ports). SSID-1 = 2.4G, SSID-5 = 5G on Huawei dual-band ONTs.",
+  "note": "Wi-Fi MAC filter (the LAN page only covers wired ports). One Wi-Fi (SSID) per device, 8 devices per SSID. ssids = which SSID ids the program uses; ssidNames = their Wi-Fi names (must match the router). SSID-1..4 = 2.4G, SSID-5..8 = 5G.",
   "perSsidMax": 8,
-  "ssidLabels": {
-    "SSID-1": "2.4G",
-    "SSID-5": "5G"
+  "onePerDevice": true,
+  "ssidNames": {
+    "SSID-1": "klaypan_2.4G",
+    "SSID-5": "klaypan_5G"
   }
 }
