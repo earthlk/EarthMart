@@ -176,8 +176,19 @@ call('importProducts', T, [
   await page.waitForFunction(() => window.__serialWrites.length === 1);
   assert.deepStrictEqual(await page.evaluate(() => window.__serialWrites[0]), [0x1B, 0x70, 0x00, 0x19, 0xFA]);
   await shot('06-settings');
+  await page.waitForSelector('#devlist [data-act=unregisterDev]');
   await page.click('[data-act=setTab][data-t=backup]');
   await page.waitForSelector('#auditrows tr');
+  // go-live dialog: button stays off until PIN + exact phrase; cancelled here
+  await page.click('[data-act=goLive]');
+  await page.waitForSelector('#gl-phrase');
+  await page.fill('#gl-pin', '1234');
+  await page.fill('#gl-phrase', 'เริ่ม');
+  assert.ok(await page.$eval('.modal [data-x=ok]', b => b.disabled), 'go-live locked until the phrase matches');
+  await page.fill('#gl-phrase', 'เริ่มใช้งานจริง');
+  assert.ok(!(await page.$eval('.modal [data-x=ok]', b => b.disabled)), 'go-live unlocked');
+  await shot('06b-go-live');
+  await page.click('.modal [data-x=no]');
 
   // 7. Cash sale now kicks the drawer automatically; no-sale button logs NO_SALE
   await page.click('nav button[data-v=sale]');

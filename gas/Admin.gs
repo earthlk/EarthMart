@@ -101,7 +101,7 @@ function api_auditLog(token, limit) {
  * than backupKeepDays. It does NOT copy the file itself: copying the file would also copy the bound
  * Apps Script, leaving a new "EarthMart" script project behind every night.
  */
-function backupNow() {
+function backupNow(label) {
   var ss = ss_();
   var folderId = getSetting_('backupFolderId');
   var folder;
@@ -111,7 +111,7 @@ function backupNow() {
     folder = DriveApp.createFolder(APP_NAME + ' Backup');
     saveSettingRaw_('backupFolderId', folder.getId());
   }
-  var name = ss.getName() + ' backup ' + fmtDate_(now_(), 'yyyy-MM-dd HHmm');
+  var name = ss.getName() + (typeof label === 'string' && label ? ' ' + label + ' ' : ' backup ') + fmtDate_(now_(), 'yyyy-MM-dd HHmm');
   var dest = SpreadsheetApp.create(name);
   var blank = dest.getSheets();
   ss.getSheets().forEach(function (sh) { sh.copyTo(dest).setName(sh.getName()); });
@@ -123,7 +123,8 @@ function backupNow() {
   var files = folder.getFiles();
   while (files.hasNext()) {
     var f = files.next();
-    if (f.getDateCreated() < cutoff) f.setTrashed(true);
+    // Labelled copies (e.g. the one taken before going live) are kept for good.
+    if (f.getDateCreated() < cutoff && f.getName().indexOf(' backup ') >= 0) f.setTrashed(true);
   }
   return name;
 }

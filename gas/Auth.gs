@@ -295,6 +295,15 @@ function api_unregisterDevice(token, deviceId) {
 function api_listDevices(token) {
   return respond_(function () {
     owner_(token);
-    return readAll_('Devices').filter(function (d) { return bool_(d.active); });
+    // Last time each counter was used, and whether it has a shift open (unregistering it then is worth a warning).
+    var last = {}, open = {};
+    readAll_('Shifts').forEach(function (sh) {
+      var id = String(sh.deviceId), t = sh.closedAt || sh.openedAt;
+      if (t && (!last[id] || new Date(t) > new Date(last[id]))) last[id] = t;
+      if (String(sh.status).toUpperCase() === 'OPEN') open[id] = true;
+    });
+    return readAll_('Devices').filter(function (d) { return bool_(d.active); }).map(function (d) {
+      return { deviceId: d.deviceId, name: d.name, registeredAt: d.registeredAt, lastUsed: last[String(d.deviceId)] || '', openShift: !!open[String(d.deviceId)] };
+    });
   });
 }

@@ -88,6 +88,7 @@ var DEFAULT_SETTINGS = {
   markdownPct: '30',
   expenseCats: '',
   accStart: '',
+  liveSince: '',
   accStartAssets: ''
 };
 

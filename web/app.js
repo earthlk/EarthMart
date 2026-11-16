@@ -5510,7 +5510,7 @@ function printShift(s) {
 
 /* Reports: filters on the left, tabs on the right. S.rep = { f: {...}, tab, data } */
 var REP_TABS = [['overview', 'ภาพรวม'], ['products', 'สินค้า'], ['categories', 'หมวด'], ['staff', 'พนักงาน'], ['shifts', 'กะ'], ['slow', 'ไม่เคลื่อนไหว'], ['stock', 'มูลค่าสต็อก']];
-var ACTION_TH = { VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
+var ACTION_TH = { GO_LIVE: 'เริ่มใช้งานจริง (ล้างข้อมูลทดสอบ)', VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
   STOCK_ADJUST: 'ปรับสต็อก', PRICE_CHANGE: 'แก้ราคา', APPROVE_FAIL: 'PIN อนุมัติผิด', NO_SALE: 'เปิดลิ้นชัก', WRITEOFF: 'ตัดของเสีย',
   STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า',
   BELOW_COST: 'ขายต่ำกว่าทุน', LOW_MARGIN: 'กำไรต่ำ', OVERSELL: 'ขายเกินสต็อก', OFFLINE_CHECK: 'ตรวจรายการออฟไลน์' };
@@ -6048,7 +6048,7 @@ function renderSettings() {
       : '<div class="muted" style="font-size:13px">ติดตั้งบนคอมเครื่องอื่น: แตก ZIP แล้วรัน Install-EarthMart.bat → ได้ไอคอนหน้าร้าน (kiosk) / หลังร้าน และเปิดเองตอนเปิดเครื่อง · ยังเชื่อมกับ Google Sheet ของร้าน</div>' +
       '<div class="row" style="gap:6px;flex-wrap:wrap"><a class="btn sm" href="EarthMart-Setup.zip" download>ชุดติดตั้ง Windows (.zip)</a><a class="btn sm ghost" href="EarthMart-local.html" download="EarthMart.html">เฉพาะไฟล์ .html</a></div>') +'</div>') +
     sec('backup', '<div class="set-cols"><div class="card pad col set-card" style="gap:10px">' + '<h2>สำรองข้อมูล</h2><div class="muted" style="font-size:13px">Backup อัตโนมัติทุกวันตั้งได้ด้วย installTriggers() (ดูคู่มือ)</div>' +
-      '<button class="btn" data-act="backupNow">Backup ตอนนี้</button>' +'</div>' +
+      '<button class="btn" data-act="backupNow">Backup ตอนนี้</button>' + '<div id="golive"></div>' + '</div>' +
       '<div class="card pad" style="max-height:calc(100vh - 140px);overflow:auto"><h2>บันทึกการทำงาน (ล่าสุด 100)</h2><table class="table"><tbody id="auditrows"><tr><td class="muted">กำลังโหลด…</td></tr></tbody></table></div></div>') +
     '</div></div>';
 }
@@ -6089,9 +6089,18 @@ function loadSettings() {
     }).join('') + '</tbody></table>';
   }).catch(fail);
   api('listDevices', S.token).then(function (ds) {
+    S.devList = ds;
     var box = $('#devlist');
-    if (box) box.innerHTML = 'เครื่องหน้าร้านทั้งหมด: ' + (ds.map(function (d) { return esc(d.name); }).join(', ') || '—');
+    if (!box) return;
+    box.classList.remove('muted');
+    box.innerHTML = '<h3 style="margin:6px 0">เครื่องหน้าร้านที่ลงทะเบียน (' + ds.length + ')</h3>' + (ds.length ? '<table class="table"><tbody>' + ds.map(function (d) {
+      var me = d.deviceId === S.deviceId;
+      return '<tr><td><b>' + esc(d.name) + '</b> ' + (me ? '<span class="tag green">เครื่องนี้</span>' : '') + (d.openShift ? ' <span class="tag warn">กะเปิดอยู่</span>' : '') +
+        '<div class="muted" style="font-size:12px">ใช้ล่าสุด ' + (d.lastUsed ? dateTime(d.lastUsed) : 'ยังไม่เคยเปิดกะ') + ' · ลงทะเบียน ' + (d.registeredAt ? dateTime(d.registeredAt) : '—') + '</div></td>' +
+        '<td class="r"><button class="btn sm ghost" data-act="unregisterDev" data-id="' + esc(d.deviceId) + '">ยกเลิกลงทะเบียน</button></td></tr>';
+    }).join('') + '</tbody></table>' : '<div class="muted">ยังไม่มี</div>');
   }).catch(function () {});
+  loadGoLive();
   api('auditLog', S.token, 100).then(function (rows) {
     var tb = $('#auditrows');
     if (!tb) return;
@@ -6100,6 +6109,58 @@ function loadSettings() {
         '</b> ' + esc(r.ref) + ' ' + esc(r.detail) + (r.approvedBy ? ' · อนุมัติ ' + esc(r.approvedBy) : '') + '</td></tr>';
     }).join('') || '<tr><td class="muted">ยังไม่มี</td></tr>';
   }).catch(fail);
+}
+
+/* ---------- เริ่มใช้งานจริง: clear test data once ---------- */
+var GO_LIVE_TH = { Sales: 'บิลขาย', Shifts: 'กะ', Returns: 'การคืนสินค้า', StockMoves: 'ความเคลื่อนไหวสต็อก', Lots: 'ล็อตสินค้า', Receipts: 'การรับสินค้า',
+  Ledger: 'รายการเงินเข้าออก', Expenses: 'รายจ่าย', Payables: 'ค้างจ่าย', CustPays: 'ลูกค้าชำระหนี้', CashMoves: 'เงินเข้า/ออกลิ้นชัก', AuditLog: 'บันทึกการทำงาน',
+  Products: 'สินค้า', Barcodes: 'บาร์โค้ด', Recipes: 'สูตร', Promotions: 'โปรโมชัน' };
+function loadGoLive() {
+  var box = $('#golive');
+  if (!box) return;
+  api('goLivePreview', S.token).then(function (p) {
+    S.goLive = p;
+    if (p.liveSince) { box.innerHTML = '<hr style="border:0;border-top:1px solid var(--line)"><div class="muted" style="font-size:13px">เริ่มใช้งานจริงเมื่อ <b>' + esc(p.liveSince) + '</b></div>'; return; }
+    box.innerHTML = '<hr style="border:0;border-top:1px solid var(--line)"><h3 style="margin:4px 0">เริ่มใช้งานจริง</h3>' +
+      '<div class="muted" style="font-size:13px;line-height:1.6">ล้างข้อมูลทดสอบ (บิล กะ สต็อก ล็อต บัญชี) ครั้งเดียวก่อนเปิดร้าน · สำรองทั้งไฟล์ให้ก่อนล้าง · ทำแล้วปุ่มนี้จะหายไป</div>' +
+      '<button class="btn warn" data-act="goLive">เริ่มใช้งานจริง…</button>';
+  }).catch(function () {});
+}
+function goLiveModal() {
+  var p = S.goLive || {}, c = p.counts || {};
+  var line = function (k) { return c[k] ? '<li>' + GO_LIVE_TH[k] + ' <b>' + c[k] + '</b></li>' : ''; };
+  var hist = ['Sales', 'Shifts', 'Returns', 'StockMoves', 'Lots', 'Receipts', 'Ledger', 'Expenses', 'Payables', 'CustPays', 'CashMoves', 'AuditLog'].map(line).join('') || '<li>ไม่มี</li>';
+  var cat = ['Products', 'Barcodes', 'Recipes', 'Promotions'].map(line).join('') || '<li>ไม่มี</li>';
+  var devs = (p.devices || []).map(function (d) {
+    return '<label class="row" style="gap:8px"><input type="checkbox" name="gl-dev" value="' + esc(d.deviceId) + '"' + (d.deviceId === S.deviceId ? ' checked' : '') + '> ' + esc(d.name) + (d.deviceId === S.deviceId ? ' <span class="tag green">เครื่องนี้</span>' : '') + '</label>';
+  }).join('') || '<div class="muted">ไม่มีเครื่องลงทะเบียน</div>';
+  var m = openModal('<header><h1>เริ่มใช้งานจริง</h1></header><form class="body col" style="gap:12px">' +
+    '<div class="muted" style="font-size:13px">ล้างข้อมูลทดสอบครั้งเดียว · ระบบสำรองทั้งไฟล์ไว้ใน Drive ก่อนล้าง · ทำแล้วทำซ้ำจากโปรแกรมไม่ได้</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px"><div><b>ล้างทิ้ง</b><ul style="margin:6px 0 0 18px;font-size:14px;line-height:1.7">' + hist + '</ul></div>' +
+    '<div><label class="row" style="gap:8px"><input type="checkbox" id="gl-cat" checked> <b>ลบสินค้าตัวอย่างด้วย</b></label><ul style="margin:6px 0 0 18px;font-size:14px;line-height:1.7">' + cat + '</ul>' +
+    '<div class="muted" style="font-size:12px">ไม่ติ๊ก = เก็บสินค้าไว้ แต่สต็อกทุกตัวเริ่มที่ 0</div></div></div>' +
+    '<div><b>เก็บเครื่องหน้าร้าน</b> <span class="muted" style="font-size:12px">(ไม่ติ๊ก = ยกเลิกลงทะเบียน)</span><div class="col" style="gap:4px;margin-top:6px">' + devs + '</div></div>' +
+    '<div class="muted" style="font-size:13px">เก็บไว้เสมอ: ผู้ใช้/PIN · ตั้งค่าร้าน · กระเป๋าเงิน · ลูกค้า · สไลด์ · อินเทอร์เน็ตร้าน</div>' +
+    '<div class="field"><label for="gl-pin">PIN เจ้าของ</label><input id="gl-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></div>' +
+    '<div class="field"><label for="gl-phrase">พิมพ์ <b>' + esc(p.phrase || 'เริ่มใช้งานจริง') + '</b> เพื่อยืนยัน</label><input id="gl-phrase" autocomplete="off"></div>' +
+    '</form><footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn warn" data-x="ok" disabled>ล้างข้อมูลทดสอบ · เริ่มใช้จริง</button></footer>');
+  var ok = $('[data-x=ok]', m), phrase = p.phrase || 'เริ่มใช้งานจริง';
+  var check = function () { ok.disabled = !($('#gl-phrase', m).value.trim() === phrase && /^\d{4,6}$/.test($('#gl-pin', m).value)); };
+  $('#gl-phrase', m).addEventListener('input', check);
+  $('#gl-pin', m).addEventListener('input', check);
+  $('[data-x=no]', m).onclick = function () { closeModal(); };
+  $('form', m).onsubmit = function (e) { e.preventDefault(); };
+  ok.onclick = function () {
+    ok.disabled = true; ok.textContent = 'กำลังสำรองและล้าง…';
+    var keep = $all('input[name=gl-dev]:checked', m).map(function (i) { return i.value; });
+    api('goLive', S.token, { pin: $('#gl-pin', m).value, phrase: $('#gl-phrase', m).value.trim(), clearCatalog: $('#gl-cat', m).checked, keepDevices: keep }).then(function (r) {
+      closeModal();
+      // Test sales still waiting on this PC must not come back after the wipe.
+      ['em_outbox', 'em_offshift', 'em_shiftmap', 'em_offno', 'em_held', 'em_receive', 'em_count', 'em_cache'].forEach(function (k) { store(k, null); });
+      toast('เริ่มใช้งานจริงแล้ว · สำรองไว้: ' + r.backup);
+      return boot().then(function () { go('settings'); });
+    }).catch(function (e) { ok.disabled = false; ok.textContent = 'ล้างข้อมูลทดสอบ · เริ่มใช้จริง'; fail(e); });
+  };
 }
 
 function saveSettingsForm(form) {
@@ -6355,6 +6416,16 @@ var ACTIONS = {
       return api('unregisterDevice', S.token, S.deviceId).then(function () { return boot(); }).then(function () { go('settings'); });
     }).catch(fail);
   },
+  unregisterDev: function (el) {
+    var id = el.getAttribute('data-id'), d = (S.devList || []).filter(function (x) { return x.deviceId === id; })[0] || {};
+    var me = id === S.deviceId;
+    var msg = (me ? 'นี่คือเครื่องที่ใช้อยู่ตอนนี้ — ' : '') + 'เครื่อง "' + (d.name || id) + '" จะขายและเปิดกะไม่ได้อีก จนกว่าจะลงทะเบียนใหม่' + (d.openShift ? ' · ⚠️ เครื่องนี้มีกะเปิดอยู่ ปิดกะก่อนจะดีกว่า' : '');
+    confirm2('ยกเลิกการลงทะเบียน', msg, 'ยกเลิกลงทะเบียน', true).then(function (ok) {
+      if (!ok) return;
+      return api('unregisterDevice', S.token, id).then(function () { toast('ยกเลิกลงทะเบียนแล้ว'); return me ? boot().then(function () { go('settings'); }) : loadSettings(); });
+    }).catch(fail);
+  },
+  goLive: function () { goLiveModal(); },
   backupNow: function () { api('backupNow', S.token).then(function (n) { toast('Backup แล้ว: ' + n); }).catch(fail); },
   resetPin: function (el) {
     prompt2('ตั้ง PIN ใหม่', 'PIN 4–6 หลัก', '', { type: 'password', inputmode: 'numeric' }).then(function (pin) {

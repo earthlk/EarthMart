@@ -903,4 +903,49 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(m('netDevices', T).find(d => d.mac === 'D2:6F:3B:90:AE:14').name, 'มือถือแบงค์', 'saved again after delete');
 }
 
+{
+  // เริ่มใช้งานจริง: clear test data once (owner, PIN, phrase, backup first, never twice)
+  const h = makeContext({ now: '2026-11-16T02:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m = (fn, ...a) => { const r = c(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  h.createOwner('O', '1111');
+  const DEVA = 'Dlive000000000000001', DEVB = 'Dlive000000000000002';
+  const T = m('login', m('status').users[0].userId, '1111', DEVA).token;
+  m('registerDevice', T, DEVA, 'เครื่อง 1');
+  m('registerDevice', T, DEVB, 'Test');
+  m('saveProduct', T, { name: 'น้ำ', price: 10, cost: 5, type: 'nobarcode', unit: 'ขวด' });
+  const sku = m('listProducts', T)[0].sku;
+  m('receive', T, { receiptUid: 'R1', lines: [{ sku, qty: 10, unitCost: 5 }] });
+  m('openShift', T, 500, '');
+  m('commitSale', T, { saleUid: 'S1', payMethod: 'cash', received: 20, lines: [{ sku, qty: 2 }] });
+  m('saveNetDevice', T, { mac: '3C:52:82:1A:4F:09', name: 'POS', allowed: true });
+  m('addUser', T, 'มิว', 'cashier', '2222');
+  const mew = m('listUsers', T).find(u => u.name === 'มิว');
+  const TC = m('login', mew.userId, '2222', DEVA).token;
+  ok(!c('goLive', TC, { pin: '2222', phrase: 'เริ่มใช้งานจริง' }).ok, 'cashier cannot go live');
+  const pv = m('goLivePreview', T);
+  ok(pv.counts.Sales === 1 && pv.counts.Lots >= 1 && pv.devices.length === 2 && !pv.liveSince, 'preview counts what will be cleared');
+  ok(/PIN/.test(c('goLive', T, { pin: '9999', phrase: 'เริ่มใช้งานจริง' }).error), 'wrong PIN refused');
+  ok(/คำยืนยัน/.test(c('goLive', T, { pin: '1111', phrase: 'เริ่ม' }).error), 'wrong phrase refused');
+  eq(h.__ss.getSheetByName('Sales').getLastRow(), 2, 'nothing cleared by refused tries');
+  const nb = h.__backups.length;
+  const r = m('goLive', T, { pin: '1111', phrase: 'เริ่มใช้งานจริง', clearCatalog: false, keepDevices: [DEVA] });
+  ok(h.__backups.length === nb + 1 && /ก่อนเริ่มใช้จริง/.test(r.backup), 'labelled backup made first');
+  ['Sales', 'SaleLines', 'Shifts', 'Lots', 'LotUse', 'Receipts', 'StockMoves'].forEach(n => eq(h.__ss.getSheetByName(n).getLastRow(), 1, n + ' cleared, header kept'));
+  const ps = m('listProducts', T);
+  ok(ps.length === 1 && ps[0].onHand === 0, 'products kept, stock reset to 0');
+  eq(m('listDevices', T).map(d => d.name), ['เครื่อง 1'], 'only the kept counter stays registered');
+  eq(m('netDevices', T).length, 1, 'shop internet list kept');
+  ok(m('listUsers', T).length === 2, 'users kept');
+  ok(m('goLivePreview', T).liveSince, 'liveSince recorded');
+  ok(/ไปแล้ว/.test(c('goLive', T, { pin: '1111', phrase: 'เริ่มใช้งานจริง', clearCatalog: true }).error), 'cannot run twice');
+  eq(m('listProducts', T).length, 1, 'second press changed nothing');
+  ok(m('auditLog', T, 10).some(a => a.action === 'GO_LIVE'), 'go-live logged');
+  // after going live the shop works normally
+  m('receive', T, { receiptUid: 'R2', lines: [{ sku, qty: 24, unitCost: 6 }] });
+  eq(m('listProducts', T)[0].onHand, 24, 'first real receipt starts the stock');
+}
+
 console.log('server tests passed:', pass);

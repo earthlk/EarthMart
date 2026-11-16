@@ -61,6 +61,10 @@ class Sheet {
   }
   appendRow(row) { new Range(this, this.getLastRow() + 1, 1, 1, row.length).setValues([row]); }
   setFrozenRows() {}
+  getMaxRows() { return Math.max(1000, this.data.length); }
+  getMaxColumns() { return Math.max(26, ...this.data.map(r => (r || []).length)); }
+  getLastColumn() { let m = 0; this.data.forEach(r => (r || []).forEach((v, j) => { if (v !== '' && v !== undefined) m = Math.max(m, j + 1); })); return m; }
+  deleteRows(start, n) { this.data.splice(start - 1, n); }
   copyTo(dest) {
     const s = dest.insertSheet('Copy of ' + this.name);
     s.data = this.data.map(r => r.slice());
