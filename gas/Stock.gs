@@ -33,7 +33,7 @@ function api_stockList(token) {
     session_(token);
     return readAll_('Products').filter(function (p) { return bool_(p.active) && p.type !== 'recipe'; }).map(function (p) {
       return { sku: String(p.sku), name: p.name, category: p.category, unit: p.unit || 'ชิ้น',
-               onHand: num_(p.onHand), minStock: num_(p.minStock), cost: num_(p.cost), forSale: forSale_(p) };
+               onHand: num_(p.onHand), minStock: num_(p.minStock), manual: p.minManual !== '' && p.minManual !== null && p.minManual !== undefined, cost: num_(p.cost), forSale: forSale_(p) };
     });
   });
 }

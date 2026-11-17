@@ -948,4 +948,44 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(m('listProducts', T)[0].onHand, 24, 'first real receipt starts the stock');
 }
 
+{
+  // Minimum stock worked out from sales (and shelf life); a typed number wins
+  const h = makeContext({ now: '2026-11-01T02:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m = (fn, ...a) => { const r = c(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  h.createOwner('O', '1111');
+  const DEV = 'Dmin0000000000000001', uid = m('status').users[0].userId;
+  let T = m('login', uid, '1111', DEV).token;
+  m('registerDevice', T, DEV, 'เครื่อง 1');
+  m('saveProduct', T, { name: 'โค้ก', price: 16, type: 'nobarcode', unit: 'กระป๋อง' });
+  m('saveProduct', T, { name: 'ขนมปัง', price: 20, type: 'nobarcode', unit: 'ชิ้น' });
+  m('saveProduct', T, { name: 'ไฟแช็ก', price: 10, type: 'nobarcode', unit: 'อัน', minManual: 30 });
+  const P = Object.fromEntries(m('listProducts', T).map(p => [p.name, p.sku]));
+  m('receive', T, { receiptUid: 'R1', lines: [{ sku: P['โค้ก'], qty: 200, unitCost: 12, expiryDate: '2027-01-01' }, { sku: P['ขนมปัง'], qty: 100, unitCost: 15, expiryDate: '2026-11-07' }, { sku: P['ไฟแช็ก'], qty: 50, unitCost: 5 }] });
+  let r0 = m('recomputeMinStock', T);
+  ok(r0.waiting >= 2, 'no history yet: waits instead of guessing');
+  m('openShift', T, 500, '');
+  for (let d = 0; d < 10; d++) {
+    m('commitSale', T, { saleUid: 'S' + d, payMethod: 'cash', received: 200, lines: [{ sku: P['โค้ก'], qty: 4 }, { sku: P['ขนมปัง'], qty: 3 }] });
+    h.__advance(24 * 3600 * 1000);
+    T = m('login', uid, '1111', DEV).token;
+  }
+  const r = m('recomputeMinStock', T);
+  const ps = Object.fromEntries(m('listProducts', T).map(p => [p.name, p]));
+  eq(ps['โค้ก'].avgDaily, 4, 'sold per day');
+  eq(ps['โค้ก'].minStock, 28, 'coke: 4/day × 7 days cover');
+  eq(ps['ขนมปัง'].shelfDays, 6, 'bread shelf life from its lot');
+  eq(ps['ขนมปัง'].minStock, 9, 'bread: cover capped at half its 6-day shelf life (3 × 3)');
+  eq([ps['ไฟแช็ก'].minStock, ps['ไฟแช็ก'].minManual], [30, 30], 'typed minimum wins');
+  ok(r.auto >= 2 && r.manual === 1, 'summary counts');
+  m('saveProduct', T, Object.assign({}, ps['ไฟแช็ก'], { minManual: '' }));
+  m('recomputeMinStock', T);
+  eq(m('listProducts', T).find(p => p.name === 'ไฟแช็ก').minManual, '', 'cleared back to automatic');
+  m('saveSettings', T, { reorderDays: '14' });
+  m('recomputeMinStock', T);
+  eq(m('listProducts', T).find(p => p.name === 'โค้ก').minStock, 56, 'longer restock cycle → higher minimum');
+}
+
 console.log('server tests passed:', pass);

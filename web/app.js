@@ -3042,7 +3042,7 @@ function selectProduct(sku) {
     else {
       var p = sku ? S.idx.bySku[sku] : null;
       S.ed = {
-        p: p ? Object.assign({}, p) : { sku: '', name: '', category: S.prodFilter.cat || '', type: 'barcode', unit: 'ชิ้น', cost: '', price: '', minStock: '',
+        p: p ? Object.assign({}, p) : { sku: '', name: '', category: S.prodFilter.cat || '', type: 'barcode', unit: 'ชิ้น', cost: '', price: '', minStock: '', minManual: '',
           openPrice: false, quickKey: false, quickKeyGroup: '', quickKeyOrder: '', icon: '', color: 'gray', plu: '', active: true, forSale: true, trackExpiry: false },
         codes: p ? codesOf(sku).map(function (b) { return Object.assign({}, b); }) : [],
         comps: p && S.recipes[sku] ? S.recipes[sku].map(function (c) { return { sku: c.sku, qty: c.qty }; }) : [],
@@ -3117,7 +3117,7 @@ function drawEditor() {
     (p.forSale === false && !isRecipe ? '<div class="field"><label>ราคาขาย</label><input value="ไม่ขาย" disabled></div>'
       : f('price', isRecipe ? 'ราคาขาย / หน่วย' : 'ราคาขาย / ชิ้น', 'type="number" step="0.25" inputmode="decimal"')) + '</div>' +
     '<div class="grid3">' + f('unit', 'หน่วยนับ') + (isRecipe ? '<div class="field"><label>สต็อก</label><input value="ใช้ของส่วนประกอบ" disabled></div>'
-      : f('minStock', 'ขั้นต่ำ (ชิ้น)', 'type="number" inputmode="numeric"')) + f('plu', 'PLU (รหัสสั้น)', 'inputmode="numeric"') + '</div>' +
+      : minStockField(p, isNew)) + f('plu', 'PLU (รหัสสั้น)', 'inputmode="numeric"') + '</div>' +
     (isRecipe ? recipeSection(rcost) : p.type !== 'nobarcode' ?
       '<div class="sec-title"><b>บาร์โค้ด (EAN) แต่ละหน่วย</b><span class="muted" style="font-size:12px">สแกนหน่วยไหนก็ได้</span></div>' +
       (codes.length ? '<div class="units"><div class="u head"><span>หน่วย</span><span>EAN</span><span class="r">= ชิ้น</span><span class="r">ราคาขาย</span><span></span></div>' + unitRows + '</div>' : '') +
@@ -3229,6 +3229,19 @@ function edInput(t) {
   }
 }
 
+/** Minimum stock: worked out from sales unless the owner types a number (minManual). */
+function minStockAutoText(p) {
+  if (!p.sku) return 'คำนวณจากยอดขายหลังขายครบ 7 วัน';
+  if (p.avgDaily === '' || p.avgDaily === undefined) return 'รอข้อมูลขายครบ 7 วัน';
+  return 'อัตโนมัติ ' + (p.minManual === '' ? p.minStock : '—') + ' · ขายเฉลี่ย ' + p.avgDaily + '/วัน' + (p.shelfDays ? ' · อายุ ' + p.shelfDays + ' วัน' : '');
+}
+function minStockField(p, isNew) {
+  var auto = p.minManual === '' || p.minManual === undefined || p.minManual === null;
+  return '<div class="field"><label for="e-minManual">ขั้นต่ำ (ชิ้น)</label><input id="e-minManual" data-ef="minManual" type="number" min="0" inputmode="numeric" value="' + (auto ? '' : esc(p.minManual)) +
+    '" placeholder="' + (isNew || p.avgDaily === '' || p.avgDaily === undefined ? 'อัตโนมัติ' : 'อัตโนมัติ: ' + esc(p.minStock)) + '">' +
+    '<small class="muted" style="font-size:11px;line-height:1.3">' + (auto ? esc(minStockAutoText(p)) : 'กำหนดเอง · ลบตัวเลขออก = กลับไปอัตโนมัติ') + '</small></div>';
+}
+
 function markDirty() {
   var b = $('[data-ed=save]'); if (b) b.disabled = false;
   var c = $('[data-ed=cancel]'); if (c) c.textContent = 'ยกเลิก';
@@ -3279,7 +3292,7 @@ function saveEditor() {
     if (!(m >= 1) || Math.round(m) !== m) { toast('ใส่จำนวนชิ้นของหน่วย "' + (codes[i].unitName || codes[i].barcode) + '"', true); var inp = $('[data-ec=multiplier][data-i="' + S.ed.codes.indexOf(codes[i]) + '"]'); if (inp) inp.focus(); return; }
     if (!String(codes[i].unitName).trim()) { toast('ใส่ชื่อหน่วยของบาร์โค้ด ' + codes[i].barcode, true); return; }
   }
-  var payload = Object.assign({}, p, { forSale: p.forSale !== false, trackExpiry: !!p.trackExpiry, price: p.forSale === false ? 0 : Number(p.price) || 0, cost: Number(p.cost) || 0, minStock: Number(p.minStock) || 0, quickKeyOrder: Number(p.quickKeyOrder) || 0 });
+  var payload = Object.assign({}, p, { forSale: p.forSale !== false, trackExpiry: !!p.trackExpiry, price: p.forSale === false ? 0 : Number(p.price) || 0, cost: Number(p.cost) || 0, minManual: p.minManual === '' || p.minManual === null || p.minManual === undefined ? '' : Number(p.minManual), quickKeyOrder: Number(p.quickKeyOrder) || 0 });
   api('saveProduct', S.token, payload, codes.map(function (c) {
     return { barcode: String(c.barcode).trim(), unitName: String(c.unitName).trim(), multiplier: Number(c.multiplier), price: c.price === null || c.price === '' ? null : Number(c.price) };
   }), p.type === 'recipe' ? S.ed.comps.map(function (c) { return { sku: c.sku, qty: Number(c.qty) }; }) : []).then(function (r) {
@@ -3767,7 +3780,7 @@ function drawStockKpis() {
   var sub = function (t) { return '<div class="muted" style="font-size:12px;margin-top:2px">' + t + '</div>'; };
   var loss = round2((S.ov.lossMonth || 0) + (S.ov.expiryMonth || 0));
   box.innerHTML = k('มูลค่าสต็อก (ทุน FIFO)', '฿' + money(S.ov.stockValue)).replace(/<\/div>$/, sub(stockRows.length + ' รายการ') + '</div>') +
-    k('ใกล้หมด', low, low > 0) +
+    k('ใกล้หมด', low, low > 0).replace(/<\/div>$/, sub('ขั้นต่ำคิดจากยอดขาย ' + (S.settings.reorderDays || 7) + ' วัน') + '</div>') +
     k('ของเสียเดือนนี้', '฿' + money(loss)).replace(/<\/div>$/, sub('เสียหาย/สูญหาย ฿' + money(S.ov.lossMonth || 0) + ' · หมดอายุ ฿' + money(S.ov.expiryMonth || 0)) + '</div>') +
     k('เบิกใช้ในร้านเดือนนี้', '฿' + money(S.ov.useMonth || 0)).replace(/<\/div>$/, sub('ค่าใช้จ่าย · เบิกจากหน้าขาย') + '</div>');
 }
@@ -3819,7 +3832,7 @@ function renderStockRows() {
     var tag = r.onHand < 0 ? '<span class="tag warn">ติดลบ</span>' : low ? '<span class="tag warn">ใกล้หมด</span>' : '<span class="tag green">ปกติ</span>';
     return '<div class="stk-grid"><div>' + esc(r.name) + (r.forSale === false ? ' <span class="tag gray">วัตถุดิบ</span>' : '') + '</div><div class="muted">' + esc(r.category) + '</div>' +
       '<div class="r num' + (low || r.onHand < 0 ? ' warn-text' : '') + '" style="font-weight:600">' + r.onHand + ' <span class="muted" style="font-weight:400;font-size:13px">' + esc(r.unit) + '</span></div>' +
-      '<div class="r num">' + (r.minStock || '—') + '</div><div class="r num">' + money(val[r.sku] || 0) + '</div><div>' + tag + '</div>' +
+      '<div class="r num" title="' + (r.manual ? 'กำหนดเอง' : 'คำนวณจากยอดขาย') + '">' + (r.minStock || '—') + (r.manual ? '<small class="muted"> ✎</small>' : '') + '</div><div class="r num">' + money(val[r.sku] || 0) + '</div><div>' + tag + '</div>' +
       '<div class="r" style="white-space:nowrap"><button class="btn sm" data-act="countStock" data-sku="' + esc(r.sku) + '">ปรับยอด</button> ' +
       '<button class="btn sm ghost" data-act="stockHist" data-sku="' + esc(r.sku) + '">ประวัติ</button></div></div>';
   }).join('') : '<div class="empty">ไม่พบรายการ</div>';
@@ -6008,6 +6021,9 @@ function renderSettings() {
     f('billPrefix', 'คำนำหน้าเลขบิล', 'เว้นว่างได้') +
     '<div class="field"><label for="s-autoPrint">พิมพ์ใบเสร็จอัตโนมัติหลังรับเงิน</label><select id="s-autoPrint" data-skey="autoPrint">' +
       '<option value="1">พิมพ์ทุกบิล (ยกเลิกได้ในหน้าชำระเงิน)</option><option value="0"' + (st.autoPrint === '0' ? ' selected' : '') + '>ไม่พิมพ์ (ติ๊กพิมพ์เองเฉพาะบิลที่ลูกค้าขอ)</option></select></div>' +
+    '<div class="field"><label for="s-reorderDays">รับของเข้าร้านทุกกี่วัน <small class="muted">(ใช้คำนวณสต็อกขั้นต่ำจากยอดขาย)</small></label><select id="s-reorderDays" data-skey="reorderDays">' +
+      [['3', '3 วัน'], ['5', '5 วัน'], ['7', '7 วัน (สัปดาห์ละครั้ง)'], ['10', '10 วัน'], ['14', '14 วัน (2 สัปดาห์)'], ['30', '30 วัน (เดือนละครั้ง)']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (String(st.reorderDays || '7') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
     '<div class="field"><label for="s-autoLockMinutes">ล็อกหน้าจอเมื่อไม่มีใครใช้ (ต้องใส่ PIN ใหม่)</label><select id="s-autoLockMinutes" data-skey="autoLockMinutes">' +
       [['0', 'ไม่ล็อก'], ['5', '5 นาที'], ['10', '10 นาที'], ['15', '15 นาที'], ['30', '30 นาที'], ['60', '1 ชั่วโมง'], ['120', '2 ชั่วโมง']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.autoLockMinutes === undefined ? '5' : st.autoLockMinutes) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
@@ -6166,8 +6182,11 @@ function goLiveModal() {
 function saveSettingsForm(form) {
   var vals = {};
   $all('[data-skey]', form).forEach(function (i) { vals[i.getAttribute('data-skey')] = i.value; });
+  var cycle = vals.reorderDays !== undefined && String(vals.reorderDays) !== String(S.settings.reorderDays || '7');
   api('saveSettings', S.token, vals).then(function (st) {
     S.settings = st; applyTheme(); toast('บันทึกแล้ว'); render(); loadSettings();
+    // A new restock cycle changes every automatic minimum: work them out again now.
+    if (cycle) return api('recomputeMinStock', S.token).then(function () { return reloadCatalog(); });
   }).catch(fail);
 }
 

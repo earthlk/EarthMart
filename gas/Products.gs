@@ -27,6 +27,7 @@ function recipeCost_(comps, bySku) {
 function api_bootstrap(token) {
   return respond_(function () {
     var s = session_(token);
+    maybeRecomputeMinStock_();
     return {
       user: { userId: s.userId, name: s.name, role: s.role },
       isCounter: isCounter_(s.deviceId),
@@ -65,7 +66,10 @@ function productOut_(p) {
     cost: num_(p.cost), price: num_(p.price), minStock: num_(p.minStock), openPrice: bool_(p.openPrice),
     quickKey: bool_(p.quickKey), quickKeyGroup: p.quickKeyGroup || '', quickKeyOrder: num_(p.quickKeyOrder),
     icon: p.icon || '', color: p.color || '', plu: p.plu === '' ? '' : String(p.plu),
-    active: bool_(p.active), onHand: num_(p.onHand), forSale: forSale_(p), trackExpiry: bool_(p.trackExpiry), image: p.image ? String(p.image) : ''
+    active: bool_(p.active), onHand: num_(p.onHand), forSale: forSale_(p), trackExpiry: bool_(p.trackExpiry), image: p.image ? String(p.image) : '',
+    // minStock is worked out from sales (Reorder.gs) unless minManual holds a typed number
+    minManual: p.minManual === '' || p.minManual === null || p.minManual === undefined ? '' : num_(p.minManual),
+    avgDaily: p.avgDaily === '' ? '' : num_(p.avgDaily), shelfDays: p.shelfDays === '' ? '' : num_(p.shelfDays)
   };
 }
 
@@ -156,11 +160,15 @@ function saveProduct_(sess, input, barcodes, components) {
     if (clash) throw new Error('บาร์โค้ด ' + b.barcode + ' ใช้กับสินค้า ' + clash.sku + ' แล้ว');
   });
 
+  // Blank = let the program work it out from sales; a number = the owner's own minimum.
+  var mm = input.minManual !== undefined ? input.minManual : input.minStock;
+  var manualMin = mm === '' || mm === null || mm === undefined || (typeof mm === 'string' && !mm.trim()) ? '' : Math.max(0, num_(mm));
   var row = {
     sku: sku, name: name, category: String(input.category || '').trim(), type: type,
     // Cost comes from received lots (FIFO); a new product may start with a cost (e.g. from import) as a fallback.
     unit: String(input.unit || 'ชิ้น'), cost: type === 'recipe' ? recipeCost_(comps, bySku) : existing ? num_(existing.cost) : num_(input.cost), price: price,
-    minStock: type === 'recipe' ? 0 : num_(input.minStock), forSale: type === 'recipe' ? true : input.forSale !== false,
+    minManual: type === 'recipe' ? '' : manualMin, minStock: type === 'recipe' ? 0 : manualMin !== '' ? manualMin : existing ? num_(existing.minStock) : 0,
+    avgDaily: existing ? existing.avgDaily : '', shelfDays: existing ? existing.shelfDays : '', forSale: type === 'recipe' ? true : input.forSale !== false,
     trackExpiry: type === 'recipe' ? false : !!input.trackExpiry,
     openPrice: !!input.openPrice, quickKey: !!input.quickKey, quickKeyGroup: String(input.quickKeyGroup || ''),
     quickKeyOrder: num_(input.quickKeyOrder), icon: String(input.icon || ''), color: String(input.color || ''),
