@@ -394,3 +394,39 @@ function api_bulkPrice(token, changes) {
     });
   });
 }
+
+/**
+ * Delete a product the shop never used; a product with history (sold, received, counted, in a recipe
+ * or a promotion) is switched off instead, so old bills and reports still make sense.
+ * → { deleted: true } | { archived: true, reason }
+ */
+function api_deleteProduct(token, sku) {
+  return respond_(function () {
+    var s = owner_(token);
+    sku = String(sku || '');
+    return withLock_(function () {
+      var p = readAll_('Products').filter(function (x) { return String(x.sku) === sku; })[0];
+      if (!p) throw new Error('ไม่พบสินค้า');
+      var used = null;
+      if (readAll_('SaleLines').some(function (l) { return String(l.sku) === sku; })) used = 'เคยขายแล้ว';
+      else if (readAll_('Lots').some(function (l) { return String(l.sku) === sku; })) used = 'มีประวัติรับเข้า';
+      else if (readAll_('StockMoves').some(function (m) { return String(m.sku) === sku; })) used = 'มีความเคลื่อนไหวสต็อก';
+      else if (readAll_('Recipes').some(function (r) { return String(r.componentSku) === sku; })) used = 'เป็นส่วนผสมของสินค้าสูตรอื่น';
+      else if (readAll_('Promotions').some(function (r) { return String(r.rule || '').indexOf('"' + sku + '"') >= 0; })) used = 'อยู่ในโปรโมชั่น';
+      if (used) {
+        sheet_('Products').getRange(p._row, SCHEMA.Products.indexOf('active') + 1).setValue(false);
+        log_(s, 'PRODUCT_ARCHIVE', sku, p.name + ' · ' + used, '');
+        return { archived: true, reason: used };
+      }
+      var blank = function (name, rows) {
+        rows.forEach(function (r) { sheet_(name).getRange(r._row, 1, 1, SCHEMA[name].length).setValues([SCHEMA[name].map(function () { return ''; })]); });
+      };
+      blank('Barcodes', readAll_('Barcodes').filter(function (b) { return String(b.sku) === sku; }));
+      blank('Recipes', readAll_('Recipes').filter(function (r) { return String(r.sku) === sku; }));
+      blank('Products', [p]);
+      if (p.image) { try { DriveApp.getFileById(String(p.image)).setTrashed(true); } catch (e) { /* already gone */ } }
+      log_(s, 'PRODUCT_DELETE', sku, p.name, '');
+      return { deleted: true };
+    });
+  });
+}

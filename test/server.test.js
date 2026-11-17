@@ -996,4 +996,31 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(m('listProducts', T).find(p => p.name === 'โค้ก').minStock, 56, 'longer restock cycle → higher minimum');
 }
 
+{
+  // Delete a product: gone if never used, switched off if it has history
+  const h = makeContext({ now: '2026-11-17T02:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m = (fn, ...a) => { const r = c(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  h.createOwner('O', '1111');
+  const DEV = 'Ddel0000000000000001', uid = m('status').users[0].userId;
+  const T = m('login', uid, '1111', DEV).token;
+  m('registerDevice', T, DEV, 'เครื่อง 1');
+  m('saveProduct', T, { name: 'พิมพ์ผิด', price: 10, type: 'barcode' }, [{ barcode: '8850000000017', unitName: 'ชิ้น', multiplier: 1 }]);
+  m('saveProduct', T, { name: 'โค้ก', price: 16, type: 'nobarcode' });
+  const P = Object.fromEntries(m('listProducts', T).map(p => [p.name, p.sku]));
+  m('receive', T, { receiptUid: 'R1', lines: [{ sku: P['โค้ก'], qty: 10, unitCost: 12 }] });
+  m('addUser', T, 'มิว', 'cashier', '2222');
+  const TC = m('login', m('listUsers', T).find(u => u.name === 'มิว').userId, '2222', DEV).token;
+  ok(!c('deleteProduct', TC, P['พิมพ์ผิด']).ok, 'cashier cannot delete products');
+  ok(m('deleteProduct', T, P['พิมพ์ผิด']).deleted, 'unused product deleted');
+  ok(!m('listProducts', T).some(p => p.name === 'พิมพ์ผิด') && !m('bootstrap', T).barcodes.some(b => b.barcode === '8850000000017'), 'its row and barcode are gone');
+  const r = m('deleteProduct', T, P['โค้ก']);
+  ok(r.archived && /รับเข้า/.test(r.reason), 'product with history is switched off instead');
+  eq(m('listProducts', T).find(p => p.name === 'โค้ก').active, false, 'still there, inactive');
+  m('saveProduct', T, { name: 'ใหม่', price: 5, type: 'barcode' }, [{ barcode: '8850000000017', unitName: 'ชิ้น', multiplier: 1 }]);
+  ok(m('bootstrap', T).barcodes.some(b => b.barcode === '8850000000017'), 'barcode of a deleted product can be used again');
+}
+
 console.log('server tests passed:', pass);

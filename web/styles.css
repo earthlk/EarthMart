@@ -899,3 +899,35 @@ a{color:var(--brand-text)}
 .net-off{font-size:12px;color:var(--muted,#888);white-space:nowrap}
 .net-newrow.idle{opacity:.72}
 .chip-radio label.disabled{cursor:not-allowed;opacity:.5}
+.prod-ed .ed-foot [data-ed=delete]{flex:0 0 auto;padding:0 16px}
+
+/* saving overlay: blocks the screen while a change is being written */
+#saving{position:fixed;inset:0;z-index:2000;display:none;align-items:center;justify-content:center;background:transparent}
+#saving.block{display:flex;cursor:progress}
+#saving.show{background:rgba(20,22,20,.28);transition:background .15s}
+#saving .saving-box{display:none;align-items:center;gap:12px;background:var(--surface);color:var(--text);padding:16px 22px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.25);font-weight:600}
+#saving.show .saving-box{display:flex}
+#saving .spin{width:22px;height:22px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--brand,#1f6f4a);animation:emspin .8s linear infinite}
+@keyframes emspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){#saving .spin{animation-duration:2.4s}}
+
+/* skeleton loading */
+.skel{display:block;height:12px;border-radius:6px;margin:4px 0;background:linear-gradient(90deg,var(--surface-muted,#eceae6) 25%,var(--line,#e2dfd9) 37%,var(--surface-muted,#eceae6) 63%);background-size:400% 100%;animation:emskel 1.3s ease infinite}
+.skel.big{height:24px;margin:8px 0}
+.skel-tr td{padding-top:10px;padding-bottom:10px}
+.skel-list{display:flex;flex-direction:column;gap:2px;width:100%}
+.skel-item{padding:10px 4px;border-bottom:1px solid var(--line)}
+.skel-item:last-child{border-bottom:0}
+.skel-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;width:100%}
+.skel-card{min-height:96px}
+@keyframes emskel{0%{background-position:100% 50%}100%{background-position:0 50%}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}}
+
+/* Background sync indicator */
+.syncpill{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 10px;border-radius:17px;border:1px solid var(--line);background:transparent;color:var(--header-ink,var(--muted));font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;opacity:.85}
+.syncpill:hover{opacity:1;border-color:var(--line-strong)}
+.syncpill .sp{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.syncpill .sp.ok{background:#2fa36b}
+.syncpill .sp.off{background:var(--warn)}
+.syncpill .sp.spin-s{background:none;border:2px solid currentColor;border-right-color:transparent;width:10px;height:10px;animation:emspin .8s linear infinite}
+@media (max-width:1100px){.syncpill{font-size:0;gap:0;padding:0 11px}}

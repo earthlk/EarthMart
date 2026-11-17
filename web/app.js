@@ -297,7 +297,7 @@ function proofFor(uid, ref) {
   return sha256Hex(c.hash + ':' + ref).then(function (p) { return { userId: uid, proof: p }; });
 }
 
-if (window.EM_TEST) window.__S = S;   // tests only
+if (window.EM_TEST) { window.__S = S; window.__startAutoSync = function () { startAutoSync(); }; }   // tests only
 
 function readCache() { try { return JSON.parse(store('em_cache') || 'null'); } catch (e) { return null; } }
 var cacheTimer = null;
@@ -315,7 +315,7 @@ function saveCache(now) {
 window.addEventListener('pagehide', function () { if (cacheTimer) saveCache(true); });
 
 /** Start the counter from the saved copy. False when this device has never loaded the shop online. */
-function bootOffline(user) {
+function bootOffline(user, fromRefresh) {
   var c = readCache();
   if (!c || !c.boot || !c.boot.products) return false;
   S.user = user; S.isCounter = !!c.boot.isCounter; S.settings = c.boot.settings || S.settings;
@@ -324,12 +324,12 @@ function bootOffline(user) {
   sstore('em_user', JSON.stringify(user));
   setCatalog(c.boot.products, c.boot.barcodes || [], c.boot.recipes || []);
   applyTheme();
-  S.offline = true;
+  S.offline = !fromRefresh;
   newCart();
   cdPublish('idle');
   S.lastActivity = Date.now();
   go(S.isCounter && !S.shift ? 'shift' : 'sale');
-  toast('ออฟไลน์ — ใช้ข้อมูลร้านที่เก็บไว้ในเครื่อง (' + dateTime(c.at) + ')');
+  if (!fromRefresh) toast('ออฟไลน์ — ใช้ข้อมูลร้านที่เก็บไว้ในเครื่อง (' + dateTime(c.at) + ')');
   return true;
 }
 
@@ -442,23 +442,115 @@ function rawCall(c, name, args) {
   }, function (e) { clearTimeout(timer); throw e; });
 }
 
+/* Reads load in place (skeletons); writes hold the screen with "กำลังบันทึก…" so nothing is clicked twice
+   or changed half-way; a few small writes just happen in the background. */
+var API_READ = /^(bootstrap|status|list|payables$|expenses$|customers$|customerDetail|acc(Summary|Tax)$|wallets$|report|stock(Overview|Moves|List)$|shiftSummary|receipts$|productImage|slideImage|netDevices|lots$|goLivePreview|findBills|expiryList|bill(Summary|Image|Detail)$|auditLog|newInternalBarcode)/;
+var API_BACKGROUND = { logDrawer: 1, logout: 1, recomputeMinStock: 1 };
+var API_SAVING_TH = { commitSale: 'กำลังบันทึกบิล…', receive: 'กำลังบันทึกการรับสินค้า…', closeShift: 'กำลังปิดกะ…', openShift: 'กำลังเปิดกะ…', goLive: 'กำลังสำรองและล้างข้อมูล…',
+  importProducts: 'กำลังนำเข้าสินค้า…', uploadProductImage: 'กำลังอัปโหลดรูป…', uploadSlide: 'กำลังอัปโหลด…', deleteProduct: 'กำลังลบ…', backupNow: 'กำลังสำรองข้อมูล…' };
 function api(name) {
   var args = Array.prototype.slice.call(arguments, 1);
   var c = conn();
   if (!c.url) return Promise.reject(Object.assign(new Error('ยังไม่ได้ตั้งค่าการเชื่อมต่อ'), { code: 'NO_CONN' }));
+  var saving = !API_READ.test(name) && !API_BACKGROUND[name] && name !== 'login';
   S.busy++; showBusy();
-  return rawCall(c, name, args).then(function (d) { S.busy--; showBusy(); return d; }, function (e) {
-    S.busy--; showBusy();
+  if (saving) savingStart(API_SAVING_TH[name]);
+  return rawCall(c, name, args).then(function (d) { S.busy--; showBusy(); if (saving) savingEnd(); return d; }, function (e) {
+    S.busy--; showBusy(); if (saving) savingEnd();
     if (e.code === 'BAD_KEY') { showConnect(e.message); throw e; }
     if (/เข้าสู่ระบบ/.test(e.message) && S.token) { forceLogin(e.message); }
     throw e;
   });
 }
 
+/** Same as api() for reads done in the background: no loading bar, never interrupts the screen. */
+function apiQuiet(name) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  var c = conn();
+  if (!c.url) return Promise.reject(Object.assign(new Error('ยังไม่ได้ตั้งค่าการเชื่อมต่อ'), { code: 'NO_CONN' }));
+  return rawCall(c, name, args).catch(function (e) {
+    if (/เข้าสู่ระบบ/.test(e.message) && S.token) forceLogin(e.message);
+    throw e;
+  });
+}
+
+/* ---------- Data cache: show the last copy at once, then the fresh one (stale-while-revalidate) ---------- */
+var memo = (function () { try { return JSON.parse(store('em_memo') || '{}') || {}; } catch (e) { return {}; } })();
+var memoTimer = null;
+function memoSave(now) {
+  clearTimeout(memoTimer);
+  if (!now) { memoTimer = setTimeout(function () { memoSave(true); }, 400); return; }
+  memoTimer = null;
+  (function () {
+    try {
+      var keys = Object.keys(memo).sort(function (a, b) { return memo[b].at - memo[a].at; });
+      var out = {}, size = 0;
+      keys.forEach(function (k) { var j = JSON.stringify(memo[k]); if (size + j.length < 1500000) { out[k] = memo[k]; size += j.length; } });
+      memo = out;
+      store('em_memo', JSON.stringify(out));
+    } catch (e) { /* storage full: cache stays in memory */ }
+  })();
+}
+window.addEventListener('pagehide', function () { if (memoTimer) memoSave(true); });
+/** Call fn(data, cached) with the saved copy right away (if any), then with fresh data from the server. */
+function swr(key, fetch, fn) {
+  var hit = memo[key];
+  if (hit && hit.u === (S.user && S.user.userId)) { try { fn(hit.d, true); } catch (e) { console.error(e); } }
+  return fetch().then(function (d) {
+    memo[key] = { d: d, at: Date.now(), u: S.user && S.user.userId };
+    memoSave();
+    fn(d, false);
+    return d;
+  });
+}
+function memoClear() { memo = {}; store('em_memo', null); }
+
+var savingN = 0, savingTimer = null;
+function savingStart(label) {
+  savingN++;
+  var el = $('#saving');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'saving'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite');
+    el.innerHTML = '<div class="saving-box"><span class="spin"></span><span class="saving-t"></span></div>';
+    document.body.appendChild(el);
+  }
+  $('.saving-t', el).textContent = label || 'กำลังบันทึก…';
+  el.classList.add('block');
+  // quick saves (< 0.25 s) only block clicks; the spinner shows if it takes longer
+  clearTimeout(savingTimer);
+  savingTimer = setTimeout(function () { if (savingN > 0) el.classList.add('show'); }, 250);
+}
+function savingEnd() {
+  savingN = Math.max(0, savingN - 1);
+  if (savingN) return;
+  clearTimeout(savingTimer);
+  var el = $('#saving');
+  if (el) el.classList.remove('show', 'block');
+}
+document.addEventListener('keydown', function (e) { if (savingN > 0) { e.preventDefault(); e.stopPropagation(); } }, true);
+
 function showBusy() {
   var el = $('#busy');
   if (S.busy > 0 && !el) { el = document.createElement('div'); el.id = 'busy'; el.className = 'loading'; document.body.appendChild(el); }
   if (S.busy <= 0 && el) el.remove();
+}
+
+/* Skeletons: grey shimmering blocks in the shape of what is loading. */
+function skelLine(w) { return '<span class="skel" style="width:' + (w || 100) + '%"></span>'; }
+function skelRows(n, cols) {
+  var o = '';
+  for (var i = 0; i < (n || 6); i++) { o += '<tr class="skel-tr">'; for (var j = 0; j < (cols || 4); j++) o += '<td>' + skelLine(j === 0 ? 70 + (i * 7) % 25 : 40 + (i * 13 + j * 9) % 45) + '</td>'; o += '</tr>'; }
+  return o;
+}
+function skelList(n) {
+  var o = '<div class="skel-list" aria-busy="true" aria-label="กำลังโหลด">';
+  for (var i = 0; i < (n || 5); i++) o += '<div class="skel-item">' + skelLine(55 + (i * 11) % 35) + skelLine(30 + (i * 17) % 40) + '</div>';
+  return o + '</div>';
+}
+function skelCards(n) {
+  var o = '<div class="skel-cards" aria-busy="true" aria-label="กำลังโหลด">';
+  for (var i = 0; i < (n || 4); i++) o += '<div class="card pad skel-card">' + skelLine(45) + '<span class="skel big" style="width:70%"></span>' + skelLine(60) + '</div>';
+  return o + '</div>';
 }
 
 var toastTimer;
@@ -595,6 +687,7 @@ function start() {
     navigator.serviceWorker.register('sw.js').catch(function () {});
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
+  if (bootFromCache()) return;
   api('status').then(function (st) {
     S.status = st;
     S.settings = st.settings || {};
@@ -792,8 +885,153 @@ function shakeDots() {
   d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake');
 }
 
+/**
+ * Refresh with a saved sign-in: open straight away from the copy saved on this device,
+ * then fetch the latest shop data quietly and swap it in without disturbing the screen.
+ */
+function bootFromCache() {
+  var c = readCache(), user = null, token = sstore('em_token');
+  try { user = JSON.parse(sstore('em_user') || 'null'); } catch (x) { user = null; }
+  if (!token || !user || !c || !c.status || !c.boot || !c.boot.products || !conn().url) return false;
+  S.status = c.status; S.settings = c.status.settings || {}; S.token = token;
+  if (!bootOffline(user, true)) return false;
+  S.syncing = true; drawSyncPill();
+  apiQuiet('status').then(function (st) {
+    S.status = st; pruneCreds(st);
+    return apiQuiet('bootstrap', S.token);
+  }).then(function (d) {
+    applyBoot(d);
+    S.syncing = false; S.lastSync = Date.now(); drawSyncPill();
+    startAutoSync();
+    if (outbox().length) setTimeout(function () { syncOutbox(); }, 1500);
+    if (d.isCounter) setTimeout(loadCustomers, 1200);
+    setTimeout(syncSlides, 2500);
+    setTimeout(syncImages, 4000);
+  }).catch(function (e) {
+    S.syncing = false; drawSyncPill();
+    if (e.code === 'BAD_KEY') return showConnect(e.message);
+    if (/เข้าสู่ระบบ/.test(e.message)) return;            // forceLogin already shown
+    if (e.offline) { S.offline = true; S.syncErr = 'ออฟไลน์'; drawSyncPill(); toast('ออฟไลน์ — ใช้ข้อมูลร้านที่เก็บไว้ในเครื่อง (' + dateTime(c.at) + ')'); startAutoSync(); return; }
+    S.syncErr = e.message; drawSyncPill(); startAutoSync();
+  });
+  return true;
+}
+
+/** Put fresh bootstrap data in place; redraw only if the person is not in the middle of something. */
+function applyBoot(d) {
+  var wasOffline = S.offline;
+  S.offline = false; S.syncErr = '';
+  S.user = d.user; S.isCounter = d.isCounter; S.settings = d.settings || S.settings;
+  sstore('em_user', JSON.stringify(d.user));
+  var hadShift = !!S.shift;
+  S.shift = d.shift || localShift();
+  S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0; S.promos = d.promos || []; S.slides = d.slides || [];
+  S.prevFloat = d.prevFloat || 0; S.wallets = d.wallets || [];
+  setCatalog(d.products, d.barcodes, d.recipes);
+  saveCache(true);
+  applyTheme();
+  if (S.view === 'shift' && !hadShift && S.shift && S.isCounter) return go('sale');
+  if (S.view === 'sale' && S.isCounter && !S.shift) return go('shift');
+  if (wasOffline || quietRedrawOk()) softRender();
+}
+
+/** True when a redraw would not lose anything: no dialog open, nothing typed, no unsaved product edit. */
+function quietRedrawOk() {
+  if (modalStack.length || savingN > 0) return false;
+  if (S.ed && S.ed.dirty) return false;
+  var a = document.activeElement;
+  if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.value && a.id !== 'scan') return false;
+  if (S.view === 'login' || S.view === 'connect') return false;
+  return true;
+}
+/** Redraw the current page and keep where it was scrolled to (and the scan box focused). */
+function softRender() {
+  var keep = [].map.call(document.querySelectorAll('[id]'), function (el) { return el.scrollTop ? [el.id, el.scrollTop] : null; }).filter(Boolean);
+  var y = window.scrollY, scanFocus = document.activeElement && document.activeElement.id === 'scan';
+  var scanVal = $('#scan') ? $('#scan').value : '';
+  var v = S.view;
+  if (v !== 'sale' && v !== 'products' && v !== 'home' && v !== 'bills' && v !== 'stock' && v !== 'expiry' && v !== 'shift' && v !== 'acct') return;  // forms: leave as they are
+  render();
+  if (v === 'products') { if (S.promoMode) loadPromos(); else if (S.labelMode) drawLabItems(); else renderProductRows(); }
+  refreshPageQuiet();
+  keep.forEach(function (x) { var el = document.getElementById(x[0]); if (el) el.scrollTop = x[1]; });
+  window.scrollTo(0, y);
+  if ($('#scan') && scanVal) $('#scan').value = scanVal;
+  if (scanFocus && $('#scan')) $('#scan').focus();
+}
+
+/* ---------- Background sync: keep this device up to date on a timer, quietly ---------- */
+var autoSyncTimer = null;
+function syncEveryMs() {
+  var m = S.settings && S.settings.syncMinutes;
+  m = m === undefined || m === '' ? 5 : Number(m);
+  return m > 0 ? m * 60000 : 0;
+}
+function startAutoSync() {
+  clearInterval(autoSyncTimer);
+  var ms = syncEveryMs();
+  if (ms) autoSyncTimer = setInterval(function () { backgroundSync(false); }, ms);
+}
+/**
+ * One quiet round: send waiting offline bills, pull the latest catalog/settings, refresh the page on screen.
+ * Never shows a loading bar or blocks; skipped while saving. Manual = the person tapped the sync button.
+ */
+function backgroundSync(manual) {
+  if (!S.token || S.syncing || savingN > 0 || !conn().url) return Promise.resolve();
+  if (!manual && document.hidden) return Promise.resolve();
+  S.syncing = true; drawSyncPill();
+  return Promise.resolve(outbox().length ? syncOutbox() : null).catch(function () {}).then(function () {
+    return apiQuiet('bootstrap', S.token);
+  }).then(function (d) {
+    S.syncing = false; S.lastSync = Date.now();
+    applyBoot(d);
+    drawSyncPill();
+    if (manual) toast('ซิงก์ข้อมูลแล้ว');
+  }, function (e) {
+    S.syncing = false;
+    S.syncErr = e.offline ? 'ออฟไลน์' : e.message;
+    drawSyncPill();
+    if (manual) fail(e);
+  });
+}
+/** Re-run the loader of the page on screen (they draw cached data first, so nothing flickers). */
+function refreshPageQuiet() {
+  var v = S.view;
+  if (v === 'bills') loadBills();
+  else if (v === 'stock') loadStock();
+  else if (v === 'expiry') loadExpiry();
+  else if (v === 'shift' && S.shift) loadShift();
+  else if (v === 'acct') loadAcct();
+  else if (v === 'home') loadHome();
+}
+function syncPillHtml() {
+  if (S.syncing) return '<span class="sp spin-s"></span>กำลังซิงก์';
+  if (S.syncErr) return '<span class="sp off"></span>' + (S.syncErr === 'ออฟไลน์' ? 'ออฟไลน์' : 'ซิงก์ไม่สำเร็จ');
+  if (!S.lastSync) return '<span class="sp"></span>ซิงก์';
+  return '<span class="sp ok"></span>' + agoText(S.lastSync);
+}
+function agoText(t) {
+  var s = Math.round((Date.now() - t) / 1000);
+  if (s < 60) return 'ซิงก์เมื่อสักครู่';
+  if (s < 3600) return 'ซิงก์ ' + Math.floor(s / 60) + ' นาทีก่อน';
+  return 'ซิงก์ ' + timeOf(new Date(t).toISOString());
+}
+function drawSyncPill() {
+  var el = document.getElementById('syncpill');
+  if (!el) return;
+  el.innerHTML = syncPillHtml();
+  el.title = S.syncErr && S.syncErr !== 'ออฟไลน์' ? 'ซิงก์ไม่สำเร็จ: ' + S.syncErr + ' — กดเพื่อลองใหม่' : 'ซิงก์ข้อมูลเดี๋ยวนี้' + (S.lastSync ? ' · ล่าสุด ' + timeOf(new Date(S.lastSync).toISOString()) : '');
+}
+setInterval(drawSyncPill, 30000);
+// Back online or back to this tab after a while: catch up straight away
+window.addEventListener('online', function () { if (S.token) setTimeout(function () { backgroundSync(false); }, 1500); });
+document.addEventListener('visibilitychange', function () {
+  if (!document.hidden && S.token && S.lastSync && Date.now() - S.lastSync > Math.max(60000, syncEveryMs() || 0)) backgroundSync(false);
+});
+
 function boot() {
   return api('bootstrap', S.token).then(function (d) {
+    S.lastSync = Date.now(); setTimeout(startAutoSync, 0);
     S.user = d.user; S.isCounter = d.isCounter; S.settings = d.settings; S.shift = d.shift || localShift();
     sstore('em_user', JSON.stringify(d.user));
     S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0; S.promos = d.promos || []; S.slides = d.slides || [];
@@ -896,6 +1134,7 @@ function frame(inner) {
     '<span class="grow"></span><span class="meta">' + shiftTxt + ' · ' + role + ': ' + esc(S.user ? S.user.name : '') + '</span>' +
     (S.shift && S.isCounter ? '<button class="btn" data-act="cashMoveModal">เงินเข้า/ออก</button>' : '') +
     '<button class="netpill hidden" id="netpill" data-act="outbox" title="บิลที่ขายตอนออฟไลน์"></button>' +
+    '<button class="syncpill" id="syncpill" data-act="syncNow" title="ซิงก์ข้อมูลเดี๋ยวนี้">' + syncPillHtml() + '</button>' +
     (S.isCounter ? '<button class="btn" data-act="openCustomer" id="cdbtn" title="เปิดจอลูกค้าบนจอที่ 2"><span class="dot' +
       (window.CustomerDisplay && CustomerDisplay.pos.connected() ? ' on' : '') + '"></span>จอลูกค้า</button>' : '') +
     '<button class="btn" data-act="logout">ออก</button></header>' + banner + inner;
@@ -980,7 +1219,7 @@ function renderHome() {
   var lock = function (t) { return '<div class="mlock"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4"/></svg>' + t + '</div>'; };
   return '<div class="page mhome">' +
     '<div class="muted" style="font-size:13px">' + esc(S.user.name) + ' · ' + (owner ? 'เจ้าของ' : 'แคชเชียร์') + ' · มือถือ</div>' +
-    (owner ? '<button class="card pad mtoday" data-act="go" data-v="reports" id="mtoday"><span class="muted">ยอดขายวันนี้</span><b class="num">฿—</b><span class="muted" id="mtoday-sub">กำลังโหลด…</span></button>' : '') +
+    (owner ? '<button class="card pad mtoday" data-act="go" data-v="reports" id="mtoday"><span class="muted">ยอดขายวันนี้</span><b class="num">฿—</b><span class="muted" id="mtoday-sub">' + skelLine(60) + '</span></button>' : '') +
     (S.expiryTodo ? '<button class="card pad mexp" data-act="go" data-v="expiry"><b>สินค้าหมดอายุ ' + S.expiryTodo + ' ล็อต</b><span>แตะเพื่อจัดการ ›</span></button>' : '') +
     '<h3 class="mh">ทางลัด</h3><div class="mtiles">' +
     tile('mStock', 'data-t="count"', 'ตรวจนับสต็อก', 'สแกนด้วยกล้องได้') +
@@ -1974,7 +2213,7 @@ function renderBills() {
   if (b.level === 'search') crumb = '<nav class="crumb"><button data-act="billsGo" data-l="month" data-k="' + b.m + '">‹ กลับ</button><span>›</span><button class="on">ค้นหา "' + esc(b.q) + '"</button></nav>';
   return '<div class="page" style="flex-direction:column"><div class="row" style="flex-wrap:wrap;gap:10px">' + crumb + '<span class="grow"></span>' + search + step + '</div>' +
     '<div class="kpis" id="bkpi"></div>' +
-    '<div class="card" style="flex:1;overflow:auto"><table class="table"><thead>' + head + '</thead><tbody id="bills"><tr><td colspan="10" class="muted">กำลังโหลด…</td></tr></tbody></table></div></div>';
+    '<div class="card" style="flex:1;overflow:auto"><table class="table"><thead>' + head + '</thead><tbody id="bills">' + skelRows(8, 7) + '</tbody></table></div></div>';
 }
 
 function billsKpis(t) {
@@ -1989,7 +2228,7 @@ function loadBills() {
   var b = billsState();
   var tb = $('#bills');
   if (b.level === 'day' || b.level === 'search') {
-    return (b.level === 'search' ? api('findBills', S.token, b.q) : api('listBills', S.token, b.d)).then(function (rows) {
+    return swr('bills:' + b.level + ':' + (b.level === 'search' ? b.q : b.d), function () { return b.level === 'search' ? api('findBills', S.token, b.q) : api('listBills', S.token, b.d); }, function (rows) {
       tb = $('#bills');
       if (!tb) return;
       var t = { bills: 0, total: 0, cash: 0, qr: 0, transfer: 0, voids: 0, voidTotal: 0, returned: 0 };
@@ -2616,7 +2855,7 @@ function slidesCard() {
     '<div class="muted" style="font-size:13px">วนแสดงตอนไม่มีลูกค้า · โปรที่กำลังใช้ทำเป็นสไลด์ให้เอง · อัปรูปโปสเตอร์เพิ่มได้ (ย่อขนาดให้อัตโนมัติ)</div>' +
     '<div class="row" style="flex-wrap:wrap;gap:8px"><label class="btn primary" for="sl-file" style="cursor:pointer">+ อัปโหลดรูป</label>' +
     '<input id="sl-file" type="file" accept="image/*" data-change="slideFile" style="position:absolute;left:-9999px"></div>' +
-    '<div id="slidelist" class="slide-list"><div class="muted">กำลังโหลด…</div></div></div>';
+    '<div id="slidelist" class="slide-list">' + skelList(3) + '</div></div>';
 }
 function drawSlideList() {
   var box = $('#slidelist');
@@ -2798,7 +3037,7 @@ function renderPromos() {
     '<div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">โปรโมชั่น</h2><span class="grow"></span>' +
     '<button class="btn" data-act="promoClose">‹ กลับหน้าสินค้า</button><button class="btn primary" data-act="promoNew">+ สร้างโปรโมชั่น</button></div>' +
     '<div class="muted" style="font-size:13px">ระบบคิดให้เองตอนสแกน · ใช้กับสินค้าที่ขายเป็นชิ้น (แพ็ค/ลังมีราคาของตัวเองอยู่แล้ว) · สินค้าลดราคาใกล้หมดอายุไม่ร่วมโปร · 1 ชิ้นเข้าได้โปรเดียว (เซ็ต → หลายชิ้น → แถม → ลดชิ้นเดียว)</div></section>' +
-    '<div id="promo-rows" class="promo-list"><div class="empty">กำลังโหลด…</div></div></div>';
+    '<div id="promo-rows" class="promo-list">' + skelList(4) + '</div></div>';
 }
 
 function promoStatus(p) {
@@ -3253,7 +3492,7 @@ function drawEditor() {
     '<label class="checkrow"><input type="checkbox" data-ef="openPrice" ' + (p.openPrice ? 'checked' : '') + '> ราคาเปิด (ใส่ราคาตอนขาย เช่น ของทอด ของฝากขาย)</label>') +
     (isNew ? '' : '<label class="checkrow"><input type="checkbox" data-ef="active" ' + (p.active ? 'checked' : '') + '> ใช้งาน (เอาออก = ซ่อนจากหน้าขาย ประวัติยังอยู่)</label>') +
     '</fieldset>' +
-    (owner ? '<div class="ed-foot"><button class="btn" data-ed="cancel">' + (S.ed.dirty ? 'ยกเลิก' : 'ปิด') + '</button><button class="btn primary" data-ed="save"' + (S.ed.dirty || isNew ? '' : ' disabled') + '>บันทึก</button></div>' : '');
+    (owner ? '<div class="ed-foot">' + (isNew ? '' : '<button class="btn ghost warn-text" data-ed="delete" title="ลบสินค้า">ลบ</button>') + '<button class="btn" data-ed="cancel">' + (S.ed.dirty ? 'ยกเลิก' : 'ปิด') + '</button><button class="btn primary" data-ed="save"' + (S.ed.dirty || isNew ? '' : ' disabled') + '>บันทึก</button></div>' : '');
 }
 
 function recipeSection(rcost) {
@@ -3385,6 +3624,18 @@ function edClick(el) {
   if (a === 'internal') api('newInternalBarcode', S.token).then(edAddCode).catch(fail);
   if (a === 'cancel') { S.ed.dirty = false; selectProduct(null); }
   if (a === 'save') saveEditor();
+  if (a === 'delete') deleteProduct(S.ed.p);
+}
+
+function deleteProduct(p) {
+  confirm2('ลบ "' + p.name + '"?', 'ถ้าสินค้านี้เคยขาย รับเข้า หรืออยู่ในสูตร/โปรโมชั่น ระบบจะ "ปิดใช้งาน" แทน (หายจากหน้าขาย แต่บิลและรายงานเก่ายังถูกต้อง) · ถ้ายังไม่เคยใช้เลย จะลบทิ้งพร้อมบาร์โค้ดและรูป', 'ลบสินค้า', true).then(function (ok) {
+    if (!ok) return;
+    return api('deleteProduct', S.token, p.sku).then(function (r) {
+      toast(r.deleted ? 'ลบ "' + p.name + '" แล้ว' : 'ปิดใช้งานแทน — ' + r.reason);
+      S.ed = null; S.prodSel = null;
+      return reloadCatalog().then(function () { render(); });
+    });
+  }).catch(fail);
 }
 
 function saveEditor() {
@@ -3505,7 +3756,7 @@ function renderReceive() {
     '<div class="rcv-grid head"><div>สินค้า</div><div>หน่วยที่รับ</div><div class="r">จำนวน</div><div class="r">ทุน / หน่วย</div>' +
     '<div class="r">ทุน/ชิ้น เดิม → ใหม่</div><div class="r">รวม</div><div></div></div>' +
     '<div class="rcv-rows" id="rlines"></div></section>' +
-    '<aside class="rcv-side"><div class="card pad" id="rsum"></div><div class="card pad" id="rlow"></div><div class="card pad" id="rrecent"><span class="muted">กำลังโหลด…</span></div>' +
+    '<aside class="rcv-side"><div class="card pad" id="rsum"></div><div class="card pad" id="rlow"></div><div class="card pad" id="rrecent">' + skelList(3) + '</div>' +
     '<span class="grow"></span><button class="btn primary" data-act="rcCommit" style="height:60px;font-size:18px">บันทึกรับสินค้า · เพิ่มสต็อก</button></aside></div></div>';
 }
 
@@ -3726,12 +3977,12 @@ function renderExpiry() {
     '<span class="muted" style="align-self:center;font-size:13px;padding-right:6px">เตือนตามวันที่ ไม่ขึ้นกับจำนวนคงเหลือ</span></div>' +
     (tab === 'wo' ? '<div class="exp-grid head"><div>สินค้า</div><div>วันที่ตัด · โดย</div><div>ตัดจาก</div><div class="r">จำนวน · ทุนที่เสีย</div></div>'
       : '<div class="exp-grid head"><div>สินค้า</div><div>ล็อต (วันรับ · จำนวนรับ)</div><div>หมดอายุ</div><div class="r">จัดการ</div></div>') +
-    '<div class="stk-rows" id="xrows"><div class="empty">กำลังโหลด…</div></div></section></div>' +
+    '<div class="stk-rows" id="xrows">' + skelList(6) + '</div></section></div>' +
     '<aside class="stk-side"><div class="card pad" id="xact"></div><div class="card pad" id="xset"></div></aside></div></div>';
 }
 
 function loadExpiry() {
-  api('expiryList', S.token).then(function (d) {
+  swr('expiry', function () { return api('expiryList', S.token); }, function (d) {
     S.exp = d;
     S.expiryTodo = d.todo.length;
     var nb = $('nav [data-v=expiry] .badge'); if (nb) nb.textContent = d.todo.length || '';
@@ -3872,8 +4123,8 @@ function renderStock() {
 function loadStock() {
   drawStockTab();
   drawWriteOff();
-  Promise.all([api('stockList', S.token), api('stockOverview', S.token, 7)]).then(function (r) {
-    stockRows = r[0]; S.ov = r[1];
+  swr('stock', function () { return Promise.all([api('stockList', S.token), api('stockOverview', S.token, 7)]); }, function (r) {
+    stockRows = r[0]; S.ov = r[1]; S.stockLoaded = true;
     if (S.ov.expiryTodo !== undefined) { S.expiryTodo = S.ov.expiryTodo; var nb = $('nav [data-v=expiry] .badge'); if (nb) nb.textContent = S.expiryTodo || ''; }
     drawStockKpis(); drawStockTab(); drawExpiring();
   }).catch(fail);
@@ -3919,7 +4170,7 @@ function drawStockTab() {
   if (tab === 'moves') {
     var mv = S.ov ? S.ov.moves : null;
     box.innerHTML = '<div style="overflow:auto;flex:1"><table class="table"><thead><tr><th>เวลา</th><th>สินค้า</th><th>ประเภท</th><th class="r">จำนวน</th><th>อ้างอิง</th><th>หมายเหตุ</th><th>โดย</th></tr></thead><tbody>' +
-      (!mv ? '<tr><td colspan="7" class="muted">กำลังโหลด…</td></tr>' : mv.map(function (m) {
+      (!mv ? skelRows(8, 7) : mv.map(function (m) {
         return '<tr><td class="num" style="white-space:nowrap">' + dateTime(m.createdAt) + '</td><td>' + esc(m.name) + '</td><td>' + (MOVE_TH[m.type] || m.type) + '</td>' +
           '<td class="r num ' + (m.qtyPieces < 0 ? 'warn-text' : 'brand-text') + '">' + (m.qtyPieces > 0 ? '+' : '') + m.qtyPieces + '</td><td class="num">' + esc(m.refNo) + '</td><td>' + esc(m.note) + '</td><td>' + esc(m.user) + '</td></tr>';
       }).join('') || '<tr><td colspan="7" class="muted">ยังไม่มี</td></tr>') + '</tbody></table></div>';
@@ -3935,6 +4186,7 @@ function drawStockTab() {
 function renderStockRows() {
   var box = $('#srows');
   if (!box) return;
+  if (!stockRows.length && !S.stockLoaded) { box.innerHTML = skelList(8); return; }
   var rows = stockFiltered();
   var val = S.ov ? S.ov.values : {};
   box.innerHTML = rows.length ? rows.map(function (r) {
@@ -4165,7 +4417,7 @@ function renderShift() {
   var open = !S.shift, p = open ? 'o' : 'c';
   var count = '<section class="card pad shift-count"><div class="shift-head"><h2>' + (open ? 'เปิดกะ · นับเงินทอน' : 'ปิดกะ · นับเงินในลิ้นชัก') +
     '</h2><span class="muted">นับตามลำดับ 1 → 10 · กด + / − ทีละใบ หรือพิมพ์ที่แป้น · แตะแถวไหนก็ได้เพื่อแก้</span></div>' + denomTable(p) +
-    (open ? '' : '<div class="shift-sum" id="shiftsum"><h2>สรุปจากระบบ</h2><span class="muted">กำลังโหลด…</span></div>') + '</section>';
+    (open ? '' : '<div class="shift-sum" id="shiftsum"><h2>สรุปจากระบบ</h2>' + skelList(5) + '</div>') + '</section>';
   var side = '<aside class="card pad shift-pad"><div class="shift-total"><div class="st-top"><span>' + (open ? 'เงินทอนตั้งต้น' : 'นับได้จริง') + '</span><small id="' + p + '-prog">นับแล้ว 0 / 11 ชนิด</small></div>' +
     '<b id="' + p + '-total" class="num">฿0.00</b>' + (open ? '' : '<div class="st-cmp"><span id="c-exp"></span><b id="c-diff"></b></div>') +
     '<div class="st-bar"><i id="' + p + '-bar"></i></div></div>' +
@@ -4294,7 +4546,7 @@ function loadShift() {
       ' · เงินทอนตั้งต้น ' + money(S.shift.openingCash) + '<br>ขายตอนออฟไลน์ ' + outbox().filter(function (x) { return x.kind === 'sale'; }).length + ' บิล (รอส่ง)</div>';
     return;
   }
-  api('shiftSummary', S.token).then(drawShiftSum).catch(fail);
+  swr('shiftsum:' + (S.shift && S.shift.shiftId), function () { return api('shiftSummary', S.token); }, drawShiftSum).catch(fail);
 }
 
 function drawShiftSum(s) {
@@ -4651,7 +4903,7 @@ function renderAcct() {
   return '<div class="page acc-page"><div class="acc-head"><div class="acc-tabs">' + ACC_TABS.map(function (t) {
     return '<button type="button" data-act="accTab" data-t="' + t[0] + '" class="' + (a.tab === t[0] ? 'on' : '') + '">' + t[1] + '</button>';
   }).join('') + '</div><div class="acc-tools">' + (withPeriod ? accPeriodBar() : '') + right + '</div></div>' +
-    '<div id="acc-body" class="acc-body"><div class="card pad muted">กำลังโหลด…</div></div></div>';
+    '<div id="acc-body" class="acc-body">' + skelCards(4) + skelList(5) + '</div></div>';
 }
 
 function loadAcct() {
@@ -4661,10 +4913,11 @@ function loadAcct() {
   var stamp = (S.accReq = (S.accReq || 0) + 1);
   var mine = function (fn) { return function (d) { if (stamp === S.accReq) put(fn(d)); }; };
   var err = function (e) { put('<div class="card pad warn-text">' + esc(e.message || e) + '</div>'); };
-  if (a.tab === 'overview') api('accSummary', S.token, { from: r[0], to: r[1] }).then(mine(drawAccOverview)).catch(err);
-  else if (a.tab === 'pl') api('accSummary', S.token, { from: r[0], to: r[1] }).then(mine(drawAccPL)).catch(err);
-  else if (a.tab === 'expenses') api('expenses', S.token, { from: r[0], to: r[1] }).then(mine(drawAccExpenses)).catch(err);
-  else if (a.tab === 'wallets') api('wallets', S.token, a.walletSel).then(mine(drawAccWallets)).catch(err);
+  var rk = r[0] + '_' + r[1];
+  if (a.tab === 'overview') swr('acc:sum:' + rk, function () { return api('accSummary', S.token, { from: r[0], to: r[1] }); }, mine(drawAccOverview)).catch(err);
+  else if (a.tab === 'pl') swr('acc:sum:' + rk, function () { return api('accSummary', S.token, { from: r[0], to: r[1] }); }, mine(drawAccPL)).catch(err);
+  else if (a.tab === 'expenses') swr('acc:exp:' + rk, function () { return api('expenses', S.token, { from: r[0], to: r[1] }); }, mine(drawAccExpenses)).catch(err);
+  else if (a.tab === 'wallets') swr('acc:wal:' + (a.walletSel || ''), function () { return api('wallets', S.token, a.walletSel); }, mine(drawAccWallets)).catch(err);
   else if (a.tab === 'tax') Promise.all([api('accTax', S.token, a.taxYear, a.taxHalf), api('accSummary', S.token, { from: a.taxYear + '-01-01', to: a.taxYear + '-12-31' })]).then(mine(drawAccTax)).catch(err);
   else if (a.tab === 'debts') {
     if (a.side === 'ours') api('payables', S.token).then(function (rows) { return api('customers', S.token).then(function (cs) { return { rows: rows, cust: cs }; }); }).then(mine(drawAccPayables)).catch(err);
@@ -5633,7 +5886,7 @@ function printShift(s) {
 
 /* Reports: filters on the left, tabs on the right. S.rep = { f: {...}, tab, data } */
 var REP_TABS = [['overview', 'ภาพรวม'], ['products', 'สินค้า'], ['categories', 'หมวด'], ['staff', 'พนักงาน'], ['shifts', 'กะ'], ['slow', 'ไม่เคลื่อนไหว'], ['stock', 'มูลค่าสต็อก']];
-var ACTION_TH = { GO_LIVE: 'เริ่มใช้งานจริง (ล้างข้อมูลทดสอบ)', VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
+var ACTION_TH = { PRODUCT_DELETE: 'ลบสินค้า', PRODUCT_ARCHIVE: 'ปิดใช้งานสินค้า', GO_LIVE: 'เริ่มใช้งานจริง (ล้างข้อมูลทดสอบ)', VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
   STOCK_ADJUST: 'ปรับสต็อก', PRICE_CHANGE: 'แก้ราคา', APPROVE_FAIL: 'PIN อนุมัติผิด', NO_SALE: 'เปิดลิ้นชัก', WRITEOFF: 'ตัดของเสีย',
   STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า',
   BELOW_COST: 'ขายต่ำกว่าทุน', LOW_MARGIN: 'กำไรต่ำ', OVERSELL: 'ขายเกินสต็อก', OFFLINE_CHECK: 'ตรวจรายการออฟไลน์' };
@@ -5696,7 +5949,7 @@ function renderReports() {
     '<div class="card rep-f' + (r.showF ? '' : ' hidden') + '"><div id="rf-sel" class="rep-sel"></div><button class="btn sm ghost" data-act="repClear" style="align-self:flex-end;white-space:nowrap">ล้างตัวกรอง</button></div>' +
     '<div class="tabs card rep-tabs">' + REP_TABS.map(function (t) {
       return '<button class="tab' + (r.tab === t[0] ? ' on' : '') + '" data-act="repTab" data-t="' + t[0] + '">' + t[1] + '</button>';
-    }).join('') + '</div><div id="report" class="col" style="gap:14px"><span class="muted">กำลังโหลด…</span></div></div>';
+    }).join('') + '</div><div id="report" class="col" style="gap:14px">' + skelCards(4) + skelList(6) + '</div></div>';
 }
 
 function repFilterBadge() {
@@ -5957,7 +6210,7 @@ function repSelects(o) {
 function loadReport() {
   var r = repState();
   var box = $('#report');
-  if (box && !r.data) box.innerHTML = '<span class="muted">กำลังโหลด…</span>';
+  if (box && !r.data) box.innerHTML = skelCards(4) + skelList(6);
   api('report', S.token, r.f).then(function (d) {
     r.data = d;
     if (!$('#report')) return;
@@ -6134,6 +6387,9 @@ function renderSettings() {
     '<div class="field"><label for="s-reorderDays">รอบรับของ (ค่าเริ่มต้น) <small class="muted">— ใช้กับสินค้าที่ยังรับของไม่ถึง 2 ครั้ง · พอรับครบ ระบบดูรอบจริงของแต่ละสินค้า/ผู้ขายเอง</small></label><select id="s-reorderDays" data-skey="reorderDays">' +
       [['3', '3 วัน'], ['5', '5 วัน'], ['7', '7 วัน (สัปดาห์ละครั้ง)'], ['10', '10 วัน'], ['14', '14 วัน (2 สัปดาห์)'], ['30', '30 วัน (เดือนละครั้ง)']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.reorderDays || '7') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
+    '<div class="field"><label for="s-syncMinutes">ซิงก์ข้อมูลอัตโนมัติ <small class="muted">— ดึงสินค้า ราคา สต็อก และส่งบิลค้างเบื้องหลัง ไม่รบกวนการขาย</small></label><select id="s-syncMinutes" data-skey="syncMinutes">' +
+      [['0', 'ปิด (ซิงก์เมื่อเปิดโปรแกรมเท่านั้น)'], ['1', 'ทุก 1 นาที'], ['3', 'ทุก 3 นาที'], ['5', 'ทุก 5 นาที'], ['10', 'ทุก 10 นาที'], ['15', 'ทุก 15 นาที'], ['30', 'ทุก 30 นาที'], ['60', 'ทุก 1 ชั่วโมง']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (String(st.syncMinutes === undefined || st.syncMinutes === '' ? '5' : st.syncMinutes) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
     '<div class="field"><label for="s-autoLockMinutes">ล็อกหน้าจอเมื่อไม่มีใครใช้ (ต้องใส่ PIN ใหม่)</label><select id="s-autoLockMinutes" data-skey="autoLockMinutes">' +
       [['0', 'ไม่ล็อก'], ['5', '5 นาที'], ['10', '10 นาที'], ['15', '15 นาที'], ['30', '30 นาที'], ['60', '1 ชั่วโมง'], ['120', '2 ชั่วโมง']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.autoLockMinutes === undefined ? '5' : st.autoLockMinutes) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
@@ -6159,12 +6415,12 @@ function renderSettings() {
     (S.isCounter ? '<button class="btn warn" data-act="unregisterThis">ยกเลิกการลงทะเบียนเครื่องนี้</button>' : '<button class="btn primary" data-act="registerThis">ลงทะเบียนเป็นเครื่องหน้าร้าน</button>') +
     '<div id="devlist" class="muted" style="font-size:13px"></div><hr style="border:0;border-top:1px solid var(--line);width:100%">' +
     drawerSettings() + '</div>') +
-    sec('users', '<div class="card pad set-card wide"><h2>พนักงาน & สิทธิ์</h2><div id="userlist" class="muted">กำลังโหลด…</div>' +
+    sec('users', '<div class="card pad set-card wide"><h2>พนักงาน & สิทธิ์</h2><div id="userlist">' + skelList(3) + '</div>' +
     '<form class="row" data-form="addUser" style="margin-top:10px;flex-wrap:wrap"><label class="sr" for="nu-name">ชื่อ</label><input id="nu-name" placeholder="ชื่อ" style="width:140px">' +
     '<label class="sr" for="nu-role">สิทธิ์</label><select id="nu-role"><option value="cashier">แคชเชียร์</option><option value="owner">เจ้าของ</option></select>' +
     '<label class="sr" for="nu-pin">PIN</label><input id="nu-pin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN 4–6 หลัก" style="width:120px">' +
     '<button class="btn" type="submit">+ เพิ่ม</button></form></div>' + '') +
-    sec('net', '<div id="netbox" class="net-wrap"><div class="card pad muted">กำลังเชื่อมตัวช่วยอินเทอร์เน็ต…</div></div>') +
+    sec('net', '<div id="netbox" class="net-wrap"><div class="card pad"><div class="muted" style="margin-bottom:8px">กำลังเชื่อมตัวช่วยอินเทอร์เน็ต…</div>' + skelList(4) + '</div></div>') +
     sec('connect', '<div class="card pad col set-card" style="gap:10px">' + '<h2>การเชื่อมต่อ</h2><div class="muted" style="font-size:13px;word-break:break-all">' + esc(conn().url.replace(/(macros\/s\/.{6}).*(.{6}\/exec)/, '$1…$2')) + '</div>' +
     '<div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="copyConnect">คัดลอกลิงก์ตั้งค่าเครื่องอื่น</button><button class="btn sm ghost" data-act="connect">เปลี่ยน</button></div>' +
     '<div class="muted" style="font-size:12px">ลิงก์นี้มี API key — ส่งให้เฉพาะเครื่องของร้าน</div>' +
@@ -6175,7 +6431,7 @@ function renderSettings() {
       '<div class="row" style="gap:6px;flex-wrap:wrap"><a class="btn sm" href="EarthMart-Setup.zip" download>ชุดติดตั้ง Windows (.zip)</a><a class="btn sm ghost" href="EarthMart-local.html" download="EarthMart.html">เฉพาะไฟล์ .html</a></div>') +'</div>') +
     sec('backup', '<div class="set-cols"><div class="card pad col set-card" style="gap:10px">' + '<h2>สำรองข้อมูล</h2><div class="muted" style="font-size:13px">Backup อัตโนมัติทุกวันตั้งได้ด้วย installTriggers() (ดูคู่มือ)</div>' +
       '<button class="btn" data-act="backupNow">Backup ตอนนี้</button>' + '<div id="golive"></div>' + '</div>' +
-      '<div class="card pad" style="max-height:calc(100vh - 140px);overflow:auto"><h2>บันทึกการทำงาน (ล่าสุด 100)</h2><table class="table"><tbody id="auditrows"><tr><td class="muted">กำลังโหลด…</td></tr></tbody></table></div></div>') +
+      '<div class="card pad" style="max-height:calc(100vh - 140px);overflow:auto"><h2>บันทึกการทำงาน (ล่าสุด 100)</h2><table class="table"><tbody id="auditrows">' + skelRows(8, 3) + '</tbody></table></div></div>') +
     '</div></div>';
 }
 
@@ -6332,6 +6588,7 @@ var ACTIONS = {
   bulkReset: function () { S.bulk.edits = {}; drawBulk(); },
   bulkSave: bulkSave,
   outbox: function () { outboxModal(); },
+  syncNow: function () { backgroundSync(true); },
   toggleMd: function (el) { toggleMd(Number(el.getAttribute('data-i'))); },
   expTab: function (el) { S.expTab = el.getAttribute('data-t'); S.expSel = null; render(); drawExpiry(); },
   expPick: function (el) {
