@@ -3472,6 +3472,23 @@ function canMake(comps) {
 
 function codesOf(sku) { return S.barcodes.filter(function (b) { return b.sku === sku; }).sort(function (a, b) { return a.multiplier - b.multiplier; }); }
 
+/** Units already used in the shop (products and barcode units), most common first, plus the usual ones. */
+function unitNames() {
+  var n = {};
+  S.products.forEach(function (p) { if (p.unit) n[p.unit] = (n[p.unit] || 0) + 2; });
+  S.barcodes.forEach(function (b) { if (b.unitName) n[b.unitName] = (n[b.unitName] || 0) + 1; });
+  ['ชิ้น', 'ขวด', 'กระป๋อง', 'ซอง', 'ถุง', 'กล่อง', 'แพ็ค', 'ลัง', 'แก้ว', 'อัน', 'ห่อ', 'หลอด', 'กก.'].forEach(function (u) { if (!n[u]) n[u] = 0.5; });
+  return Object.keys(n).sort(function (a, b) { return n[b] - n[a] || a.localeCompare(b, 'th'); });
+}
+/** A free PLU to suggest: the next number after the highest one in use (starting at 101). */
+function nextPlu() {
+  var used = {}, max = 100;
+  S.products.forEach(function (p) { if (p.plu && p.active) { used[p.plu] = 1; if (/^\d+$/.test(p.plu)) max = Math.max(max, Number(p.plu)); } });
+  var n = max + 1;
+  while (used[String(n)] && n < 99999) n++;
+  return n > 99999 ? '' : String(n);
+}
+
 /** Sub-groups of a category (all of them when no category is chosen), as <option>s. */
 function subcategories(cat) {
   var o = {};
@@ -3596,13 +3613,13 @@ function drawEditor() {
     '<button type="button" data-ed="type" data-v="recipe" class="' + (isRecipe ? 'on' : '') + '">สูตรผสม</button></div>' +
     '<div class="grid3">' + f('category', 'หมวด', 'list="e-catlist"') + '<datalist id="e-catlist">' + catList + '</datalist>' +
     f('subcategory', 'หมวดย่อย', 'list="e-sublist" placeholder="เช่น น้ำอัดลม" title="ใช้ดูรายงานแยกย่อย กรองสินค้า/สต็อก และแบ่งแถวปุ่มหน้าขาย"') + '<datalist id="e-sublist">' + Object.keys(subs).sort().map(function (g) { return '<option value="' + esc(g) + '">'; }).join('') + '</datalist>' +
-    f('unit', 'หน่วยนับ') + '</div>' +
+    f('unit', 'หน่วยนับ', 'list="e-unitlist"') + '<datalist id="e-unitlist">' + unitNames().map(function (u) { return '<option value="' + esc(u) + '">'; }).join('') + '</datalist></div>' +
     '<div class="grid3">' +
     (isRecipe ? '<div class="field"><label>ทุน / หน่วย</label><input value="' + money(rcost) + '" disabled title="คำนวณจากส่วนประกอบ"></div>'
       : '<div class="field"><label>ทุน / ชิ้น (FIFO)</label><div class="row" style="gap:4px"><input value="' + (isNew ? 'จากการรับสินค้า' : money(p.cost)) + '" disabled title="ทุนของล็อตที่จะขายถัดไป" class="grow">' +
         (isNew ? '' : '<button type="button" class="btn sm" data-act="showLots" data-sku="' + esc(p.sku) + '" style="height:40px;padding:0 8px">ล็อต</button>') + '</div></div>') +
     (p.forSale === false && !isRecipe ? '<div class="field"><label>ราคาขาย</label><input value="ไม่ขาย" disabled></div>'
-      : f('price', isRecipe ? 'ราคาขาย / หน่วย' : 'ราคาขาย / ชิ้น', 'type="number" step="0.25" inputmode="decimal"')) + f('plu', 'PLU (รหัสสั้น)', 'inputmode="numeric"') + '</div>' +
+      : f('price', isRecipe ? 'ราคาขาย / หน่วย' : 'ราคาขาย / ชิ้น', 'type="number" step="0.25" inputmode="decimal"')) + f('plu', 'PLU (เลข 1–5 หลัก)', 'inputmode="numeric" maxlength="5" placeholder="เช่น ' + nextPlu() + '" title="รหัสสั้นสำหรับพิมพ์ในช่องสแกน ใช้กับของไม่มีบาร์โค้ด · ตัวเลข 1–5 หลัก ห้ามซ้ำ"') + '</div>' +
     (isRecipe ? '' : minStockField(p, isNew)) +
     (isRecipe ? recipeSection(rcost) : p.type !== 'nobarcode' ?
       '<div class="sec-title"><b>บาร์โค้ด (EAN) แต่ละหน่วย</b><span class="muted" style="font-size:12px">สแกนหน่วยไหนก็ได้</span></div>' +
@@ -3786,6 +3803,7 @@ function saveEditor() {
   var p = S.ed.p;
   if (!String(p.name).trim()) { toast('ใส่ชื่อสินค้า', true); $('#e-name').focus(); return; }
   if (p.forSale !== false && (p.price === '' || isNaN(Number(p.price)))) { if (!p.openPrice) { toast('ใส่ราคาขาย', true); $('#e-price').focus(); return; } }
+  if (String(p.plu || '').trim() && !/^\d{1,5}$/.test(String(p.plu).trim())) { toast('PLU ต้องเป็นตัวเลข 1–5 หลัก', true); $('#e-plu').focus(); return; }
   if (p.type === 'recipe') {
     if (!S.ed.comps.length) { toast('เพิ่มส่วนประกอบอย่างน้อย 1 รายการ', true); var ci = $('#e-comp'); if (ci) ci.focus(); return; }
     var badQ = S.ed.comps.filter(function (c) { return !(Number(c.qty) > 0); })[0];

@@ -124,6 +124,7 @@ function saveProduct_(sess, input, barcodes, components) {
   if (!sku) sku = nextSku_(all);
 
   var plu = String(input.plu || '').trim();
+  if (plu && !/^\d{1,5}$/.test(plu)) throw new Error('PLU ต้องเป็นตัวเลข 1–5 หลัก (บาร์โค้ดยาว 6 หลักขึ้นไป จะได้ไม่ชนกัน)');
   if (plu) {
     var dupPlu = all.filter(function (p) { return String(p.plu) === plu && String(p.sku) !== sku && bool_(p.active); })[0];
     if (dupPlu) throw new Error('PLU ' + plu + ' ซ้ำกับ ' + dupPlu.name);

@@ -1048,6 +1048,9 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(P()['โค้ก'].quickKeyRow, 'น้ำอัดลม', 'editing a product keeps its row');
   m('saveProduct', T, Object.assign({}, q['โค้ก'], { quickKeyRow: undefined }), []);
   eq(P()['โค้ก'].quickKeyRow, 'น้ำอัดลม', 'an older client without the field keeps the row');
+  ok(/1–5 หลัก/.test(c('saveProduct', T, Object.assign({}, P()['โค้ก'], { plu: '885123' }), []).error), 'PLU of 6+ digits refused (would clash with barcodes)');
+  ok(/1–5 หลัก/.test(c('saveProduct', T, Object.assign({}, P()['โค้ก'], { plu: 'A1' }), []).error), 'PLU must be digits');
+  eq(m('saveProduct', T, Object.assign({}, P()['โค้ก'], { plu: '7' }), []).sku, s['โค้ก'], 'short PLU ok');
   // sub-group is a product field: saved on its own, returned with the save, used by reports and stock
   const sv = m('saveProduct', T, Object.assign({}, P()['โค้ก'], { subcategory: 'โคล่า', category: 'เครื่องดื่ม' }), []);
   ok(Array.isArray(sv.products) && sv.products.find(p => p.sku === s['โค้ก']).subcategory === 'โคล่า', 'save returns the fresh catalog');

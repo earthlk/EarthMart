@@ -128,6 +128,12 @@ const server = http.createServer((req, res) => {
     await page.click('[data-act=go][data-v=products]');
     await page.waitForSelector('#prows .prod-grid');
     await page.click('#prows .prod-grid:has-text("คาราบาว")');
+    assert.ok((await page.$$eval('#e-unitlist option', a => a.map(o => o.value))).includes('ชิ้น'), 'unit offers existing units');
+    assert.strictEqual(await page.getAttribute('#e-plu', 'placeholder'), 'เช่น 101', 'suggests a free PLU');
+    await page.fill('#e-plu', '12a');
+    await page.click('[data-ed=save]');
+    await page.waitForSelector('.toast.err:has-text("1–5 หลัก")');
+    await page.fill('#e-plu', '');
     await page.fill('#e-category', 'เครื่องดื่ม');
     await page.fill('#e-subcategory', 'เครื่องดื่มชูกำลัง');
     await page.fill('#e-price', '16');
