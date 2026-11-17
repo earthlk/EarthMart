@@ -320,7 +320,7 @@ call('importProducts', T, [
   await page.click('[data-ef=quickKey]');
   await page.click('[data-ed=icon][data-v=bread]');
   await page.click('[data-ed=color][data-v=tan]');
-  await page.fill('#e-quickKeyGroup', 'ขนม');
+  await page.fill('#e-category', 'ขนม');
   await shot('09b-product-new');
   await page.click('[data-ed=save]');
   await page.waitForSelector('#ped .muted:has-text("SKU P")');
@@ -356,7 +356,7 @@ call('importProducts', T, [
   await page.click('[data-ef=quickKey]');
   await page.click('[data-ed=icon][data-v=ice]');
   await page.click('[data-ed=color][data-v=blue]');
-  await page.fill('#e-quickKeyGroup', 'ขนม');
+  await page.fill('#e-category', 'ขนม');
   await shot('09h-recipe');
   await page.click('[data-ed=save]');
   await page.waitForSelector('#ped .muted:has-text("SKU P")');

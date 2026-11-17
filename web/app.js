@@ -1458,14 +1458,15 @@ function beep() {
 /* =================================================================== */
 
 function renderSale() {
-  var groups = {};
-  S.products.forEach(function (p) { if (p.quickKey && p.active && p.forSale !== false) groups[p.quickKeyGroup || 'ทั่วไป'] = true; });
-  var gnames = Object.keys(groups).sort();
+  // Tabs = product category, rows = subcategory (no separate "key group" to set)
+  var groups = {}, tabOf = function (p) { return p.category || 'อื่นๆ'; };
+  S.products.forEach(function (p) { if (p.quickKey && p.active && p.forSale !== false) groups[tabOf(p)] = true; });
+  var gnames = Object.keys(groups).sort(function (a, b) { return a === 'อื่นๆ' ? 1 : b === 'อื่นๆ' ? -1 : a.localeCompare(b, 'th'); });
   if (gnames.length && gnames.indexOf(S.keyGroup) < 0) S.keyGroup = gnames[0];
   var chips = gnames.map(function (g) {
     return '<button class="chip ' + (g === S.keyGroup ? 'on' : '') + '" data-act="keyGroup" data-g="' + esc(g) + '">' + esc(g) + '</button>';
   }).join('');
-  var keyList = S.products.filter(function (p) { return p.quickKey && p.active && p.forSale !== false && (p.quickKeyGroup || 'ทั่วไป') === S.keyGroup; })
+  var keyList = S.products.filter(function (p) { return p.quickKey && p.active && p.forSale !== false && tabOf(p) === S.keyGroup; })
     .sort(function (a, b) { return (a.quickKeyOrder || 999) - (b.quickKeyOrder || 999) || a.name.localeCompare(b.name, 'th'); });
   var keysHaveImg = keyList.some(function (p) { return p.image; });
   var keyHtml = function (p) {
@@ -3560,8 +3561,6 @@ function drawEditor() {
   var p = S.ed.p, codes = S.ed.codes, isNew = !p.sku, isRecipe = p.type === 'recipe';
   var rcost = round2(S.ed.comps.reduce(function (a, c) { var x = S.idx.bySku[c.sku]; return a + (x ? x.cost * (Number(c.qty) || 0) : 0); }, 0));
   var catList = categories().map(function (c) { return '<option value="' + esc(c) + '">'; }).join('');
-  var groups = {};
-  S.products.forEach(function (x) { if (x.quickKeyGroup) groups[x.quickKeyGroup] = 1; });
   var subs = {};
   S.products.forEach(function (x) { if (x.subcategory && (!p.category || x.category === p.category)) subs[x.subcategory] = 1; });
   var f = function (key, label, attrs) {
@@ -3619,9 +3618,8 @@ function drawEditor() {
     (p.quickKey ?
       '<div class="row" style="align-items:flex-end"><span class="key" style="width:120px;height:' + (p.image ? '170' : '104') + 'px;flex:0 0 120px;cursor:default"><span class="ic' + (p.image && S.imgUrl && S.imgUrl[p.image] ? ' has-img' : '') + '"' + pimgAttr(p) + ' style="background:' + c[0] + ';color:' + c[1] + '">' + picHtml(p) + '</span>' +
       '<span class="nm" style="font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + esc(p.name || 'ชื่อสินค้า') + '</span><span class="pr" style="font-size:13px">' + (p.openPrice ? 'ราคาเปิด' : '฿' + money(p.price)) + '</span></span>' +
-      '<div class="col grow" style="gap:8px"><div class="field"><label for="e-quickKeyGroup">หมวดปุ่ม</label><input id="e-quickKeyGroup" data-ef="quickKeyGroup" list="e-grplist" value="' + esc(p.quickKeyGroup) + '" placeholder="เช่น เครื่องดื่มชง" style="height:36px"></div>' +
-      '<datalist id="e-grplist">' + Object.keys(groups).map(function (g) { return '<option value="' + esc(g) + '">'; }).join('') + '</datalist>' +
-      '<small class="muted" style="font-size:11px">หน้าขายแบ่งแถวตามหมวดย่อย' + (p.subcategory ? ' (แถว "' + esc(p.subcategory) + '")' : '') + ' · ย้ายตำแหน่ง: กดปุ่มค้างแล้วลาก</small></div></div>' +
+      '<div class="col grow" style="gap:6px;font-size:13px"><div>อยู่ในแท็บ <b>' + esc(p.category || 'อื่นๆ') + '</b>' + (p.subcategory ? ' · แถว <b>' + esc(p.subcategory) + '</b>' : '') + '</div>' +
+      '<small class="muted" style="font-size:11px;line-height:1.4">หน้าขายแบ่งแท็บตามหมวด และแถวตามหมวดย่อยให้เอง · ย้ายตำแหน่ง: กดปุ่มค้างแล้วลาก</small></div></div>' +
       '<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:14px">รูปสินค้า</b>' +
         (owner ? '<label class="btn sm" for="e-img" style="cursor:pointer">' + (p.image ? 'เปลี่ยนรูป' : '+ อัปโหลดรูป') + '</label><input id="e-img" type="file" accept="image/*" data-change="prodImg" style="position:absolute;left:-9999px">' +
           (p.image ? '<button type="button" class="btn sm ghost" data-act="prodImgDel">ลบรูป</button>' : '') : '') +
@@ -3818,12 +3816,12 @@ function saveEditor() {
   }).catch(fail);
 }
 
-var CSV_TEMPLATE = 'sku,name,category,subcategory,type,unit,cost,price,minStock,openingStock,barcode,barcodeUnit,multiplier,barcodePrice,quickKey,quickKeyGroup,openPrice,plu\n' +
-  'W0001,น้ำดื่ม 600 มล.,เครื่องดื่ม,น้ำดื่ม,barcode,ขวด,4.2,7,48,186,8851234567890,ชิ้น,1,,,,,\n' +
-  'W0001,,,,,,,,,,8851234567906,แพ็ค,12,80,,,,\n' +
-  'W0001,,,,,,,,,,8851234567913,ลัง,24,,,,,\n' +
-  'D0101,น้ำแข็งแก้ว,เครื่องดื่มชง,น้ำแข็ง,nobarcode,แก้ว,1.65,5,0,,,,,,y,น้ำแข็ง,,101\n' +
-  'D0102,กาแฟเย็น,เครื่องดื่มชง,กาแฟ,nobarcode,แก้ว,9,30,0,,,,,,y,เครื่องดื่มชง,,102\n';
+var CSV_TEMPLATE = 'sku,name,category,subcategory,type,unit,cost,price,minStock,openingStock,barcode,barcodeUnit,multiplier,barcodePrice,quickKey,openPrice,plu\n' +
+  'W0001,น้ำดื่ม 600 มล.,เครื่องดื่ม,น้ำดื่ม,barcode,ขวด,4.2,7,48,186,8851234567890,ชิ้น,1,,,,\n' +
+  'W0001,,,,,,,,,,8851234567906,แพ็ค,12,80,,,\n' +
+  'W0001,,,,,,,,,,8851234567913,ลัง,24,,,,\n' +
+  'D0101,น้ำแข็งแก้ว,เครื่องดื่มชง,น้ำแข็ง,nobarcode,แก้ว,1.65,5,0,,,,,,y,,101\n' +
+  'D0102,กาแฟเย็น,เครื่องดื่มชง,กาแฟ,nobarcode,แก้ว,9,30,0,,,,,,y,,102\n';
 
 function downloadCsvTemplate() {
   var blob = new Blob(['﻿' + CSV_TEMPLATE], { type: 'text/csv;charset=utf-8' });

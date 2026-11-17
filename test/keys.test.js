@@ -22,7 +22,7 @@ const ownerId = ok('status').users[0].userId;
 const T = ok('login', ownerId, '1234', DEV).token;
 ok('registerDevice', T, DEV, 'เครื่อง 1');
 [['โค้ก', 'น้ำอัดลม'], ['สไปรท์', 'น้ำอัดลม'], ['M-150', 'ชูกำลัง'], ['คาราบาว', 'ชูกำลัง']].forEach(([n, r], i) =>
-  ok('saveProduct', T, { name: n, price: 15, type: 'nobarcode', quickKey: true, quickKeyGroup: 'เครื่องดื่ม', quickKeyRow: r, quickKeyOrder: i + 1 }));
+  ok('saveProduct', T, { name: n, price: 15, type: 'nobarcode', quickKey: true, category: 'เครื่องดื่ม', subcategory: r, quickKeyOrder: i + 1 }));
 const order = () => ok('listProducts', T).filter(p => p.quickKey).sort((a, b) => a.quickKeyOrder - b.quickKeyOrder).map(p => p.name + ':' + p.quickKeyRow);
 ok('openShift', T, 500, '', { floatSource: 'owner' });
 
@@ -69,6 +69,7 @@ const server = http.createServer((req, res) => {
 
     // rows in order with their names
     assert.deepStrictEqual(await page.$$eval('.krow-h', a => a.map(x => x.textContent)), ['น้ำอัดลม', 'ชูกำลัง'], 'one row per sub-group');
+    assert.deepStrictEqual(await page.$$eval('[data-act=keyGroup]', a => a.map(x => x.textContent)), ['เครื่องดื่ม'], 'tabs come from the product category');
     await shot('k1-rows');
 
     // a quick tap still sells

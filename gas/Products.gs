@@ -448,8 +448,8 @@ function api_deleteProduct(token, sku) {
 
 
 /**
- * Sale-screen layout from drag and drop: rows (sub-groups) of one key group, in screen order.
- * rows: [{ name: 'น้ำอัดลม', skus: ['P001', ...] }, ...]  → each product gets that group, row and a running order.
+ * Sale-screen layout from drag and drop: rows (subcategories) of one tab (= category), in screen order.
+ * rows: [{ name: 'น้ำอัดลม', skus: ['P001', ...] }, ...]  → each product gets that subcategory and a running order.
  */
 function api_saveKeyLayout(token, group, rows) {
   return respond_(function () {
@@ -475,7 +475,6 @@ function api_saveKeyLayout(token, group, rows) {
           if (i === undefined || seen[sku]) return;
           seen[sku] = 1;
           n++;
-          data[i][cG] = group === 'ทั่วไป' && !data[i][cG] ? '' : group;
           data[i][cO] = n;
           data[i][cR] = name;
           data[i][cOld] = '';
@@ -483,7 +482,6 @@ function api_saveKeyLayout(token, group, rows) {
       });
       if (!n) return { saved: 0 };
       var pick = function (c) { return data.map(function (r) { return [r[c]]; }); };
-      sh.getRange(2, cG + 1, last - 1, 1).setValues(pick(cG));
       sh.getRange(2, cO + 1, last - 1, 1).setValues(pick(cO));
       sh.getRange(2, cR + 1, last - 1, 1).setValues(pick(cR));
       sh.getRange(2, cOld + 1, last - 1, 1).setValues(pick(cOld));
