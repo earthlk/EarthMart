@@ -3233,7 +3233,7 @@ function edInput(t) {
 function minStockAutoText(p) {
   if (!p.sku) return 'คำนวณจากยอดขายหลังขายครบ 7 วัน';
   if (p.avgDaily === '' || p.avgDaily === undefined) return 'รอข้อมูลขายครบ 7 วัน';
-  return 'อัตโนมัติ ' + (p.minManual === '' ? p.minStock : '—') + ' · ขายเฉลี่ย ' + p.avgDaily + '/วัน' + (p.shelfDays ? ' · อายุ ' + p.shelfDays + ' วัน' : '');
+  return 'อัตโนมัติ ' + (p.minManual === '' ? p.minStock : '—') + ' · ขาย ' + p.avgDaily + '/วัน · รับของทุก ' + (p.cycleDays ? '~' + p.cycleDays + ' วัน' : (S.settings.reorderDays || 7) + ' วัน (ค่าเริ่มต้น)') + (p.shelfDays ? ' · อายุ ' + p.shelfDays + ' วัน' : '');
 }
 function minStockField(p, isNew) {
   var auto = p.minManual === '' || p.minManual === undefined || p.minManual === null;
@@ -3780,7 +3780,7 @@ function drawStockKpis() {
   var sub = function (t) { return '<div class="muted" style="font-size:12px;margin-top:2px">' + t + '</div>'; };
   var loss = round2((S.ov.lossMonth || 0) + (S.ov.expiryMonth || 0));
   box.innerHTML = k('มูลค่าสต็อก (ทุน FIFO)', '฿' + money(S.ov.stockValue)).replace(/<\/div>$/, sub(stockRows.length + ' รายการ') + '</div>') +
-    k('ใกล้หมด', low, low > 0).replace(/<\/div>$/, sub('ขั้นต่ำคิดจากยอดขาย ' + (S.settings.reorderDays || 7) + ' วัน') + '</div>') +
+    k('ใกล้หมด', low, low > 0).replace(/<\/div>$/, sub('ขั้นต่ำคิดจากยอดขาย × รอบรับของของแต่ละสินค้า') + '</div>') +
     k('ของเสียเดือนนี้', '฿' + money(loss)).replace(/<\/div>$/, sub('เสียหาย/สูญหาย ฿' + money(S.ov.lossMonth || 0) + ' · หมดอายุ ฿' + money(S.ov.expiryMonth || 0)) + '</div>') +
     k('เบิกใช้ในร้านเดือนนี้', '฿' + money(S.ov.useMonth || 0)).replace(/<\/div>$/, sub('ค่าใช้จ่าย · เบิกจากหน้าขาย') + '</div>');
 }
@@ -6021,7 +6021,7 @@ function renderSettings() {
     f('billPrefix', 'คำนำหน้าเลขบิล', 'เว้นว่างได้') +
     '<div class="field"><label for="s-autoPrint">พิมพ์ใบเสร็จอัตโนมัติหลังรับเงิน</label><select id="s-autoPrint" data-skey="autoPrint">' +
       '<option value="1">พิมพ์ทุกบิล (ยกเลิกได้ในหน้าชำระเงิน)</option><option value="0"' + (st.autoPrint === '0' ? ' selected' : '') + '>ไม่พิมพ์ (ติ๊กพิมพ์เองเฉพาะบิลที่ลูกค้าขอ)</option></select></div>' +
-    '<div class="field"><label for="s-reorderDays">รับของเข้าร้านทุกกี่วัน <small class="muted">(ใช้คำนวณสต็อกขั้นต่ำจากยอดขาย)</small></label><select id="s-reorderDays" data-skey="reorderDays">' +
+    '<div class="field"><label for="s-reorderDays">รอบรับของ (ค่าเริ่มต้น) <small class="muted">— ใช้กับสินค้าที่ยังรับของไม่ถึง 2 ครั้ง · พอรับครบ ระบบดูรอบจริงของแต่ละสินค้า/ผู้ขายเอง</small></label><select id="s-reorderDays" data-skey="reorderDays">' +
       [['3', '3 วัน'], ['5', '5 วัน'], ['7', '7 วัน (สัปดาห์ละครั้ง)'], ['10', '10 วัน'], ['14', '14 วัน (2 สัปดาห์)'], ['30', '30 วัน (เดือนละครั้ง)']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.reorderDays || '7') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
     '<div class="field"><label for="s-autoLockMinutes">ล็อกหน้าจอเมื่อไม่มีใครใช้ (ต้องใส่ PIN ใหม่)</label><select id="s-autoLockMinutes" data-skey="autoLockMinutes">' +

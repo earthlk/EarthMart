@@ -69,7 +69,8 @@ function productOut_(p) {
     active: bool_(p.active), onHand: num_(p.onHand), forSale: forSale_(p), trackExpiry: bool_(p.trackExpiry), image: p.image ? String(p.image) : '',
     // minStock is worked out from sales (Reorder.gs) unless minManual holds a typed number
     minManual: p.minManual === '' || p.minManual === null || p.minManual === undefined ? '' : num_(p.minManual),
-    avgDaily: p.avgDaily === '' ? '' : num_(p.avgDaily), shelfDays: p.shelfDays === '' ? '' : num_(p.shelfDays)
+    avgDaily: p.avgDaily === '' ? '' : num_(p.avgDaily), shelfDays: p.shelfDays === '' ? '' : num_(p.shelfDays),
+    cycleDays: p.cycleDays === '' || p.cycleDays === undefined ? '' : num_(p.cycleDays)
   };
 }
 
@@ -168,7 +169,7 @@ function saveProduct_(sess, input, barcodes, components) {
     // Cost comes from received lots (FIFO); a new product may start with a cost (e.g. from import) as a fallback.
     unit: String(input.unit || 'ชิ้น'), cost: type === 'recipe' ? recipeCost_(comps, bySku) : existing ? num_(existing.cost) : num_(input.cost), price: price,
     minManual: type === 'recipe' ? '' : manualMin, minStock: type === 'recipe' ? 0 : manualMin !== '' ? manualMin : existing ? num_(existing.minStock) : 0,
-    avgDaily: existing ? existing.avgDaily : '', shelfDays: existing ? existing.shelfDays : '', forSale: type === 'recipe' ? true : input.forSale !== false,
+    avgDaily: existing ? existing.avgDaily : '', shelfDays: existing ? existing.shelfDays : '', cycleDays: existing ? existing.cycleDays : '', forSale: type === 'recipe' ? true : input.forSale !== false,
     trackExpiry: type === 'recipe' ? false : !!input.trackExpiry,
     openPrice: !!input.openPrice, quickKey: !!input.quickKey, quickKeyGroup: String(input.quickKeyGroup || ''),
     quickKeyOrder: num_(input.quickKeyOrder), icon: String(input.icon || ''), color: String(input.color || ''),

@@ -962,13 +962,18 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   m('saveProduct', T, { name: 'โค้ก', price: 16, type: 'nobarcode', unit: 'กระป๋อง' });
   m('saveProduct', T, { name: 'ขนมปัง', price: 20, type: 'nobarcode', unit: 'ชิ้น' });
   m('saveProduct', T, { name: 'ไฟแช็ก', price: 10, type: 'nobarcode', unit: 'อัน', minManual: 30 });
+  m('saveProduct', T, { name: 'นมสด', price: 15, type: 'nobarcode', unit: 'ขวด' });
+  m('saveProduct', T, { name: 'โยเกิร์ต', price: 12, type: 'nobarcode', unit: 'ถ้วย' });
   const P = Object.fromEntries(m('listProducts', T).map(p => [p.name, p.sku]));
   m('receive', T, { receiptUid: 'R1', lines: [{ sku: P['โค้ก'], qty: 200, unitCost: 12, expiryDate: '2027-01-01' }, { sku: P['ขนมปัง'], qty: 100, unitCost: 15, expiryDate: '2026-11-07' }, { sku: P['ไฟแช็ก'], qty: 50, unitCost: 5 }] });
+  m('receive', T, { receiptUid: 'Y0', supplier: 'ฟาร์มโคนม', lines: [{ sku: P['โยเกิร์ต'], qty: 100, unitCost: 8 }] });
   let r0 = m('recomputeMinStock', T);
   ok(r0.waiting >= 2, 'no history yet: waits instead of guessing');
   m('openShift', T, 500, '');
   for (let d = 0; d < 10; d++) {
-    m('commitSale', T, { saleUid: 'S' + d, payMethod: 'cash', received: 200, lines: [{ sku: P['โค้ก'], qty: 4 }, { sku: P['ขนมปัง'], qty: 3 }] });
+    // the dairy van comes every 2 days with milk
+    if (d % 2 === 0) m('receive', T, { receiptUid: 'M' + d, supplier: 'ฟาร์มโคนม', lines: [{ sku: P['นมสด'], qty: 10, unitCost: 10 }] });
+    m('commitSale', T, { saleUid: 'S' + d, payMethod: 'cash', received: 300, lines: [{ sku: P['โค้ก'], qty: 4 }, { sku: P['ขนมปัง'], qty: 3 }, { sku: P['นมสด'], qty: 5 }, { sku: P['โยเกิร์ต'], qty: 1 }] });
     h.__advance(24 * 3600 * 1000);
     T = m('login', uid, '1111', DEV).token;
   }
@@ -980,6 +985,9 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(ps['ขนมปัง'].minStock, 9, 'bread: cover capped at half its 6-day shelf life (3 × 3)');
   eq([ps['ไฟแช็ก'].minStock, ps['ไฟแช็ก'].minManual], [30, 30], 'typed minimum wins');
   ok(r.auto >= 2 && r.manual === 1, 'summary counts');
+  eq([ps['นมสด'].cycleDays, ps['นมสด'].minStock], [2, 10], 'milk restocked every 2 days: 5/day × 2');
+  eq([ps['โยเกิร์ต'].cycleDays, ps['โยเกิร์ต'].minStock], [2, 2], 'yogurt received once: uses its supplier\'s 2-day rhythm');
+  eq(ps['โค้ก'].cycleDays, '', 'coke received once from nobody known: falls back to the setting');
   m('saveProduct', T, Object.assign({}, ps['ไฟแช็ก'], { minManual: '' }));
   m('recomputeMinStock', T);
   eq(m('listProducts', T).find(p => p.name === 'ไฟแช็ก').minManual, '', 'cleared back to automatic');

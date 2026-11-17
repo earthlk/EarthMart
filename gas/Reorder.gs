@@ -3,8 +3,10 @@
  *
  *   sold per day  = pieces that left by sale (SALE − VOID − RETURN moves, recipes exploded to their
  *                   ingredients) over the last REORDER_WINDOW days, or since the product first moved
- *   cover days    = Settings.reorderDays (how long one restock has to last, default 7)
- *                   — never more than half the shelf life, so stock turns over before it expires
+ *   cover days    = how often this product is restocked: the median gap between the days it was
+ *                   received (needs 2+ receipts); else the gap of the supplier it last came from;
+ *                   else Settings.reorderDays (default 7) — never more than half the shelf life,
+ *                   so stock turns over before it expires
  *   shelf life    = median days from receipt to expiry of its lots (when expiry dates were entered)
  *   minStock      = ceil(sold per day × cover days), at least 1 once it sells
  *
@@ -39,18 +41,36 @@ function minStockFigures_() {
     var q = num_(m.qtyPieces);
     if (m.type === 'SALE' || m.type === 'VOID' || m.type === 'RETURN') sold[sku] = (sold[sku] || 0) - q;
   });
-  var shelf = {};
+  var shelf = {}, recvDays = {}, lastSup = {}, supDays = {};
+  var supOf = {};
+  readAll_('Receipts').forEach(function (rc) { supOf[String(rc.receiptNo)] = String(rc.supplier || '').trim(); });
+  var dayKey = function (d) { return Math.floor((d.getTime() + 7 * 3600000) / DAY); };  // Thai calendar day
   readAll_('Lots').forEach(function (l) {
     var r = dateOf_(l.receivedAt), e = dateOf_(l.expiryDate), sku = String(l.sku);
     if (r) seen(sku, r.getTime());
     if (r && e && e > r) (shelf[sku] = shelf[sku] || []).push((e - r) / DAY);
+    if (!r || l.receiptNo === 'OPENING') return;
+    var k = dayKey(r), sup = supOf[String(l.receiptNo)] || '';
+    (recvDays[sku] = recvDays[sku] || {})[k] = true;
+    if (!lastSup[sku] || k >= lastSup[sku].k) lastSup[sku] = { k: k, sup: sup };
+    if (sup) (supDays[sup] = supDays[sup] || {})[k] = true;
   });
-  var cover = Math.max(1, num_(getSetting_('reorderDays')) || 7);
+  var gapOf = function (set) {
+    var ks = Object.keys(set || {}).map(Number).sort(function (a, b) { return a - b; }).slice(-7);
+    if (ks.length < 2) return 0;
+    var g = []; for (var i = 1; i < ks.length; i++) g.push(ks[i] - ks[i - 1]);
+    return Math.min(60, Math.max(1, Math.round(median_(g))));
+  };
+  var supGap = {};
+  Object.keys(supDays).forEach(function (sup) { supGap[sup] = gapOf(supDays[sup]); });
+  var fallback = Math.max(1, num_(getSetting_('reorderDays')) || 7);
   var out = {};
   Object.keys(first).forEach(function (sku) {
     var days = Math.min(REORDER_WINDOW, (now - Math.max(from, first[sku])) / DAY);
     var sl = shelf[sku] ? median_(shelf[sku]) : 0;
-    var o = { days: days, shelfDays: sl ? Math.round(sl) : '', avgDaily: '', min: null };
+    var cycle = gapOf(recvDays[sku]) || (lastSup[sku] && supGap[lastSup[sku].sup]) || 0;
+    var cover = cycle || fallback;
+    var o = { days: days, shelfDays: sl ? Math.round(sl) : '', cycleDays: cycle || '', avgDaily: '', min: null };
     if (days >= REORDER_MIN_DAYS) {
       var daily = Math.max(0, sold[sku] || 0) / days;
       var c = sl ? Math.min(cover, sl / 2) : cover;
@@ -78,7 +98,7 @@ function recomputeMinStock_() {
   // Index by sheet row so blank rows in the sheet cannot shift values onto the wrong product.
   var last = sh.getLastRow();
   var colMin = sh.getRange(2, cMin + 1, last - 1, 1).getValues();
-  var colExtra = sh.getRange(2, cAvg + 1, last - 1, 2).getValues();
+  var colExtra = sh.getRange(2, cAvg + 1, last - 1, 3).getValues();
   rows.forEach(function (p) {
     var f = fig[String(p.sku)] || {}, man = p.minManual;
     var min = num_(p.minStock);
@@ -88,11 +108,11 @@ function recomputeMinStock_() {
     else n.waiting++;
     if (min !== num_(p.minStock)) n.updated++;
     colMin[p._row - 2] = [min];
-    colExtra[p._row - 2] = [f.avgDaily === undefined ? '' : f.avgDaily, f.shelfDays === undefined ? '' : f.shelfDays];
+    colExtra[p._row - 2] = [f.avgDaily === undefined ? '' : f.avgDaily, f.shelfDays === undefined ? '' : f.shelfDays, f.cycleDays === undefined ? '' : f.cycleDays];
   });
-  // minStock, then avgDaily and shelfDays (these two sit next to each other at the end)
+  // minStock, then avgDaily / shelfDays / cycleDays (side by side at the end)
   sh.getRange(2, cMin + 1, last - 1, 1).setValues(colMin);
-  sh.getRange(2, cAvg + 1, last - 1, 2).setValues(colExtra);
+  sh.getRange(2, cAvg + 1, last - 1, 3).setValues(colExtra);
   saveSettingRaw_('minStockAt', fmtDate_(now_(), 'yyyy-MM-dd'));
   return n;
 }
