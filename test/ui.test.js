@@ -671,8 +671,24 @@ call('importProducts', T, [
   await page.fill('#pq', 'ขนมปัง');
   await page.click('#prows .prod-grid >> nth=0');
   await page.waitForSelector('label[for=e-img]');
-  const jpg = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64');
-  await page.setInputFiles('#e-img', { name: 'bread.png', mimeType: 'image/png', buffer: jpg });
+  // a photo of a "bottle" standing on a light grey table: landscape, lots of background
+  const photo = Buffer.from((await page.evaluate(() => {
+    const c = document.createElement('canvas'); c.width = 400; c.height = 300;
+    const x = c.getContext('2d'); x.fillStyle = '#e9e7e2'; x.fillRect(0, 0, 400, 300);
+    x.fillStyle = '#b3261e'; x.fillRect(170, 60, 60, 200); x.fillStyle = '#1b5e20'; x.fillRect(185, 35, 30, 28);
+    x.fillStyle = '#fff'; x.fillRect(178, 140, 44, 40);
+    return c.toDataURL('image/png');
+  })).split(',')[1], 'base64');
+  await page.setInputFiles('#e-img', { name: 'bottle.png', mimeType: 'image/png', buffer: photo });
+  await page.waitForSelector('#pp-out img');
+  const cut = await page.evaluate(() => new Promise(res => { const i = new Image(); i.onload = () => {
+    const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const x = c.getContext('2d'); x.drawImage(i, 0, 0);
+    res({ w: i.width, h: i.height, corner: x.getImageData(1, 1, 1, 1).data[3], label: Array.from(x.getImageData(Math.round(i.width / 2), Math.round(i.height / 2), 1, 1).data) }); }; i.src = document.querySelector('#pp-out img').src; }));
+  assert.ok(cut.h > cut.w, 'cropped to the upright product: ' + cut.w + 'x' + cut.h);
+  assert.strictEqual(cut.corner, 0, 'background made transparent');
+  assert.ok(cut.label[3] === 255, 'white label inside the bottle kept (not flood-filled)');
+  await shot('09g-photo-cutout');
+  await page.click('.modal [data-x=ok]');
   await page.waitForSelector('.toast:has-text("ใส่รูปแล้ว")');
   await page.waitForSelector('#ped .ic.has-img img.kimg');
   assert.ok(call('bootstrap', T).products.find(p => p.name === 'ขนมปังไส้สังขยา').image, 'photo saved on the product');

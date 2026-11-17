@@ -2663,6 +2663,115 @@ function shrinkImage(file, max) {
     img.src = url;
   });
 }
+/**
+ * Remove a plain background from a product photo (no AI, no download): take the colour around the
+ * edges as the background, flood-fill from the edges through pixels close to it, make those
+ * transparent (soft edge), then crop to the product with a small margin.
+ * → Promise<{ ok, url, reason }>; ok = false when the edges are not one plain colour.
+ */
+function cleanBackground(dataUrl, tol) {
+  tol = tol || 60;
+  return new Promise(function (resolve) {
+    var img = new Image();
+    img.onload = function () {
+      var w = img.width, h = img.height, c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      var cx = c.getContext('2d');
+      cx.drawImage(img, 0, 0);
+      var d = cx.getImageData(0, 0, w, h), px = d.data, n = w * h;
+      // background colour = median of the border pixels
+      var edge = [];
+      for (var x = 0; x < w; x++) { edge.push(x, (h - 1) * w + x); }
+      for (var y = 1; y < h - 1; y++) { edge.push(y * w, y * w + w - 1); }
+      var med = [0, 1, 2].map(function (ch) {
+        var v = edge.map(function (i) { return px[i * 4 + ch]; }).sort(function (a, b) { return a - b; });
+        return v[v.length >> 1];
+      });
+      var dist = function (i) { var r = px[i * 4] - med[0], g = px[i * 4 + 1] - med[1], b = px[i * 4 + 2] - med[2]; return Math.sqrt(r * r + g * g + b * b); };
+      var plain = edge.filter(function (i) { return dist(i) < tol; }).length / edge.length;
+      if (plain < 0.6) return resolve({ ok: false, reason: 'พื้นหลังไม่เรียบ — ถ่ายบนพื้นสีเรียบ (เช่น กระดาษขาว) แล้วจะลบได้' });
+      // flood fill from the edges
+      var bg = new Uint8Array(n), q = new Int32Array(n), qh = 0, qt = 0;
+      edge.forEach(function (i) { if (!bg[i] && dist(i) < tol) { bg[i] = 1; q[qt++] = i; } });
+      while (qh < qt) {
+        var i = q[qh++], xx = i % w;
+        var nb = [xx > 0 ? i - 1 : -1, xx < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i < n - w ? i + w : -1];
+        for (var k = 0; k < 4; k++) { var j = nb[k]; if (j >= 0 && !bg[j] && dist(j) < tol) { bg[j] = 1; q[qt++] = j; } }
+      }
+      var fg = 0, x0 = w, y0 = h, x1 = -1, y1 = -1;
+      for (var p = 0; p < n; p++) {
+        var py = (p / w) | 0, pxx = p % w;
+        if (bg[p]) { px[p * 4 + 3] = 0; continue; }
+        // soft edge: foreground pixels touching the background and close to its colour fade out a little
+        var touch = (pxx > 0 && bg[p - 1]) || (pxx < w - 1 && bg[p + 1]) || (p >= w && bg[p - w]) || (p < n - w && bg[p + w]);
+        if (touch) { var dd = dist(p); if (dd < tol * 1.6) px[p * 4 + 3] = Math.round(255 * Math.min(1, (dd - tol) / (tol * 0.6) + 0.35)); }
+        fg++;
+        if (pxx < x0) x0 = pxx; if (pxx > x1) x1 = pxx; if (py < y0) y0 = py; if (py > y1) y1 = py;
+      }
+      if (fg < n * 0.02 || fg > n * 0.97) return resolve({ ok: false, reason: 'แยกสินค้าออกจากพื้นหลังไม่ได้ — ลองปรับความแรง หรือถ่ายใหม่บนพื้นสีเรียบ' });
+      cx.putImageData(d, 0, 0);
+      var pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.06);
+      x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
+      var o = document.createElement('canvas');
+      o.width = x1 - x0 + 1; o.height = y1 - y0 + 1;
+      var ox = o.getContext('2d');
+      ox.drawImage(c, x0, y0, o.width, o.height, 0, 0, o.width, o.height);
+      var out = o.toDataURL('image/webp', 0.85);
+      if (out.indexOf('data:image/webp') !== 0) {
+        ox.globalCompositeOperation = 'destination-over'; ox.fillStyle = '#fff'; ox.fillRect(0, 0, o.width, o.height);
+        out = o.toDataURL('image/jpeg', 0.85);
+      }
+      resolve({ ok: true, url: out });
+    };
+    img.onerror = function () { resolve({ ok: false, reason: 'เปิดรูปไม่ได้' }); };
+    img.src = dataUrl;
+  });
+}
+
+/** Scale a data URL down to max px on the long side (keeps transparency). */
+function fitDataUrl(url, max) {
+  return new Promise(function (resolve) {
+    var img = new Image();
+    img.onload = function () {
+      var k = Math.min(1, max / Math.max(img.width, img.height));
+      if (k === 1) return resolve(url);
+      var c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      var x = c.getContext('2d'); x.drawImage(img, 0, 0, c.width, c.height);
+      var out = c.toDataURL('image/webp', 0.85);
+      if (out.indexOf('data:image/webp') !== 0) { x.globalCompositeOperation = 'destination-over'; x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); out = c.toDataURL('image/jpeg', 0.85); }
+      resolve(out);
+    };
+    img.onerror = function () { resolve(url); };
+    img.src = url;
+  });
+}
+
+/** Before / after for a product photo; resolves with the image to upload (or null = cancelled). */
+function productPhotoModal(original) {
+  return new Promise(function (resolve) {
+    var cleaned = null;
+    var box = 'width:100%;height:min(260px,36vh);object-fit:contain;border-radius:10px;border:1px solid var(--line);background:#fff';
+    var m = openModal('<header><h1>รูปสินค้า</h1></header><div class="body col" style="gap:10px">' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="col" style="gap:4px"><small class="muted">รูปเดิม</small><img src="' + original + '" alt="รูปเดิม" style="' + box + '"></div>' +
+      '<div class="col" style="gap:4px"><small class="muted">ลบพื้นหลัง</small><div id="pp-out" style="' + box + ';display:flex;align-items:center;justify-content:center;padding:8px;text-align:center" class="muted">กำลังลบพื้นหลัง…</div></div></div>' +
+      '<label class="row" style="gap:8px;font-size:13px">ความแรง <input id="pp-tol" type="range" min="20" max="140" value="60" class="grow"></label>' +
+      '<div class="muted" style="font-size:12px">ได้ผลดีเมื่อถ่ายบนพื้นสีเรียบ (กระดาษขาว / ผนังสีเดียว) · ถ้าลบเกินเข้าไปในสินค้า ลดความแรง · ถ้ายังเหลือพื้น เพิ่มความแรง</div></div>' +
+      '<footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn" data-x="orig">ใช้รูปเดิม</button><button class="btn primary" data-x="ok" disabled>ใช้รูปที่ลบพื้นหลัง</button></footer>');
+    var run = function () {
+      var out = $('#pp-out', m), ok = $('[data-x=ok]', m);
+      cleanBackground(original, Number($('#pp-tol', m).value)).then(function (r) {
+        cleaned = r.ok ? r.url : null; ok.disabled = !r.ok;
+        out.innerHTML = r.ok ? '<img src="' + r.url + '" alt="ลบพื้นหลังแล้ว" style="width:100%;height:100%;object-fit:contain">' : esc(r.reason);
+      });
+    };
+    var tm; $('#pp-tol', m).addEventListener('input', function () { clearTimeout(tm); tm = setTimeout(run, 150); });
+    run();
+    $('[data-x=no]', m).onclick = function () { closeModal(); resolve(null); };
+    $('[data-x=orig]', m).onclick = function () { closeModal(); resolve(original); };
+    $('[data-x=ok]', m).onclick = function () { closeModal(); resolve(cleaned); };
+  });
+}
+
 function slideModal(sl, dataUrl) {
   var m = openModal('<header><h1>' + (sl ? 'แก้สไลด์' : 'เพิ่มสไลด์') + '</h1></header><div class="body" style="gap:10px">' +
     (dataUrl ? '<img src="' + dataUrl + '" alt="" style="width:100%;max-height:260px;object-fit:contain;background:var(--surface-muted);border-radius:8px">' : '') +
@@ -6567,8 +6676,11 @@ document.addEventListener('change', function (e) {
   if (k === 'prodImg' && t.files && t.files[0]) {
     var pf = t.files[0], psku = S.ed && S.ed.p.sku; t.value = '';
     if (!psku) return toast('บันทึกสินค้าก่อน แล้วค่อยใส่รูป', true);
-    shrinkImage(pf, 480).then(function (u) { return api('uploadProductImage', S.token, psku, u); })
-      .then(function (r) { toast('ใส่รูปแล้ว'); prodImgSet(psku, r.image); }).catch(fail);
+    // cut out at a good size first (the product may be a small part of the photo), then store at most 480 px
+    shrinkImage(pf, 1200).then(productPhotoModal).then(function (u) { return u && fitDataUrl(u, 480); }).then(function (u) {
+      if (!u) return;
+      return api('uploadProductImage', S.token, psku, u).then(function (r) { toast('ใส่รูปแล้ว'); prodImgSet(psku, r.image); });
+    }).catch(fail);
   }
   if (k === 'labA4') { labState().a4[labState().kind] = t.value; labSave(); drawLabPreview(); }
   if (k === 'labRoll') { labState().roll[labState().kind] = [Number($('#lab-rw').value) || 0, Number($('#lab-rh').value) || 0]; labSave(); drawLabPreview(); }
