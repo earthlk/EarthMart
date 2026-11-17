@@ -3586,9 +3586,16 @@ function minStockAutoText(p) {
 }
 function minStockField(p, isNew) {
   var auto = p.minManual === '' || p.minManual === undefined || p.minManual === null;
-  return '<div class="field"><label for="e-minManual">ขั้นต่ำ (ชิ้น)</label><input id="e-minManual" data-ef="minManual" type="number" min="0" inputmode="numeric" value="' + (auto ? '' : esc(p.minManual)) +
-    '" placeholder="' + (isNew || p.avgDaily === '' || p.avgDaily === undefined ? 'อัตโนมัติ' : 'อัตโนมัติ: ' + esc(p.minStock)) + '">' +
-    '<small class="muted" style="font-size:11px;line-height:1.3">' + (auto ? esc(minStockAutoText(p)) : 'กำหนดเอง · ลบตัวเลขออก = กลับไปอัตโนมัติ') + '</small></div>';
+  if (auto && !S.ed.minOpen) {
+    // Nothing to type: the system works it out from sales. "กำหนดเอง" only for the odd product that needs a fixed number.
+    var has = !isNew && p.avgDaily !== '' && p.avgDaily !== undefined;
+    return '<div class="field"><label>ขั้นต่ำ (ชิ้น)</label><div class="row" style="gap:4px"><input value="' + (has ? 'อัตโนมัติ · ' + esc(p.minStock) : 'อัตโนมัติ') + '" disabled class="grow" title="' + esc(minStockAutoText(p)) + '">' +
+      (isNew ? '' : '<button type="button" class="btn sm" data-ed="minOpen" style="height:40px;padding:0 8px" title="ใส่ตัวเลขเองแทนค่าอัตโนมัติ">กำหนดเอง</button>') + '</div>' +
+      '<small class="muted" style="font-size:11px;line-height:1.3">' + esc(minStockAutoText(p)) + '</small></div>';
+  }
+  return '<div class="field"><label for="e-minManual">ขั้นต่ำ (ชิ้น) · กำหนดเอง</label><input id="e-minManual" data-ef="minManual" type="number" min="0" inputmode="numeric" value="' + (auto ? '' : esc(p.minManual)) +
+    '" placeholder="' + (p.avgDaily === '' || p.avgDaily === undefined ? 'ใส่จำนวน' : 'อัตโนมัติคือ ' + esc(p.minStock)) + '">' +
+    '<small class="muted" style="font-size:11px;line-height:1.3">ลบตัวเลขออก = กลับไปใช้ค่าอัตโนมัติ</small></div>';
 }
 
 function markDirty() {
@@ -3616,6 +3623,7 @@ function edClick(el) {
   var a = el.getAttribute('data-ed');
   if (!S.ed) return;
   if (a === 'type') { S.ed.p.type = el.getAttribute('data-v'); S.ed.dirty = true; drawEditor(); }
+  if (a === 'minOpen') { S.ed.minOpen = true; drawEditor(); var mi = $('#e-minManual'); if (mi) mi.focus(); return; }
   if (a === 'icon') { S.ed.p.icon = S.ed.p.icon === el.getAttribute('data-v') ? '' : el.getAttribute('data-v'); S.ed.dirty = true; drawEditor(); }
   if (a === 'color') { S.ed.p.color = el.getAttribute('data-v'); S.ed.dirty = true; drawEditor(); }
   if (a === 'delcomp') { S.ed.comps.splice(Number(el.getAttribute('data-i')), 1); S.ed.dirty = true; drawEditor(); }

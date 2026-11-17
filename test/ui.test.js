@@ -308,6 +308,7 @@ call('importProducts', T, [
   await page.fill('#pq', '8850999111222');
   await page.keyboard.press('Enter');
   await page.waitForSelector('#e-name:focus');
+  assert.ok(!(await page.$('#e-minManual')) && !(await page.$('[data-ed=minOpen]')), 'new product: no minimum to type (automatic)');
   await page.keyboard.type('ขนมปังไส้สังขยา');
   await page.fill('#e-category', 'ขนม');
   await page.fill('#e-price', '15');
@@ -323,6 +324,10 @@ call('importProducts', T, [
   await shot('09b-product-new');
   await page.click('[data-ed=save]');
   await page.waitForSelector('#ped .muted:has-text("SKU P")');
+  assert.ok(!(await page.$('#e-minManual')), 'saved product: minimum shown as automatic, no input');
+  await page.click('[data-ed=minOpen]');
+  assert.strictEqual(await page.evaluate(() => document.activeElement.id), 'e-minManual', '"กำหนดเอง" opens the number box');
+  await page.click('[data-ed=cancel]');
   const saved = call('bootstrap', T);
   const bread = saved.products.find(p => p.name === 'ขนมปังไส้สังขยา');
   assert.ok(bread && bread.price === 15 && bread.quickKey && bread.icon === 'bread', 'new product saved');
