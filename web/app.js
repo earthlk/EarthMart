@@ -1225,9 +1225,10 @@ function renderSale() {
   var chips = gnames.map(function (g) {
     return '<button class="chip ' + (g === S.keyGroup ? 'on' : '') + '" data-act="keyGroup" data-g="' + esc(g) + '">' + esc(g) + '</button>';
   }).join('');
-  var keys = S.products.filter(function (p) { return p.quickKey && p.active && p.forSale !== false && (p.quickKeyGroup || 'ทั่วไป') === S.keyGroup; })
-    .sort(function (a, b) { return (a.quickKeyOrder || 999) - (b.quickKeyOrder || 999) || a.name.localeCompare(b.name, 'th'); })
-    .map(function (p) {
+  var keyList = S.products.filter(function (p) { return p.quickKey && p.active && p.forSale !== false && (p.quickKeyGroup || 'ทั่วไป') === S.keyGroup; })
+    .sort(function (a, b) { return (a.quickKeyOrder || 999) - (b.quickKeyOrder || 999) || a.name.localeCompare(b.name, 'th'); });
+  var keysHaveImg = keyList.some(function (p) { return p.image; });
+  var keys = keyList.map(function (p) {
       var c = KEY_COLORS[p.color] || KEY_COLORS.gray;
       return '<button class="key" data-act="quickKey" data-sku="' + esc(p.sku) + '"><span class="ic' + (p.image && S.imgUrl && S.imgUrl[p.image] ? ' has-img' : '') + '"' + pimgAttr(p) + ' style="background:' + c[0] + ';color:' + c[1] + '">' +
         picHtml(p) + '</span>' + (promosFor(p.sku).length ? '<span class="kpromo">โปร</span>' : '') + '<span class="nm">' + esc(p.name) + '</span><span class="pr">' +
@@ -1243,7 +1244,7 @@ function renderSale() {
     '<div class="lines" id="lines"></div>' +
     '<div class="cart-actions"><button class="btn" data-act="billDiscount">ส่วนลดท้ายบิล</button><button class="btn" data-act="holdBill">พักบิล</button><button class="btn" data-act="storeUse">เบิกใช้</button>' +
     '<button class="btn" data-act="noSale">เปิดลิ้นชัก</button><button class="btn warn" data-act="clearCart">ล้างบิล</button></div></section>' +
-    '<section class="sell"><div class="row" style="flex-wrap:wrap">' + chips + '</div><div class="keys">' + keys + '</div>' +
+    '<section class="sell"><div class="row" style="flex-wrap:wrap">' + chips + '</div><div class="keys' + (keysHaveImg ? ' with-img' : '') + '">' + keys + '</div>' +
     '<div class="card total" id="totalbar"></div></section></div></div>';
 }
 
@@ -3130,7 +3131,7 @@ function drawEditor() {
     (isRecipe ? '' : '<label class="checkrow"><input type="checkbox" data-ef="trackExpiry" ' + (p.trackExpiry ? 'checked' : '') + '> ติดตามวันหมดอายุ — ต้องใส่วันหมดอายุตอนรับสินค้า แล้วเตือนในหน้า "หมดอายุ"</label>') +
     (p.forSale === false && !isRecipe ? '' : '<div class="sec-title"><b>ปุ่มขายด่วน</b><label class="checkrow"><input type="checkbox" data-ef="quickKey" ' + (p.quickKey ? 'checked' : '') + '> แสดงบนหน้าขาย</label></div>' +
     (p.quickKey ?
-      '<div class="row" style="align-items:flex-end"><span class="key" style="width:120px;height:104px;flex:0 0 120px;cursor:default"><span class="ic' + (p.image && S.imgUrl && S.imgUrl[p.image] ? ' has-img' : '') + '"' + pimgAttr(p) + ' style="background:' + c[0] + ';color:' + c[1] + '">' + picHtml(p) + '</span>' +
+      '<div class="row" style="align-items:flex-end"><span class="key" style="width:120px;height:' + (p.image ? '170' : '104') + 'px;flex:0 0 120px;cursor:default"><span class="ic' + (p.image && S.imgUrl && S.imgUrl[p.image] ? ' has-img' : '') + '"' + pimgAttr(p) + ' style="background:' + c[0] + ';color:' + c[1] + '">' + picHtml(p) + '</span>' +
       '<span class="nm" style="font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + esc(p.name || 'ชื่อสินค้า') + '</span><span class="pr" style="font-size:13px">' + (p.openPrice ? 'ราคาเปิด' : '฿' + money(p.price)) + '</span></span>' +
       '<div class="col grow" style="gap:8px"><div class="field"><label for="e-quickKeyGroup">หมวดปุ่ม</label><input id="e-quickKeyGroup" data-ef="quickKeyGroup" list="e-grplist" value="' + esc(p.quickKeyGroup) + '" placeholder="เช่น เครื่องดื่มชง" style="height:36px"></div>' +
       '<datalist id="e-grplist">' + Object.keys(groups).map(function (g) { return '<option value="' + esc(g) + '">'; }).join('') + '</datalist>' +

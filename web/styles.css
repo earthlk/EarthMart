@@ -608,7 +608,15 @@ a{color:var(--brand-text)}
 }
 .ic.has-img{background:transparent !important;padding:0;overflow:hidden}
 .ic .kimg{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
-.key .ic.has-img{width:100%;height:76px;border-radius:8px}
+/* Product photos are mostly bottles, cans and bags: show them upright and whole (portrait card). */
+.keys.with-img{grid-auto-rows:220px;grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+.keys.with-img .key .ic:not(.has-img){width:100%;height:auto;flex:1 1 0;min-height:0;border-radius:8px}
+.keys.with-img .key .ic:not(.has-img) svg{width:44px;height:44px}
+.key .ic.has-img{width:100%;height:auto;flex:1 1 0;min-height:0;border-radius:8px;background:#fff !important}
+.key .ic.has-img .kimg{object-fit:contain}
+.keys.with-img .key{padding:8px 8px 10px;gap:4px}
+.keys.with-img .key .nm{font-size:14px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.keys.with-img .key .pr{margin-top:0}
 
 /* ===== Drawer count (open / close shift) ===== */
 /* Shift page: count sheet (notes | coins) in order, summary under it; total + keypad + actions on the right */
