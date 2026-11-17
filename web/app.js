@@ -445,7 +445,7 @@ function rawCall(c, name, args) {
 /* Reads load in place (skeletons); writes hold the screen with "กำลังบันทึก…" so nothing is clicked twice
    or changed half-way; a few small writes just happen in the background. */
 var API_READ = /^(bootstrap|status|list|payables$|expenses$|customers$|customerDetail|acc(Summary|Tax)$|wallets$|report|stock(Overview|Moves|List)$|shiftSummary|receipts$|productImage|slideImage|netDevices|lots$|goLivePreview|findBills|expiryList|bill(Summary|Image|Detail)$|auditLog|newInternalBarcode)/;
-var API_BACKGROUND = { logDrawer: 1, logout: 1, recomputeMinStock: 1 };
+var API_BACKGROUND = { logDrawer: 1, logout: 1, recomputeMinStock: 1, saveKeyLayout: 1 };
 var API_SAVING_TH = { commitSale: 'กำลังบันทึกบิล…', receive: 'กำลังบันทึกการรับสินค้า…', closeShift: 'กำลังปิดกะ…', openShift: 'กำลังเปิดกะ…', goLive: 'กำลังสำรองและล้างข้อมูล…',
   importProducts: 'กำลังนำเข้าสินค้า…', uploadProductImage: 'กำลังอัปโหลดรูป…', uploadSlide: 'กำลังอัปโหลด…', deleteProduct: 'กำลังลบ…', backupNow: 'กำลังสำรองข้อมูล…' };
 function api(name) {
@@ -952,6 +952,7 @@ function softRender() {
   var v = S.view;
   if (v !== 'sale' && v !== 'products' && v !== 'home' && v !== 'bills' && v !== 'stock' && v !== 'expiry' && v !== 'shift' && v !== 'acct') return;  // forms: leave as they are
   render();
+  if (v === 'sale') renderCartOnly();
   if (v === 'products') { if (S.promoMode) loadPromos(); else if (S.labelMode) drawLabItems(); else renderProductRows(); }
   refreshPageQuiet();
   keep.forEach(function (x) { var el = document.getElementById(x[0]); if (el) el.scrollTop = x[1]; });
@@ -1467,13 +1468,28 @@ function renderSale() {
   var keyList = S.products.filter(function (p) { return p.quickKey && p.active && p.forSale !== false && (p.quickKeyGroup || 'ทั่วไป') === S.keyGroup; })
     .sort(function (a, b) { return (a.quickKeyOrder || 999) - (b.quickKeyOrder || 999) || a.name.localeCompare(b.name, 'th'); });
   var keysHaveImg = keyList.some(function (p) { return p.image; });
-  var keys = keyList.map(function (p) {
+  var keyHtml = function (p) {
       var c = KEY_COLORS[p.color] || KEY_COLORS.gray;
       return '<button class="key" data-act="quickKey" data-sku="' + esc(p.sku) + '"><span class="ic' + (p.image && S.imgUrl && S.imgUrl[p.image] ? ' has-img' : '') + '"' + pimgAttr(p) + ' style="background:' + c[0] + ';color:' + c[1] + '">' +
         picHtml(p) + '</span>' + (promosFor(p.sku).length ? '<span class="kpromo">โปร</span>' : '') + '<span class="nm">' + esc(p.name) + '</span><span class="pr">' +
         (p.openPrice ? 'ราคาเปิด' : '฿' + money(p.price)) + '</span></button>';
-    }).join('');
+    };
+  // Rows = sub-groups (quickKeyRow), in the order of their first key; keys without a row go last
+  var rows = [], byRow = {};
+  keyList.forEach(function (p) {
+    var r = String(p.quickKeyRow || '');
+    if (!byRow[r]) { byRow[r] = []; rows.push(r); }
+    byRow[r].push(p);
+  });
+  if (byRow[''] && rows.length > 1) { rows.splice(rows.indexOf(''), 1); rows.push(''); }
+  var owner = S.user && S.user.role === 'owner';
+  var keys = rows.map(function (r) {
+    var named = rows.length > 1 || r;
+    return '<div class="krow" data-row="' + esc(r) + '">' + (named ? '<div class="krow-h"' + (owner ? ' title="กดค้างแล้วลากเพื่อย้ายแถว"' : '') + '>' + esc(r || 'อื่นๆ') + '</div>' : '') +
+      '<div class="keys' + (keysHaveImg ? ' with-img' : '') + '">' + byRow[r].map(keyHtml).join('') + '</div></div>';
+  }).join('');
   if (!gnames.length) keys = '<div class="muted">ยังไม่มีปุ่มขายด่วน — ตั้งได้ในหน้าสินค้า (ติ๊ก "ปุ่มขายด่วน")</div>';
+  else if (owner) keys += '<div class="krow-new">ลากปุ่มมาวางที่นี่ = สร้างแถวใหม่</div>';
 
   return '<div class="page"><div class="sale">' +
     '<section class="card cart"><div class="scan"><div class="row"><label for="scan" style="white-space:nowrap">สแกน / ค้นหา</label>' +
@@ -1483,8 +1499,114 @@ function renderSale() {
     '<div class="lines" id="lines"></div>' +
     '<div class="cart-actions"><button class="btn" data-act="billDiscount">ส่วนลดท้ายบิล</button><button class="btn" data-act="holdBill">พักบิล</button><button class="btn" data-act="storeUse">เบิกใช้</button>' +
     '<button class="btn" data-act="noSale">เปิดลิ้นชัก</button><button class="btn warn" data-act="clearCart">ล้างบิล</button></div></section>' +
-    '<section class="sell"><div class="row" style="flex-wrap:wrap">' + chips + '</div><div class="keys' + (keysHaveImg ? ' with-img' : '') + '">' + keys + '</div>' +
+    '<section class="sell"><div class="row" style="flex-wrap:wrap">' + chips + '</div><div class="keypad' + (owner ? ' can-arrange' : '') + '" data-group="' + esc(S.keyGroup || '') + '">' + keys + '</div>' +
     '<div class="card total" id="totalbar"></div></section></div></div>';
+}
+
+/* ---------- Arrange the sale keys: press and hold a key (or a row name), drag, let go — saved by itself ---------- */
+var kd = null;
+function kdEnd() { if (kd) { clearTimeout(kd.timer); if (kd.ghost) kd.ghost.remove(); if (kd.el) kd.el.classList.remove('dragging'); } kd = null; document.body.classList.remove('arranging'); }
+document.addEventListener('pointerdown', function (e) {
+  if (S.view !== 'sale' || !S.user || S.user.role !== 'owner' || e.button > 0) return;
+  var el = e.target.closest && e.target.closest('.keypad .key, .keypad .krow-h');
+  if (!el) return;
+  kdEnd();
+  kd = { el: el, row: el.classList.contains('krow-h'), x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, active: false };
+  kd.timer = setTimeout(function () { kdStart(); }, 450);
+});
+function kdStart() {
+  if (!kd) return;
+  var src = kd.row ? kd.el.parentNode : kd.el;
+  var r = src.getBoundingClientRect();
+  kd.active = true;
+  kd.el = src;
+  kd.dx = kd.x - r.left; kd.dy = kd.y - r.top;
+  var g = src.cloneNode(true);
+  g.className += ' kghost';
+  g.style.width = r.width + 'px'; g.style.height = kd.row ? Math.min(r.height, 160) + 'px' : r.height + 'px';
+  document.body.appendChild(g);
+  kd.ghost = g;
+  src.classList.add('dragging');
+  document.body.classList.add('arranging');
+  if (navigator.vibrate) try { navigator.vibrate(15); } catch (x) { /* ignore */ }
+  kdMove();
+}
+function kdMove() {
+  kd.ghost.style.transform = 'translate(' + (kd.x - kd.dx) + 'px,' + (kd.y - kd.dy) + 'px)';
+  var under = document.elementFromPoint(kd.x, kd.y);
+  if (!under) return;
+  var pad = $('.keypad');
+  document.querySelectorAll('.krow-new.over').forEach(function (z) { z.classList.remove('over'); });
+  if (kd.row) {
+    var tr = under.closest('.krow');
+    if (tr && tr !== kd.el && tr.parentNode === pad) {
+      var b = tr.getBoundingClientRect();
+      pad.insertBefore(kd.el, kd.y < b.top + b.height / 2 ? tr : tr.nextSibling);
+    }
+    return;
+  }
+  if (under.closest('.krow-new')) { under.closest('.krow-new').classList.add('over'); return; }
+  var key = under.closest('.keypad .key');
+  if (key && key !== kd.el) {
+    var k = key.getBoundingClientRect();
+    key.parentNode.insertBefore(kd.el, kd.x < k.left + k.width / 2 ? key : key.nextSibling);
+    return;
+  }
+  var row = under.closest('.krow');
+  if (row && !row.contains(kd.el)) $('.keys', row).appendChild(kd.el);
+}
+document.addEventListener('pointermove', function (e) {
+  if (!kd) return;
+  kd.x = e.clientX; kd.y = e.clientY;
+  if (!kd.active) { if (Math.abs(kd.x - kd.x0) > 8 || Math.abs(kd.y - kd.y0) > 8) kdEnd(); return; }
+  e.preventDefault();
+  kdMove();
+}, { passive: false });
+document.addEventListener('touchmove', function (e) { if (kd && kd.active) e.preventDefault(); }, { passive: false });
+document.addEventListener('contextmenu', function (e) { if (kd) e.preventDefault(); });
+document.addEventListener('pointercancel', function () { if (kd && !kd.active) kdEnd(); });
+document.addEventListener('pointerup', function () {
+  if (!kd) return;
+  if (!kd.active) { kdEnd(); return; }
+  var el = kd.el, toNew = !!$('.krow-new.over');
+  S.kdClickBlock = Date.now();
+  kdEnd();
+  if (!toNew) return saveKeyLayout();
+  prompt2('แถวใหม่', 'ชื่อแถว (หมวดย่อย)', '', { hint: 'เช่น น้ำอัดลม, เครื่องดื่มชูกำลัง', ok: 'สร้างแถว' }).then(function (name) {
+    name = String(name || '').trim();
+    if (!name) return render();
+    var row = document.createElement('div');
+    row.className = 'krow'; row.setAttribute('data-row', name);
+    row.innerHTML = '<div class="krow-h"></div><div class="keys"></div>';
+    $('.krow-h', row).textContent = name;
+    $('.keys', row).appendChild(el);
+    $('.keypad').insertBefore(row, $('.krow-new'));
+    saveKeyLayout();
+  });
+});
+// the tap that ends a drag must not sell the key
+document.addEventListener('click', function (e) {
+  if (S.kdClickBlock && Date.now() - S.kdClickBlock < 400 && e.target.closest && e.target.closest('.keypad')) { e.preventDefault(); e.stopPropagation(); }
+}, true);
+
+/** Read the order on screen, apply it at once, save quietly in the background. */
+function saveKeyLayout() {
+  var pad = $('.keypad');
+  if (!pad) return;
+  var group = pad.getAttribute('data-group');
+  var rows = [], n = 0;
+  [].forEach.call(pad.querySelectorAll('.krow'), function (r) {
+    var skus = [].map.call(r.querySelectorAll('.key'), function (k) { return k.getAttribute('data-sku'); });
+    if (!skus.length) return;
+    rows.push({ name: r.getAttribute('data-row') || '', skus: skus });
+  });
+  rows.forEach(function (r) { r.skus.forEach(function (sku) { var p = S.idx.bySku[sku]; if (p) { n++; p.quickKeyOrder = n; p.quickKeyRow = r.name; } }); });
+  saveCache();
+  render(); renderCartOnly();
+  api('saveKeyLayout', S.token, group, rows).then(function () { toast('บันทึกตำแหน่งปุ่มแล้ว'); }).catch(function (e) {
+    toast('บันทึกตำแหน่งไม่สำเร็จ: ' + e.message, true);
+    reloadCatalog().then(function () { if (S.view === 'sale') { render(); renderCartOnly(); } }).catch(function () {});
+  });
 }
 
 function renderCartOnly() {
@@ -3392,7 +3514,7 @@ function selectProduct(sku) {
       var p = sku ? S.idx.bySku[sku] : null;
       S.ed = {
         p: p ? Object.assign({}, p) : { sku: '', name: '', category: S.prodFilter.cat || '', type: 'barcode', unit: 'ชิ้น', cost: '', price: '', minStock: '', minManual: '',
-          openPrice: false, quickKey: false, quickKeyGroup: '', quickKeyOrder: '', icon: '', color: 'gray', plu: '', active: true, forSale: true, trackExpiry: false },
+          openPrice: false, quickKey: false, quickKeyGroup: '', quickKeyRow: '', quickKeyOrder: '', icon: '', color: 'gray', plu: '', active: true, forSale: true, trackExpiry: false },
         codes: p ? codesOf(sku).map(function (b) { return Object.assign({}, b); }) : [],
         comps: p && S.recipes[sku] ? S.recipes[sku].map(function (c) { return { sku: c.sku, qty: c.qty }; }) : [],
         dirty: false
@@ -3428,6 +3550,8 @@ function drawEditor() {
   var catList = categories().map(function (c) { return '<option value="' + esc(c) + '">'; }).join('');
   var groups = {};
   S.products.forEach(function (x) { if (x.quickKeyGroup) groups[x.quickKeyGroup] = 1; });
+  var krows = {};
+  S.products.forEach(function (x) { if (x.quickKeyRow && (x.quickKeyGroup || '') === (p.quickKeyGroup || '')) krows[x.quickKeyRow] = 1; });
   var f = function (key, label, attrs) {
     return '<div class="field"><label for="e-' + key + '">' + label + '</label><input id="e-' + key + '" data-ef="' + key + '" value="' + esc(p[key]) + '" ' + (attrs || '') + '></div>';
   };
@@ -3483,7 +3607,9 @@ function drawEditor() {
       '<span class="nm" style="font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + esc(p.name || 'ชื่อสินค้า') + '</span><span class="pr" style="font-size:13px">' + (p.openPrice ? 'ราคาเปิด' : '฿' + money(p.price)) + '</span></span>' +
       '<div class="col grow" style="gap:8px"><div class="field"><label for="e-quickKeyGroup">หมวดปุ่ม</label><input id="e-quickKeyGroup" data-ef="quickKeyGroup" list="e-grplist" value="' + esc(p.quickKeyGroup) + '" placeholder="เช่น เครื่องดื่มชง" style="height:36px"></div>' +
       '<datalist id="e-grplist">' + Object.keys(groups).map(function (g) { return '<option value="' + esc(g) + '">'; }).join('') + '</datalist>' +
-      '<div class="field"><label for="e-quickKeyOrder">ลำดับบนจอ</label><input id="e-quickKeyOrder" data-ef="quickKeyOrder" type="number" value="' + esc(p.quickKeyOrder || '') + '" style="height:36px;width:90px"></div></div></div>' +
+      '<div class="field"><label for="e-quickKeyRow">แถว (หมวดย่อย)</label><input id="e-quickKeyRow" data-ef="quickKeyRow" list="e-rowlist" value="' + esc(p.quickKeyRow || '') + '" placeholder="เช่น น้ำอัดลม" style="height:36px"></div>' +
+      '<datalist id="e-rowlist">' + Object.keys(krows).map(function (g) { return '<option value="' + esc(g) + '">'; }).join('') + '</datalist>' +
+      '<small class="muted" style="font-size:11px">ย้ายตำแหน่ง: ที่หน้าขาย กดปุ่มค้างแล้วลาก</small></div></div>' +
       '<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:14px">รูปสินค้า</b>' +
         (owner ? '<label class="btn sm" for="e-img" style="cursor:pointer">' + (p.image ? 'เปลี่ยนรูป' : '+ อัปโหลดรูป') + '</label><input id="e-img" type="file" accept="image/*" data-change="prodImg" style="position:absolute;left:-9999px">' +
           (p.image ? '<button type="button" class="btn sm ghost" data-act="prodImgDel">ลบรูป</button>' : '') : '') +
@@ -5894,7 +6020,7 @@ function printShift(s) {
 
 /* Reports: filters on the left, tabs on the right. S.rep = { f: {...}, tab, data } */
 var REP_TABS = [['overview', 'ภาพรวม'], ['products', 'สินค้า'], ['categories', 'หมวด'], ['staff', 'พนักงาน'], ['shifts', 'กะ'], ['slow', 'ไม่เคลื่อนไหว'], ['stock', 'มูลค่าสต็อก']];
-var ACTION_TH = { PRODUCT_DELETE: 'ลบสินค้า', PRODUCT_ARCHIVE: 'ปิดใช้งานสินค้า', GO_LIVE: 'เริ่มใช้งานจริง (ล้างข้อมูลทดสอบ)', VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
+var ACTION_TH = { KEY_LAYOUT: 'จัดตำแหน่งปุ่มหน้าขาย', PRODUCT_DELETE: 'ลบสินค้า', PRODUCT_ARCHIVE: 'ปิดใช้งานสินค้า', GO_LIVE: 'เริ่มใช้งานจริง (ล้างข้อมูลทดสอบ)', VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
   STOCK_ADJUST: 'ปรับสต็อก', PRICE_CHANGE: 'แก้ราคา', APPROVE_FAIL: 'PIN อนุมัติผิด', NO_SALE: 'เปิดลิ้นชัก', WRITEOFF: 'ตัดของเสีย',
   STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า',
   BELOW_COST: 'ขายต่ำกว่าทุน', LOW_MARGIN: 'กำไรต่ำ', OVERSELL: 'ขายเกินสต็อก', OFFLINE_CHECK: 'ตรวจรายการออฟไลน์' };

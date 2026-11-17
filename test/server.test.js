@@ -1023,4 +1023,31 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   ok(m('bootstrap', T).barcodes.some(b => b.barcode === '8850000000017'), 'barcode of a deleted product can be used again');
 }
 
+{
+  // Sale-screen rows (sub-groups) and drag-and-drop order
+  const h = makeContext({ now: '2026-11-17T02:00:00Z' });
+  h.setup();
+  const K = h.__props.API_KEY;
+  const c = (fn, ...a) => JSON.parse(h.doPost({ postData: { contents: JSON.stringify({ key: K, fn, args: a }) } }).getContent());
+  const m = (fn, ...a) => { const r = c(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+  h.createOwner('O', '1111');
+  const DEV = 'Dkey0000000000000001', uid = m('status').users[0].userId;
+  const T = m('login', uid, '1111', DEV).token;
+  ['โค้ก', 'สไปรท์', 'M-150', 'คาราบาว'].forEach(n => m('saveProduct', T, { name: n, price: 15, type: 'nobarcode', quickKey: true, quickKeyGroup: 'เครื่องดื่ม', quickKeyRow: n.length > 4 ? 'ชูกำลัง' : 'น้ำอัดลม' }));
+  const P = () => Object.fromEntries(m('listProducts', T).map(p => [p.name, p]));
+  eq([P()['โค้ก'].quickKeyRow, P()['คาราบาว'].quickKeyRow], ['น้ำอัดลม', 'ชูกำลัง'], 'row saved with the product');
+  const s = Object.fromEntries(Object.entries(P()).map(([k, v]) => [k, v.sku]));
+  m('addUser', T, 'มิว', 'cashier', '2222');
+  const TC = m('login', m('listUsers', T).find(u => u.name === 'มิว').userId, '2222', DEV).token;
+  ok(!c('saveKeyLayout', TC, 'เครื่องดื่ม', []).ok, 'cashier cannot rearrange keys');
+  const r = m('saveKeyLayout', T, 'เครื่องดื่ม', [{ name: 'ชูกำลัง', skus: [s['คาราบาว'], s['M-150']] }, { name: 'น้ำอัดลม', skus: [s['สไปรท์'], s['โค้ก']] }]);
+  eq(r.saved, 4, 'four keys saved');
+  const q = P();
+  eq(['คาราบาว', 'M-150', 'สไปรท์', 'โค้ก'].map(n => [q[n].quickKeyOrder, q[n].quickKeyRow]), [[1, 'ชูกำลัง'], [2, 'ชูกำลัง'], [3, 'น้ำอัดลม'], [4, 'น้ำอัดลม']], 'order and rows follow the screen');
+  m('saveProduct', T, Object.assign({}, q['โค้ก'], { price: 16 }), []);
+  eq(P()['โค้ก'].quickKeyRow, 'น้ำอัดลม', 'editing a product keeps its row');
+  m('saveProduct', T, Object.assign({}, q['โค้ก'], { quickKeyRow: undefined }), []);
+  eq(P()['โค้ก'].quickKeyRow, 'น้ำอัดลม', 'an older client without the field keeps the row');
+}
+
 console.log('server tests passed:', pass);
