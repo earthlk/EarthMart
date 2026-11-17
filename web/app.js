@@ -1163,7 +1163,7 @@ function render() {
   fillImages();
   drawNetPill();
   markOfflineNav();
-  if (S.view === 'sale') focusScan();
+  if (S.view === 'sale') { renderCartOnly(); focusScan(); }   // the bill on hold is always drawn with the page
 }
 
 /* =================================================================== */

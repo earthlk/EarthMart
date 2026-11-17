@@ -73,6 +73,14 @@ const server = http.createServer((req, res) => {
     // a quick tap still sells
     await page.click('.key:has-text("โค้ก")');
     await page.waitForSelector('#lines :text("โค้ก")');
+    // the bill stays on screen after visiting another page
+    await page.click('[data-act=go][data-v=stock]');
+    await page.waitForSelector('#srows');
+    await page.click('[data-act=go][data-v=sale]');
+    await page.waitForSelector('#lines .line:has-text("โค้ก")', { timeout: 3000 });
+    assert.match(await page.textContent('#totalbar'), /15\.00/, 'total shown again');
+    await page.click('.key:has-text("สไปรท์")');
+    assert.strictEqual(await page.$$eval('#lines .line', a => a.length), 2, 'adding another keeps both');
     await page.click('[data-act=clearCart]');
     await page.click('.modal [data-x=yes]');
     await page.waitForSelector('.modal', { state: 'detached' });
