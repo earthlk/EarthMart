@@ -23,21 +23,32 @@ function recipeCost_(comps, bySku) {
   return round2_((comps || []).reduce(function (a, c) { var p = bySku[c.sku]; return a + (p ? num_(p.cost) * c.qty : 0); }, 0));
 }
 
+/** Sub-group of a product (older sheets kept it in quickKeyRow). */
+function subcatOf_(p) { return String(p.subcategory || p.quickKeyRow || '').trim(); }
+
+/** Products, barcodes and recipes as the client keeps them. */
+function catalog_() {
+  return {
+    products: productsForClient_(),
+    recipes: readAll_('Recipes').map(function (r) { return { sku: String(r.sku), componentSku: String(r.componentSku), qty: num_(r.qty) }; }),
+    barcodes: readAll_('Barcodes').map(function (b) {
+      return { barcode: String(b.barcode), sku: String(b.sku), unitName: b.unitName,
+               multiplier: num_(b.multiplier) || 1, price: b.price === '' ? null : num_(b.price) };
+    })
+  };
+}
+
 /** Everything the client needs after login. */
 function api_bootstrap(token) {
   return respond_(function () {
     var s = session_(token);
     maybeRecomputeMinStock_();
+    var cat = catalog_();
     return {
       user: { userId: s.userId, name: s.name, role: s.role },
       isCounter: isCounter_(s.deviceId),
       settings: publicSettings_(),
-      products: productsForClient_(),
-      recipes: readAll_('Recipes').map(function (r) { return { sku: String(r.sku), componentSku: String(r.componentSku), qty: num_(r.qty) }; }),
-      barcodes: readAll_('Barcodes').map(function (b) {
-        return { barcode: String(b.barcode), sku: String(b.sku), unitName: b.unitName,
-                 multiplier: num_(b.multiplier) || 1, price: b.price === '' ? null : num_(b.price) };
-      }),
+      products: cat.products, recipes: cat.recipes, barcodes: cat.barcodes,
       shift: openShiftForDevice_(s.deviceId),
       prevFloat: isCounter_(s.deviceId) ? prevFloat_(s.deviceId) : 0,
       wallets: walletsForClient_(),
@@ -64,7 +75,7 @@ function productOut_(p) {
   return {
     sku: String(p.sku), name: p.name, category: p.category, type: p.type || 'barcode', unit: p.unit || 'ชิ้น',
     cost: num_(p.cost), price: num_(p.price), minStock: num_(p.minStock), openPrice: bool_(p.openPrice),
-    quickKey: bool_(p.quickKey), quickKeyGroup: p.quickKeyGroup || '', quickKeyRow: p.quickKeyRow === undefined || p.quickKeyRow === null ? '' : String(p.quickKeyRow), quickKeyOrder: num_(p.quickKeyOrder),
+    quickKey: bool_(p.quickKey), quickKeyGroup: p.quickKeyGroup || '', subcategory: subcatOf_(p), quickKeyRow: subcatOf_(p), quickKeyOrder: num_(p.quickKeyOrder),
     icon: p.icon || '', color: p.color || '', plu: p.plu === '' ? '' : String(p.plu),
     active: bool_(p.active), onHand: num_(p.onHand), forSale: forSale_(p), trackExpiry: bool_(p.trackExpiry), image: p.image ? String(p.image) : '',
     // minStock is worked out from sales (Reorder.gs) unless minManual holds a typed number
@@ -93,7 +104,9 @@ function api_listProducts(token) {
 function api_saveProduct(token, product, barcodes, components) {
   return respond_(function () {
     var s = owner_(token);
-    return withLock_(function () { return saveProduct_(s, product, barcodes || [], components || []); });
+    var r = withLock_(function () { return saveProduct_(s, product, barcodes || [], components || []); });
+    // send the fresh catalog back so the screen updates without a second round trip
+    return Object.assign(r, catalog_());
   });
 }
 
@@ -172,7 +185,8 @@ function saveProduct_(sess, input, barcodes, components) {
     avgDaily: existing ? existing.avgDaily : '', shelfDays: existing ? existing.shelfDays : '', cycleDays: existing ? existing.cycleDays : '', forSale: type === 'recipe' ? true : input.forSale !== false,
     trackExpiry: type === 'recipe' ? false : !!input.trackExpiry,
     openPrice: !!input.openPrice, quickKey: !!input.quickKey, quickKeyGroup: String(input.quickKeyGroup || ''),
-    quickKeyRow: input.quickKeyRow !== undefined ? String(input.quickKeyRow || '').trim() : existing ? String(existing.quickKeyRow || '') : '',
+    subcategory: (input.subcategory !== undefined ? String(input.subcategory || '') : input.quickKeyRow !== undefined ? String(input.quickKeyRow || '') : existing ? subcatOf_(existing) : '').trim().slice(0, 40),
+    quickKeyRow: '',   // replaced by subcategory (kept for older sheets)
     quickKeyOrder: num_(input.quickKeyOrder), icon: String(input.icon || ''), color: String(input.color || ''),
     plu: plu, active: input.active === undefined ? true : !!input.active,
     onHand: existing ? num_(existing.onHand) : 0, updatedAt: now_(), image: existing ? existing.image || '' : ''
@@ -307,7 +321,7 @@ function api_importProducts(token, csvText) {
             sku: sku, name: get(r, 'name'), category: get(r, 'category'), type: get(r, 'type') || 'barcode',
             unit: get(r, 'unit') || 'ชิ้น', cost: get(r, 'cost'), price: get(r, 'price'), minStock: get(r, 'minStock'),
             quickKey: bool_(get(r, 'quickKey').toLowerCase() === 'y' ? true : get(r, 'quickKey').toUpperCase()),
-            quickKeyGroup: get(r, 'quickKeyGroup'), quickKeyRow: get(r, 'quickKeyRow') || undefined,
+            quickKeyGroup: get(r, 'quickKeyGroup'), subcategory: get(r, 'subcategory') || get(r, 'quickKeyRow') || undefined,
             openPrice: bool_(get(r, 'openPrice').toLowerCase() === 'y' ? true : get(r, 'openPrice').toUpperCase()),
             plu: get(r, 'plu')
           }, merged);
@@ -449,7 +463,7 @@ function api_saveKeyLayout(token, group, rows) {
       var H = SCHEMA.Products;
       var width = H.length;
       var data = sh.getRange(2, 1, last - 1, width).getValues();
-      var cSku = H.indexOf('sku'), cG = H.indexOf('quickKeyGroup'), cO = H.indexOf('quickKeyOrder'), cR = H.indexOf('quickKeyRow');
+      var cSku = H.indexOf('sku'), cG = H.indexOf('quickKeyGroup'), cO = H.indexOf('quickKeyOrder'), cR = H.indexOf('subcategory'), cOld = H.indexOf('quickKeyRow');
       var at = {};
       data.forEach(function (r, i) { if (r[cSku] !== '') at[String(r[cSku])] = i; });
       var n = 0, seen = {};
@@ -464,6 +478,7 @@ function api_saveKeyLayout(token, group, rows) {
           data[i][cG] = group === 'ทั่วไป' && !data[i][cG] ? '' : group;
           data[i][cO] = n;
           data[i][cR] = name;
+          data[i][cOld] = '';
         });
       });
       if (!n) return { saved: 0 };
@@ -471,6 +486,7 @@ function api_saveKeyLayout(token, group, rows) {
       sh.getRange(2, cG + 1, last - 1, 1).setValues(pick(cG));
       sh.getRange(2, cO + 1, last - 1, 1).setValues(pick(cO));
       sh.getRange(2, cR + 1, last - 1, 1).setValues(pick(cR));
+      sh.getRange(2, cOld + 1, last - 1, 1).setValues(pick(cOld));
       log_(s, 'KEY_LAYOUT', group, n + ' ปุ่ม · ' + rows.length + ' แถว', '');
       return { saved: n };
     });

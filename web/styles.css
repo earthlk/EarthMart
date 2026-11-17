@@ -948,3 +948,8 @@ a{color:var(--brand-text)}
 .key.dragging,.krow.dragging{opacity:.3}
 .kghost{position:fixed;left:0;top:0;z-index:9999;pointer-events:none;opacity:.92;box-shadow:0 12px 30px rgba(0,0,0,.25);transform-origin:0 0;overflow:hidden;background:var(--surface);border-radius:12px}
 .arranging,.arranging *{cursor:grabbing !important}
+.table tr.subrow td{font-size:13px;padding-top:6px;padding-bottom:6px}
+.table tr.subrow td:first-child{padding-left:22px}
+.sharebar.sub span{opacity:.55}
+.chips.subchips{margin-top:-4px}
+.chips.subchips .chip{font-size:12px;height:28px}

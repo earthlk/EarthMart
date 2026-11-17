@@ -1048,6 +1048,23 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(P()['โค้ก'].quickKeyRow, 'น้ำอัดลม', 'editing a product keeps its row');
   m('saveProduct', T, Object.assign({}, q['โค้ก'], { quickKeyRow: undefined }), []);
   eq(P()['โค้ก'].quickKeyRow, 'น้ำอัดลม', 'an older client without the field keeps the row');
+  // sub-group is a product field: saved on its own, returned with the save, used by reports and stock
+  const sv = m('saveProduct', T, Object.assign({}, P()['โค้ก'], { subcategory: 'โคล่า', category: 'เครื่องดื่ม' }), []);
+  ok(Array.isArray(sv.products) && sv.products.find(p => p.sku === s['โค้ก']).subcategory === 'โคล่า', 'save returns the fresh catalog');
+  eq(P()['โค้ก'].subcategory, 'โคล่า', 'subcategory saved');
+  ['สไปรท์', 'M-150', 'คาราบาว'].forEach(n => m('saveProduct', T, Object.assign({}, P()[n], { category: 'เครื่องดื่ม' }), []));
+  eq(m('stockList', T).find(r => r.sku === s['คาราบาว']).subcategory, 'ชูกำลัง', 'stock list carries the subcategory');
+  m('registerDevice', T, DEV, 'เครื่อง 1');
+  m('openShift', T, 0, '', { floatSource: 'owner' });
+  m('commitSale', T, { saleUid: 'K1', payMethod: 'cash', received: 100, lines: [{ sku: s['โค้ก'], qty: 2 }, { sku: s['คาราบาว'], qty: 1 }, { sku: s['M-150'], qty: 1 }] });
+  const day = '2026-11-17';
+  const rp = m('report', T, { from: day, to: day });
+  const bev = rp.categories.find(c => c.category === 'เครื่องดื่ม');
+  eq(bev.subs.map(x => [x.subcategory, x.revenue]).sort(), [['ชูกำลัง', 30], ['โคล่า', 30]], 'category broken down by subcategory');
+  eq(rp.options.subcategories['เครื่องดื่ม'].sort(), ['ชูกำลัง', 'น้ำอัดลม', 'โคล่า'].sort(), 'filter options list subcategories');
+  eq(m('report', T, { from: day, to: day, category: 'เครื่องดื่ม', subcategory: 'ชูกำลัง' }).summary.net, 30, 'subcategory filter');
+  const tr = m('report', T, { from: day, to: day, category: 'เครื่องดื่ม' }).trend;
+  eq(tr.cats.map(c => c.category).sort(), ['ชูกำลัง', 'โคล่า'], 'chart splits a chosen category by subcategory');
 }
 
 console.log('server tests passed:', pass);

@@ -42,6 +42,7 @@ const server = http.createServer((req, res) => {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
+  page.on('console', m => { if (/FAIL/.test(m.text())) console.log(m.text()); });
   await page.addInitScript(([dev]) => { localStorage.setItem('em_device', dev); window.EM_TEST = true; window.EM_NO_SW = true; window.print = () => {}; }, [DEV]);
   await ctx.route(API + '*', route => {
     const out = g.doPost({ postData: { contents: route.request().postData() } });
@@ -122,6 +123,45 @@ const server = http.createServer((req, res) => {
     assert.deepStrictEqual(await page.$$eval('.krow-h', a => a.map(x => x.textContent)), ['ชูกำลัง', 'น้ำอัดลม', 'น้ำผลไม้'], 'layout kept after refresh');
     await page.waitForFunction(() => /ยอดรวม/.test(document.getElementById('totalbar').textContent));
     await shot('k3-after');
+    // products page: subcategory is a product field; after saving, moving on never asks to discard
+    await page.click('[data-act=go][data-v=products]');
+    await page.waitForSelector('#prows .prod-grid');
+    await page.click('#prows .prod-grid:has-text("คาราบาว")');
+    await page.fill('#e-category', 'เครื่องดื่ม');
+    await page.fill('#e-subcategory', 'เครื่องดื่มชูกำลัง');
+    await page.fill('#e-price', '16');
+    const t1 = Date.now();
+    await page.click('[data-ed=save]');
+    await page.waitForFunction(() => !document.querySelector('#saving.show, #saving.block'), null, { timeout: 8000 }).catch(() => {});
+    await page.waitForSelector('.toast:has-text("บันทึกแล้ว")');
+    await page.click('[data-act=selProduct][data-sku=""]');
+    await page.waitForSelector('#e-name:focus');
+    assert.ok(!(await page.$('.modal')), 'no "discard changes?" after saving');
+    await page.keyboard.type('เป๊ปซี่');
+    await page.waitForTimeout(800);
+    assert.strictEqual(await page.inputValue('#e-name'), 'เป๊ปซี่', 'the new product form is not replaced after the save');
+    await page.click('[data-ed=cancel]');
+    assert.strictEqual(ok('listProducts', T).find(p => p.name === 'คาราบาว').subcategory, 'เครื่องดื่มชูกำลัง', 'subcategory saved');
+    await page.selectOption('#pcat', 'เครื่องดื่ม');
+    await page.selectOption('#psub', 'เครื่องดื่มชูกำลัง');
+    assert.deepStrictEqual(await page.$$eval('#prows .prod-grid', a => a.map(x => x.querySelector('div div').textContent)), ['คาราบาวP00004 · เครื่องดื่ม › เครื่องดื่มชูกำลัง'], 'filter by subcategory');
+    await page.click('#prows .prod-grid:has-text("คาราบาว")');
+    await shot('k4-products');
+    // reports: category broken down by subcategory, filter by subcategory
+    ok('saveProduct', T, Object.assign({}, ok('listProducts', T).find(p => p.name === 'M-150'), { category: 'เครื่องดื่ม' }), []);
+    const sk = n => ok('listProducts', T).find(p => p.name === n).sku;
+    ok('commitSale', T, { saleUid: 'KR1', payMethod: 'cash', received: 100, lines: [{ sku: sk('คาราบาว'), qty: 2 }, { sku: sk('M-150'), qty: 1 }, { sku: sk('โค้ก'), qty: 1 }] });
+    await page.click('[data-act=go][data-v=reports]');
+    await page.waitForSelector('#report');
+    await page.click('[data-act=repTab][data-t=categories]').catch(async () => { await page.click('text=หมวด >> nth=-1'); });
+    await page.waitForTimeout(800);
+    await shot('k5-report-cats');
+    assert.ok(!(await page.$('.toast.err')), 'reports open without an error');
+    assert.ok(await page.$('tr.subrow:has-text("เครื่องดื่มชูกำลัง")'), 'category table lists subcategories');
+    await page.click('tr.subrow:has-text("เครื่องดื่มชูกำลัง")');
+    await page.waitForFunction(() => /คาราบาว/.test((document.getElementById('report') || {}).textContent || ''));
+    assert.ok(!/M-150/.test(await page.textContent('#report')), 'tapping a subcategory shows only its products');
+
     assert.deepStrictEqual(errors, [], 'no page errors');
     console.log('Sale key rows test passed');
   } catch (e) {
