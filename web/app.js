@@ -905,6 +905,7 @@ function bootFromCache() {
     startAutoSync();
     if (outbox().length) setTimeout(function () { syncOutbox(); }, 1500);
     if (d.isCounter) setTimeout(loadCustomers, 1200);
+    if (d.isCounter) setTimeout(netApplyPending, 6000);
     setTimeout(syncSlides, 2500);
     setTimeout(syncImages, 4000);
   }).catch(function (e) {
@@ -987,6 +988,7 @@ function backgroundSync(manual) {
     S.syncing = false; S.lastSync = Date.now();
     applyBoot(d);
     drawSyncPill();
+    netApplyPending();
     if (manual) toast('ซิงก์ข้อมูลแล้ว');
   }, function (e) {
     S.syncing = false;
@@ -1024,6 +1026,8 @@ function drawSyncPill() {
   el.title = S.syncErr && S.syncErr !== 'ออฟไลน์' ? 'ซิงก์ไม่สำเร็จ: ' + S.syncErr + ' — กดเพื่อลองใหม่' : 'ซิงก์ข้อมูลเดี๋ยวนี้' + (S.lastSync ? ' · ล่าสุด ' + timeOf(new Date(S.lastSync).toISOString()) : '');
 }
 setInterval(drawSyncPill, 30000);
+// counter PC: pick up whitelist requests made on other screens every 2 minutes (light read, no screen changes)
+setInterval(function () { if (S.isCounter && !document.hidden) netApplyPending(); }, 120000);
 // Back online or back to this tab after a while: catch up straight away
 window.addEventListener('online', function () { if (S.token) setTimeout(function () { backgroundSync(false); }, 1500); });
 document.addEventListener('visibilitychange', function () {
@@ -1038,6 +1042,7 @@ function boot() {
     S.markdowns = d.markdowns || []; S.expiryTodo = d.expiryTodo || 0; S.promos = d.promos || []; S.slides = d.slides || [];
     S.prevFloat = d.prevFloat || 0; S.wallets = d.wallets || [];
     if (d.isCounter) setTimeout(loadCustomers, 1200);
+    if (d.isCounter) setTimeout(netApplyPending, 6000);
     setTimeout(syncSlides, 2500);
     setTimeout(syncImages, 4000);
     if (outbox().length) setTimeout(function () { syncOutbox(); }, 1500);
@@ -5735,14 +5740,16 @@ function loadNet() {
   if (!box) return;
   clearInterval(S.netTimer);
   S.netTimer = setInterval(function () { if (S.view === 'settings' && (S.setTab || 'shop') === 'net' && !$('.modal') && !$('#net-code', netBox() || document)) loadNet(); else if (S.view !== 'settings') clearInterval(S.netTimer); }, 60000);
-  var saved = api('netDevices', S.token).catch(function () { return []; });
+  var saved = api('netDevices', S.token).then(function (l) { S.netSaved = l; return l; }).catch(function () { return []; });
   var users = api('listUsers', S.token).catch(function () { return []; });
+  if (!S.isCounter) return saved.then(function (l) { drawNetOffline(l, null); });   // the helper only runs on the counter PC
   netCall('/ping', null, 3000).then(function (p) {
     S.netPing = p;
     if (!p.configured || !store('em_netkey')) return Promise.all([saved, users]).then(function (r) { drawNetSetup(r[0]); });
     return Promise.all([netCall('/state'), saved, users]).then(function (r) {
       S.net = { st: r[0], saved: r[1], users: r[2], local: p.localMacs || [] };
       drawNet();
+      if ((r[1] || []).some(function (d) { return d.pending; })) netApplyPending();
     });
   }).catch(function (e) {
     if (e.code === 'KEY' || e.code === 'SETUP') return saved.then(drawNetSetup);
@@ -5751,14 +5758,42 @@ function loadNet() {
   });
 }
 
+/**
+ * Whitelist by MAC from any screen (phone, home PC, or this PC while the helper is not ready):
+ * saved in the sheet as a request; the counter PC sends it to the router by itself.
+ */
 function netSavedList(saved) {
-  if (!saved.length) return '';
-  return '<div class="card pad"><b>รายชื่อที่บันทึกไว้</b><div class="muted" style="font-size:13px;margin:4px 0 8px">ดูได้อย่างเดียว · เปิด/ปิดสิทธิ์ได้ที่เครื่องหน้าร้าน</div>' +
-    saved.map(function (d) { return '<div class="net-mini"><b>' + esc(d.name || d.mac) + '</b><span class="mono muted">' + esc(d.mac) + '</span><span class="' + (d.allowed ? 'brand-text' : 'warn-text') + '">' + (d.allowed ? 'อนุญาต' : 'ไม่อนุญาต') + '</span></div>'; }).join('') + '</div>';
+  saved = (saved || []).slice().sort(function (a, b) { return (!!b.pending - !!a.pending) || (b.allowed - a.allowed) || String(a.name || a.mac).localeCompare(String(b.name || b.mac)); });
+  var status = function (d) {
+    if (d.pending && d.pendingErr) return '<span class="warn-text" title="' + esc(d.pendingErr) + '">ส่งไม่สำเร็จ: ' + esc(d.pendingErr) + '</span>';
+    if (d.pending === 'allow') return '<span class="net-wait">รอส่งเข้าเราเตอร์…</span>';
+    if (d.pending === 'block') return '<span class="net-wait">รอปิดสิทธิ์…</span>';
+    return '<span class="' + (d.allowed ? 'brand-text' : 'muted') + '">' + (d.allowed ? 'อนุญาต' : 'ไม่อนุญาต') + '</span>';
+  };
+  var on = function (d) { return d.pending ? d.pending === 'allow' : !!d.allowed; };
+  return '<div class="card pad col net-remote" style="gap:10px;max-width:760px"><b style="font-size:17px">Whitelist — เพิ่มด้วย MAC address</b>' +
+    '<div class="muted" style="font-size:13px;line-height:1.6">' + (S.isCounter
+      ? 'ตัวช่วยอินเทอร์เน็ตยังไม่พร้อม — เพิ่มไว้ก่อนได้ พอพร้อมแล้วโปรแกรมจะส่งเข้าเราเตอร์ให้เอง'
+      : 'สั่งจากเครื่องนี้ได้เลย · เครื่องหน้าร้านจะส่งเข้าเราเตอร์ให้เองภายในไม่กี่นาที (ต้องเปิดโปรแกรมทิ้งไว้ที่เครื่องหน้าร้าน)') + '</div>' +
+    '<form class="row" data-form="netQueueAdd" style="gap:8px;flex-wrap:wrap"><label class="sr" for="nq-mac">MAC address</label><input id="nq-mac" class="mono" placeholder="MAC เช่น A4:83:E7:22:91:BC" autocomplete="off" style="flex:1 1 210px">' +
+    '<label class="sr" for="nq-name">ชื่อเครื่อง</label><input id="nq-name" placeholder="ชื่อเครื่อง เช่น มือถือแบงค์" style="flex:1 1 180px"><button class="btn primary">+ เพิ่ม Whitelist</button></form>' +
+    '<div class="muted" style="font-size:12px">ดู MAC ได้ที่ มือถือ: ตั้งค่า › Wi-Fi › แตะชื่อ WiFi ร้าน (ปิด "MAC แบบสุ่ม / ที่อยู่ส่วนตัว" ก่อน) · คอม: พิมพ์ getmac ใน cmd</div>' +
+    (saved.length ? '<div class="net-qlist">' + saved.map(function (d) {
+      var lockOn = d.locked && on(d);
+      return '<div class="net-q"><div><b>' + esc(d.name || d.mac) + '</b>' + (d.locked ? ' <span class="muted" title="เครื่องสำคัญ">🔒</span>' : '') + '<div class="mono muted" style="font-size:12px">' + esc(d.mac) + '</div></div>' +
+        '<div style="font-size:13px">' + status(d) + '</div>' +
+        '<button type="button" class="switch' + (on(d) ? ' on' : '') + '" role="switch" aria-checked="' + on(d) + '" aria-label="อนุญาต ' + esc(d.name || d.mac) + '" data-act="netQueueToggle" data-mac="' + esc(d.mac) + '"' +
+        (lockOn ? ' disabled title="เครื่องสำคัญ — ปิดสิทธิ์ไม่ได้"' : '') + '></button></div>';
+    }).join('') + '</div>' : '') + '</div>';
 }
 
 function drawNetOffline(saved, e) {
   var box = netBox(); if (!box) return;
+  if (!S.isCounter) {   // phone / home PC: the router is reached through the counter PC; whitelist by MAC works from here
+    box.innerHTML = '<div class="col" style="gap:12px;max-width:760px"><h2>อินเทอร์เน็ตร้าน</h2>' + netSavedList(saved) +
+      '<div class="muted" style="font-size:13px">ดูเครื่องที่ต่ออยู่ เปิด/ปิดระบบ Whitelist ทั้งหมด ทำได้ที่เครื่องหน้าร้าน</div></div>';
+    return;
+  }
   box.innerHTML = '<div class="card pad col" style="gap:10px;max-width:720px"><h2>อินเทอร์เน็ตร้าน</h2>' +
     '<div class="banner warn" style="border-radius:10px">' + esc(e.message) + '</div>' +
     '<div class="muted" style="line-height:1.7">หน้านี้สั่งเราเตอร์ผ่าน "ตัวช่วยอินเทอร์เน็ต" ที่ติดตั้งมากับ EarthMart บนเครื่องหน้าร้าน<br>' +
@@ -5912,6 +5947,64 @@ function netDo(path, body, label) {
     .catch(function (e) { netBusy(false); if (e.message) toast(e.message, true); throw e; });
 }
 
+/** Redraw only the whitelist-by-MAC card (keeps a captcha being typed, etc.); full page when the router view is up. */
+function netRefreshSaved() {
+  return api('netDevices', S.token).then(function (l) {
+    S.netSaved = l;
+    var card = $('.net-remote');
+    if (card) { var t = document.createElement('div'); t.innerHTML = netSavedList(l); card.replaceWith(t.firstChild); var mi = $('#nq-mac'); if (mi) mi.focus(); }
+    else loadNet();
+  }).catch(function () {});
+}
+
+/**
+ * Counter PC, in the background: send whitelist requests made on other screens to the router.
+ * Needs the internet helper paired and logged in; otherwise they wait for the next round.
+ */
+function netApplyPending() {
+  if (!S.isCounter || !S.token || !store('em_netkey') || S.netApplying) return Promise.resolve();
+  S.netApplying = true;
+  var done = function () { S.netApplying = false; };
+  return apiQuiet('netPending', S.token).then(function (list) {
+    if (!list.length) return;
+    return Promise.all([netCall('/ping', null, 3000), netCall('/state')]).then(function (r) {
+      var local = r[0].localMacs || [];
+      S.netPing = S.netPing || r[0];
+      S.net = S.net || { saved: [], users: [], local: local };
+      S.net.st = r[1];
+      var applied = 0;
+      return list.reduce(function (chain, d) {
+        return chain.then(function () {
+          if (d.pending === 'block' && (d.locked || local.indexOf(d.mac) >= 0)) return apiQuiet('netPendingDone', S.token, d.mac, false, 'เครื่องสำคัญ — ปิดสิทธิ์ไม่ได้');
+          var inRouter = (S.net.st.entries || []).some(function (e) { return e.mac === d.mac; });
+          var step;
+          if (d.pending === 'allow') {
+            if (inRouter) step = Promise.resolve(S.net.st);
+            else {
+              var band = netPickBands(d.mac, false);
+              if (!band.length) return apiQuiet('netPendingDone', S.token, d.mac, false, 'WiFi เต็มทุกชื่อแล้ว (8 เครื่องต่อชื่อ)');
+              step = netCall('/allow', { mac: d.mac, name: d.name, ssids: band });
+            }
+          } else step = inRouter ? netCall('/block', { mac: d.mac }) : Promise.resolve(S.net.st);
+          return step.then(function (st) {
+            if (st && st.entries) S.net.st = st;
+            applied++;
+            return apiQuiet('netPendingDone', S.token, d.mac, true);
+          }, function (e) {
+            if (e.code === 'CAPTCHA' || e.code === 'OFF' || e.code === 'KEY' || e.code === 'SETUP') throw e;   // try again next round
+            return apiQuiet('netPendingDone', S.token, d.mac, false, e.message);
+          });
+        });
+      }, Promise.resolve()).then(function () {
+        if (applied) {
+          toast('ส่ง Whitelist เข้าเราเตอร์แล้ว ' + applied + ' เครื่อง');
+          if (S.view === 'settings' && S.setTab === 'net' && !$('.modal') && !$('#net-code')) loadNet();
+        }
+      });
+    });
+  }).catch(function () { /* helper not ready / not logged in: next round */ }).then(done, done);
+}
+
 function netRow(mac) { return netRows().filter(function (r) { return r.mac === mac; })[0] || { mac: mac }; }
 
 /** Name / type / owner / important flag; allow=true also lets it on the internet. */
@@ -6017,6 +6110,16 @@ function netPair(scope) {
 }
 
 var NET_ACTIONS = {
+  netQueueToggle: function (el) {
+    var mac = el.getAttribute('data-mac'), d = (S.netSaved || []).filter(function (x) { return x.mac === mac; })[0] || { mac: mac };
+    var to = !(d.pending ? d.pending === 'allow' : d.allowed);
+    // already the way it is in the router → just cancel the request
+    var pending = to === !!d.allowed && d.pending ? '' : (to ? 'allow' : 'block');
+    api('saveNetDevice', S.token, { mac: mac, pending: pending }).then(function () {
+      toast(pending ? (to ? 'ขออนุญาตแล้ว — รอเครื่องหน้าร้านส่งเข้าเราเตอร์' : 'ขอปิดสิทธิ์แล้ว — รอเครื่องหน้าร้าน') : 'ยกเลิกคำขอแล้ว');
+      netRefreshSaved(); if (S.isCounter) setTimeout(netApplyPending, 300);
+    }).catch(fail);
+  },
   netCap: function (el) { netCapLoad(el.closest('.modal') || netBox()); },
   netLogin: function () {
     var box = netBox(), c = $('#net-code', box);
@@ -7048,6 +7151,18 @@ document.addEventListener('submit', function (e) {
     return;
   }
   if (kind === 'openShift') openShift();
+  if (kind === 'netQueueAdd') {
+    var mac = $('#nq-mac').value.trim(), clean = mac.replace(/[^0-9a-fA-F]/g, '');
+    if (clean.length !== 12) return toast('MAC ต้องมี 12 หลัก (0-9, A-F)', true);
+    var nm = $('#nq-name').value.trim();
+    if (!nm) { $('#nq-name').focus(); return toast('ใส่ชื่อเครื่อง', true); }
+    var type = netTypeFromInfo(netMacInfo(clean.match(/../g).join(':').toUpperCase(), nm)) || 'other';
+    api('saveNetDevice', S.token, { mac: mac, name: nm, type: type, pending: 'allow' }).then(function () {
+      toast(nm + ' — รอเครื่องหน้าร้านส่งเข้าเราเตอร์');
+      netRefreshSaved(); if (S.isCounter) setTimeout(netApplyPending, 300);
+    }).catch(fail);
+    return;
+  }
   if (kind === 'settings') saveSettingsForm(form);
   if (kind === 'addUser') {
     api('addUser', S.token, $('#nu-name').value, $('#nu-role').value, $('#nu-pin').value).then(function () {

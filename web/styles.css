@@ -953,3 +953,10 @@ a{color:var(--brand-text)}
 .sharebar.sub span{opacity:.55}
 .chips.subchips{margin-top:-4px}
 .chips.subchips .chip{font-size:12px;height:28px}
+
+/* Whitelist by MAC from any screen */
+.net-qlist{display:flex;flex-direction:column}
+.net-q{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,190px) auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft)}
+.net-q:last-child{border-bottom:0}
+.net-wait{color:var(--warn);font-weight:600}
+@media (max-width:560px){.net-q{grid-template-columns:minmax(0,1fr) auto}.net-q>div:nth-child(2){grid-column:1/-1;order:3}}

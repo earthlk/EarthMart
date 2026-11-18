@@ -55,7 +55,7 @@ var SCHEMA = {
   Payables:   ['payableId', 'payUid', 'createdAt', 'party', 'category', 'amount', 'paid', 'dueDate', 'source', 'ref',
                'note', 'status', 'userId'],
   Customers:  ['customerId', 'name', 'phone', 'note', 'createdAt', 'active'],
-  NetDevices: ['mac', 'name', 'type', 'ownerId', 'locked', 'allowed', 'note', 'updatedAt', 'updatedBy'],
+  NetDevices: ['mac', 'name', 'type', 'ownerId', 'locked', 'allowed', 'note', 'updatedAt', 'updatedBy', 'pending', 'pendingErr'],
   CustPays:   ['payId', 'payUid', 'createdAt', 'customerId', 'amount', 'method', 'walletId', 'shiftId', 'deviceId',
                'userId', 'note'],
   AuditLog:   ['logId', 'createdAt', 'userId', 'action', 'ref', 'detail', 'approvedBy', 'deviceId']
@@ -277,7 +277,7 @@ function rotateApiKey() {
 }
 
 /** Bump when SCHEMA gains sheets or columns; the next page load adds them (no need to re-run setup). */
-var SCHEMA_VERSION = '18';
+var SCHEMA_VERSION = '19';
 
 /** Create missing sheets and append missing header columns. Existing data is never moved. */
 function ensureSchema_(ss, force) {

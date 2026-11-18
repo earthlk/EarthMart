@@ -120,9 +120,25 @@ const server = http.createServer((req, res) => {
     r.st.sid = 'someone-else';
     code = await fresh(() => page.click('[data-act=netReload]'));
     await page.waitForSelector('h2:has-text("ล็อกอินเราเตอร์")');
+    // while the router needs a login: add to the whitelist by MAC anyway — it waits, then goes in
+    await page.fill('#nq-mac', 'b8-27-eb-12-34-56');
+    await page.fill('#nq-name', 'แท็บเล็ตจอลูกค้า');
+    await page.click('[data-form=netQueueAdd] button');
+    await page.waitForSelector('.net-q:has-text("แท็บเล็ตจอลูกค้า") .net-wait');
+    assert.strictEqual(call('netDevices', T).find(d => d.mac === 'B8:27:EB:12:34:56').pending, 'allow', 'request saved in the sheet');
+    assert.ok(!r.st.macs().includes('B8:27:EB:12:34:56'), 'not in the router yet (needs login)');
+    await shot('n5-queue');
+    // asked from another screen (phone): a second request
+    call('saveNetDevice', T, { mac: '00:1A:2B:3C:4D:5E', name: 'มือถือพี่', pending: 'allow' });
     await page.fill('#net-code', code);
     await page.click('[data-act=netLogin]');
     await page.waitForSelector('.net-table :text("มือถือแบงค์")');
+    await page.waitForFunction(() => true);
+    for (let i = 0; i < 40 && !(r.st.macs().includes('B8:27:EB:12:34:56') && r.st.macs().includes('00:1A:2B:3C:4D:5E')); i++) await new Promise(x => setTimeout(x, 250));
+    assert.ok(r.st.macs().includes('B8:27:EB:12:34:56') && r.st.macs().includes('00:1A:2B:3C:4D:5E'), 'counter PC sent both requests to the router');
+    await new Promise(x => setTimeout(x, 800));
+    const q2 = call('netDevices', T).filter(d => d.mac === 'B8:27:EB:12:34:56' || d.mac === '00:1A:2B:3C:4D:5E');
+    assert.deepStrictEqual(q2.map(d => [d.pending, d.allowed]), [['', true], ['', true]], 'requests marked done');
     // 6. self test from the connection settings
     await page.click('[data-act=netSetup]');
     await page.click('.modal [data-x=test]');

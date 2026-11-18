@@ -113,6 +113,15 @@ const server = http.createServer((req, res) => {
   const sw = await page.evaluate(() => document.documentElement.scrollWidth);
   assert.ok(sw <= 392, 'settings: no sideways page scroll (' + sw + ')');
   await shot('m10-settings');
+  // internet: whitelist by MAC from the phone (sent to the router later by the counter PC)
+  await page.click('.set-nav [data-t=net]');
+  await page.waitForSelector('#nq-mac');
+  await page.fill('#nq-mac', '3c:22:fb:01:02:03');
+  await page.fill('#nq-name', 'มือถือพนักงาน');
+  await page.click('[data-form=netQueueAdd] button');
+  await page.waitForSelector('.net-q:has-text("มือถือพนักงาน") .net-wait');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth) <= 392, 'whitelist card fits the phone');
+  await shot('m10b-net-phone');
   await page.click('.tabbar [data-v=home]');
   await page.click('[data-act=mBulk]');
   await page.waitForSelector('#bulk-rows');

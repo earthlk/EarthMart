@@ -900,6 +900,20 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   m('deleteNetDevice', T, 'D2:6F:3B:90:AE:14');
   eq(m('netDevices', T).length, 1, 'deleted device hidden');
   m('saveNetDevice', T, { mac: 'D2:6F:3B:90:AE:14', name: 'มือถือแบงค์', allowed: true });
+  // whitelist from another screen: queued for the counter PC, which reports back
+  m('saveNetDevice', T, { mac: 'aa-bb-cc-00-11-22', name: 'มือถือมิว', pending: 'allow' });
+  let q = m('netDevices', T).find(d => d.mac === 'AA:BB:CC:00:11:22');
+  eq([q.pending, q.allowed], ['allow', false], 'queued, not yet allowed');
+  ok(/เครื่องสำคัญ/.test(c('saveNetDevice', T, { mac: '3C:52:82:1A:4F:09', pending: 'block' }).error), 'important device cannot be queued for blocking');
+  ok(!c('netPending', T).ok, 'only a registered counter PC takes the queue');
+  m('registerDevice', T, 'Dnet0000000000000001', 'เครื่องหน้าร้าน');
+  eq(m('netPending', T).map(d => d.mac), ['AA:BB:CC:00:11:22'], 'counter sees the queue');
+  m('netPendingDone', T, 'AA:BB:CC:00:11:22', false, 'WiFi เต็ม');
+  eq(m('netDevices', T).find(d => d.mac === 'AA:BB:CC:00:11:22').pendingErr, 'WiFi เต็ม', 'failure kept with reason');
+  m('netPendingDone', T, 'AA:BB:CC:00:11:22', true);
+  q = m('netDevices', T).find(d => d.mac === 'AA:BB:CC:00:11:22');
+  eq([q.pending, q.allowed, q.pendingErr], ['', true, ''], 'done: allowed');
+  eq(m('netPending', T).length, 0, 'queue empty');
   eq(m('netDevices', T).find(d => d.mac === 'D2:6F:3B:90:AE:14').name, 'มือถือแบงค์', 'saved again after delete');
 }
 
