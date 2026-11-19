@@ -4400,24 +4400,47 @@ function cntDraft() {
 }
 function cntSave() { store('em_count', JSON.stringify(S.cnt)); }
 
+/** Opening stock (what the shop already had) can be set by the owner until 30 days after going live. */
+var OPENING_DAYS = 30;
+function openingUntil() {
+  var v = S.settings && S.settings.liveSince;
+  if (!v) return 'ก่อนเริ่มใช้งานจริง';
+  var t = new Date(String(v).trim().replace(' ', 'T') + (String(v).length <= 16 ? ':00+07:00' : '')).getTime();
+  if (!(t > 0)) return 'ก่อนเริ่มใช้งานจริง';
+  var end = t + OPENING_DAYS * 86400000;
+  return Date.now() <= end ? new Date(end).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+}
+function openingOk() { return !!(S.user && S.user.role === 'owner' && openingUntil()); }
+function cntOpening() { var d = cntDraft(); return !!d.opening && openingOk(); }
+function cntCost(r) { var d = cntDraft(), c = (d.costs || {})[r.sku]; return c !== undefined && c !== '' ? Number(c) : r.cost; }
+
 function cntSummary() {
-  var d = cntDraft(), n = 0, diff = 0, plus = 0, minus = 0;
+  var d = cntDraft(), n = 0, diff = 0, plus = 0, minus = 0, value = 0, noCost = 0, op = cntOpening();
   stockRows.forEach(function (r) {
     var c = d.counts[r.sku];
     if (c === undefined || c === '') return;
     n++;
+    var cost = op ? cntCost(r) : r.cost;
+    value += Number(c) * cost;
+    if (op && Number(c) > 0 && !(cost > 0)) noCost++;
     var x = Number(c) - r.onHand;
-    if (x) { diff++; if (x > 0) plus += x * r.cost; else minus += -x * r.cost; }
+    if (x) { diff++; if (x > 0) plus += x * cost; else minus += -x * cost; }
   });
-  return { n: n, diff: diff, plus: plus, minus: minus };
+  return { n: n, diff: diff, plus: plus, minus: minus, value: value, noCost: noCost };
 }
 
 function drawCountTab(box) {
-  var d = cntDraft();
-  box.innerHTML = stockCats() + '<div class="row stk-tools"><label for="cscan" style="white-space:nowrap">สแกนนับ</label>' +
+  var d = cntDraft(), op = cntOpening();
+  var mode = openingOk() ? '<div class="row cnt-mode" style="gap:6px;flex-wrap:wrap"><button class="chip' + (op ? '' : ' on') + '" data-act="cntMode" data-m="">ตรวจนับปกติ</button>' +
+    '<button class="chip' + (op ? ' on' : '') + '" data-act="cntMode" data-m="opening">ตั้งยอดเปิดร้าน (ของที่มีอยู่แล้ว)</button></div>' +
+    (op ? '<div class="hintbox">ใส่จำนวนของที่มีอยู่ในร้านตอนนี้ (สแกนทีละชิ้นก็ได้) และ<b>ทุนต่อชิ้น</b> · บันทึกเป็น "สต็อกเปิดร้าน" ไม่นับเป็นกำไรหรือขาดทุน · ไม่ต้องทำครั้งเดียวจบ ทยอยใส่ทีละหมวดแล้วกดบันทึกได้หลายรอบ' + (/ก่อน/.test(openingUntil())
+      ? '</div><div class="hintbox warn">ยังไม่ได้กด "เริ่มใช้งานจริง" — ตอนกด ระบบจะล้างสต็อกทดสอบรวมถึงยอดที่ใส่ตรงนี้ด้วย · แนะนำ: กดเริ่มใช้งานจริงก่อน (ตั้งค่า › สำรองข้อมูล) แล้วค่อยใส่ยอดเปิดร้าน</div>'
+      : ' · ทำได้ถึง ' + openingUntil() + ' (30 วันหลังเริ่มใช้งานจริง)</div>') : '') : '';
+  box.innerHTML = mode + stockCats() + '<div class="row stk-tools"><label for="cscan" style="white-space:nowrap">สแกนนับ</label>' +
     '<input id="cscan" class="grow" autocomplete="off" placeholder="สแกนบาร์โค้ด = +1 (สแกนแพ็ค = +12) หรือพิมพ์จำนวนในช่องนับได้">' + camBtn('cscan') +
     '<label class="sr" for="cnote">หมายเหตุ</label><input id="cnote" data-cnt-note value="' + esc(d.note) + '" placeholder="หมายเหตุ เช่น นับสิ้นเดือน" style="width:200px"></div>' +
-    '<div class="stk-grid cnt head"><div>สินค้า</div><div class="r">ในระบบ</div><div class="r">นับได้</div><div class="r">ส่วนต่าง</div><div class="r">มูลค่า (ประมาณ)</div></div>' +
+    (op ? '<div class="stk-grid cnt head"><div>สินค้า</div><div class="r">ในระบบ</div><div class="r">มีอยู่จริง</div><div class="r">ทุน/ชิ้น</div><div class="r">มูลค่า</div></div>'
+      : '<div class="stk-grid cnt head"><div>สินค้า</div><div class="r">ในระบบ</div><div class="r">นับได้</div><div class="r">ส่วนต่าง</div><div class="r">มูลค่า (ประมาณ)</div></div>') +
     '<div id="crows" class="stk-rows"></div><div class="cnt-foot" id="cfoot"></div>';
   drawCountRows();
 }
@@ -4431,6 +4454,13 @@ function drawCountRows() {
     var c = d.counts[r.sku];
     var has = c !== undefined && c !== '';
     var x = has ? round2(Number(c) - r.onHand) : 0;
+    if (cntOpening()) {
+      var cost = cntCost(r);
+      return '<div class="stk-grid cnt" data-sku="' + esc(r.sku) + '"><div>' + esc(r.name) + ' <span class="muted" style="font-size:13px">' + esc(r.unit) + '</span></div>' +
+        '<div class="r num">' + r.onHand + '</div><div class="r"><input data-cnt="' + esc(r.sku) + '" value="' + (has ? esc(c) : '') + '" type="number" min="0" inputmode="numeric" placeholder="—" aria-label="มีอยู่จริง ' + esc(r.name) + '" style="width:90px;height:36px;text-align:right"></div>' +
+        '<div class="r"><input data-ccost="' + esc(r.sku) + '" value="' + (cost > 0 ? cost : '') + '" type="number" min="0" step="0.01" inputmode="decimal" placeholder="ทุน" aria-label="ทุนต่อชิ้น ' + esc(r.name) + '" style="width:90px;height:36px;text-align:right' + (has && Number(c) > 0 && !(cost > 0) ? ';border-color:var(--warn)' : '') + '"></div>' +
+        '<div class="r num" data-cval>' + (has ? money(Number(c) * cost) : '') + '</div></div>';
+    }
     return '<div class="stk-grid cnt" data-sku="' + esc(r.sku) + '"><div>' + esc(r.name) + ' <span class="muted" style="font-size:13px">' + esc(r.unit) + '</span></div>' +
       '<div class="r num">' + r.onHand + '</div><div class="r"><input data-cnt="' + esc(r.sku) + '" value="' + (has ? esc(c) : '') + '" type="number" min="0" inputmode="numeric" placeholder="—" aria-label="นับได้ ' + esc(r.name) + '" style="width:90px;height:36px;text-align:right"></div>' +
       '<div class="r num" data-cdiff style="font-weight:600;color:' + (!has || !x ? 'var(--muted)' : x < 0 ? 'var(--warn)' : 'var(--brand-text)') + '">' + (has ? (x > 0 ? '+' : '') + x : '') + '</div>' +
@@ -4443,6 +4473,13 @@ function drawCountFoot() {
   var f = $('#cfoot');
   if (!f) return;
   var s = cntSummary();
+  if (cntOpening()) {
+    f.innerHTML = '<span>ใส่แล้ว <b>' + s.n + '</b> รายการ · มูลค่าสต็อก <b>฿' + money(s.value) + '</b></span>' +
+      (s.noCost ? '<span class="warn-text">ยังไม่มีทุน ' + s.noCost + ' รายการ</span>' : '') + '<span class="grow"></span>' +
+      (s.n ? '<button class="btn sm ghost" data-act="cntClear">ล้าง</button>' : '') +
+      '<button class="btn primary" data-act="cntCommit"' + (s.n ? '' : ' disabled') + '>บันทึกยอดเปิดร้าน</button>';
+    return;
+  }
   f.innerHTML = '<span>นับแล้ว <b>' + s.n + '</b> รายการ · ต่างจากระบบ <b>' + s.diff + '</b></span>' +
     '<span class="brand-text">เกิน +฿' + money(s.plus) + '</span><span class="warn-text">ขาด −฿' + money(s.minus) + '</span><span class="grow"></span>' +
     (s.n ? '<button class="btn sm ghost" data-act="cntClear">ล้าง</button>' : '') +
@@ -4458,6 +4495,7 @@ function cntSet(sku, v) {
   if (row && r) {
     var has = v !== '' && v !== null, x = has ? round2(Number(v) - r.onHand) : 0;
     var inp = $('[data-cnt]', row); if (inp && document.activeElement !== inp) inp.value = has ? v : '';
+    if (cntOpening()) { $('[data-cval]', row).textContent = has ? money(Number(v) * cntCost(r)) : ''; drawCountFoot(); return; }
     var dd = $('[data-cdiff]', row); dd.textContent = has ? (x > 0 ? '+' : '') + x : ''; dd.style.color = !has || !x ? 'var(--muted)' : x < 0 ? 'var(--warn)' : 'var(--brand-text)';
     $('[data-cval]', row).textContent = has && x ? (x > 0 ? '+' : '−') + money(Math.abs(x) * r.cost) : '';
   }
@@ -4482,6 +4520,24 @@ function cntScan(v) {
 
 function cntCommit() {
   var d = cntDraft(), s = cntSummary();
+  if (cntOpening()) {
+    var ol = Object.keys(d.counts).filter(function (k) { return d.counts[k] !== ''; }).map(function (k) {
+      var r = stockRows.filter(function (x) { return x.sku === k; })[0];
+      return { sku: k, counted: Number(d.counts[k]), cost: r ? cntCost(r) : 0 };
+    });
+    confirm2('บันทึกยอดเปิดร้าน', ol.length + ' รายการ · มูลค่าสต็อก ฿' + money(s.value) +
+      (s.noCost ? ' · ⚠ ยังไม่มีทุน ' + s.noCost + ' รายการ (มูลค่าจะเป็น 0 — ใส่ทุนก่อนดีกว่า)' : '') +
+      ' — สต็อกของรายการเหล่านี้จะเท่ากับที่ใส่ (รายการที่ไม่ได้ใส่จะไม่ถูกแตะ)', 'บันทึก').then(function (ok) {
+      if (!ok) return;
+      return api('stockCount', S.token, { countUid: d.uid, opening: true, note: d.note, lines: ol }).then(function (r) {
+        S.cnt = { uid: 'CNT' + Date.now().toString(36) + randomId(4), counts: {}, note: '', opening: true };   // ready for the next shelf
+        cntSave();
+        toast('บันทึกยอดเปิดร้านแล้ว ' + r.changed + ' รายการ · มูลค่า ฿' + money(r.netValue));
+        return reloadCatalog().then(loadStock);
+      });
+    }).catch(fail);
+    return;
+  }
   var lines = Object.keys(d.counts).filter(function (k) { return d.counts[k] !== ''; }).map(function (k) { return { sku: k, counted: Number(d.counts[k]) }; });
   confirm2('บันทึกผลตรวจนับ', 'นับ ' + s.n + ' รายการ · ต่างจากระบบ ' + s.diff + ' รายการ · เกิน ฿' + money(s.plus) + ' ขาด ฿' + money(s.minus) +
     ' — สต็อกจะถูกปรับตามที่นับได้ (สินค้าที่ไม่ได้นับจะไม่ถูกแตะ)', 'บันทึก').then(function (ok) {
@@ -5211,7 +5267,7 @@ function drawAccPL(d) {
     '<div class="acc-line muted" style="padding:10px 4px 0"><span>เจ้าของถอนใช้ส่วนตัว <small>(ไม่ใช่รายจ่ายร้าน)</small></span><span class="num purple">' + money(f.draws) + '</span></div></div>' +
     '<aside class="col" style="gap:16px"><div class="card pad"><div class="acc-h"><b>' + (d.byMonth ? 'รายเดือน' : 'รายวัน') + '</b><span class="muted"><i class="dot" style="background:#D9DDD8"></i> ยอดขาย <i class="dot" style="background:var(--brand)"></i> กำไรขั้นต้น</span></div>' + chart + '</div>' +
     '<div class="card pad"><div class="acc-h"><b>สต็อกช่วงนี้</b><span class="muted">ราคาทุน</span></div>' +
-    rowLine('สต็อกต้นงวด', money(st.start)) + rowLine('+ ซื้อสินค้าเข้า', money(st.purchases)) + rowLine('− ต้นทุนของที่ขาย', money(st.cogs), 'warn-text') +
+    rowLine('สต็อกต้นงวด', money(st.start)) + (st.opening ? rowLine('+ ยอดเปิดร้าน (ของที่มีอยู่แล้ว)', money(st.opening)) : '') + rowLine('+ ซื้อสินค้าเข้า', money(st.purchases)) + rowLine('− ต้นทุนของที่ขาย', money(st.cogs), 'warn-text') +
     rowLine('− ของเสีย / เบิกใช้', money(st.waste), 'warn-text') + rowLine('− ของขาดจากตรวจนับ', money(st.shrink), 'warn-text') +
     '<div class="acc-line tot"><span>สต็อกปลายงวด</span><span class="num">' + money(st.end) + '</span></div>' +
     '<div class="muted" style="font-size:12px;margin-top:6px">ของขาดจากตรวจนับเยอะผิดปกติ = ควรเช็กของหาย / รับของไม่ครบ</div></div>' +
@@ -6173,7 +6229,7 @@ function printShift(s) {
 
 /* Reports: filters on the left, tabs on the right. S.rep = { f: {...}, tab, data } */
 var REP_TABS = [['overview', 'ภาพรวม'], ['products', 'สินค้า'], ['categories', 'หมวด'], ['staff', 'พนักงาน'], ['shifts', 'กะ'], ['slow', 'ไม่เคลื่อนไหว'], ['stock', 'มูลค่าสต็อก']];
-var ACTION_TH = { KEY_LAYOUT: 'จัดตำแหน่งปุ่มหน้าขาย', PRODUCT_DELETE: 'ลบสินค้า', PRODUCT_ARCHIVE: 'ปิดใช้งานสินค้า', GO_LIVE: 'เริ่มใช้งานจริง (ล้างข้อมูลทดสอบ)', VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
+var ACTION_TH = { STOCK_OPENING: 'ตั้งยอดเปิดร้าน', KEY_LAYOUT: 'จัดตำแหน่งปุ่มหน้าขาย', PRODUCT_DELETE: 'ลบสินค้า', PRODUCT_ARCHIVE: 'ปิดใช้งานสินค้า', GO_LIVE: 'เริ่มใช้งานจริง (ล้างข้อมูลทดสอบ)', VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
   STOCK_ADJUST: 'ปรับสต็อก', PRICE_CHANGE: 'แก้ราคา', APPROVE_FAIL: 'PIN อนุมัติผิด', NO_SALE: 'เปิดลิ้นชัก', WRITEOFF: 'ตัดของเสีย',
   STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า',
   BELOW_COST: 'ขายต่ำกว่าทุน', LOW_MARGIN: 'กำไรต่ำ', OVERSELL: 'ขายเกินสต็อก', OFFLINE_CHECK: 'ตรวจรายการออฟไลน์' };
@@ -6834,8 +6890,9 @@ function goLiveModal() {
       closeModal();
       // Test sales still waiting on this PC must not come back after the wipe.
       ['em_outbox', 'em_offshift', 'em_shiftmap', 'em_offno', 'em_held', 'em_receive', 'em_count', 'em_cache'].forEach(function (k) { store(k, null); });
-      toast('เริ่มใช้งานจริงแล้ว · สำรองไว้: ' + r.backup);
-      return boot().then(function () { go('settings'); });
+      toast('เริ่มใช้งานจริงแล้ว · ต่อไป: ใส่ยอดของที่มีอยู่ในร้าน');
+      S.cnt = { uid: 'CNT' + Date.now().toString(36) + randomId(4), counts: {}, note: 'ยอดเปิดร้าน', opening: true }; cntSave();
+      return boot().then(function () { S.stockTab = 'count'; go('stock'); });
     }).catch(function (e) { ok.disabled = false; ok.textContent = 'ล้างข้อมูลทดสอบ · เริ่มใช้จริง'; fail(e); });
   };
 }
@@ -6907,6 +6964,11 @@ var ACTIONS = {
   stockCat: function (el) { S.stockFilter.cat = el.getAttribute('data-c'); S.stockFilter.sub = ''; drawStockTab(); },
   stockSub: function (el) { S.stockFilter.sub = el.getAttribute('data-c'); drawStockTab(); },
   cntCommit: cntCommit,
+  cntMode: function (el) {
+    var d = cntDraft();
+    if (Object.keys(d.counts).length && !!d.opening !== !!el.getAttribute('data-m')) return toast('บันทึกหรือล้างตัวเลขที่ใส่ไว้ก่อนเปลี่ยนโหมด', true);
+    d.opening = !!el.getAttribute('data-m'); cntSave(); drawStockTab();
+  },
   cntClear: function () { confirm2('ล้างการนับ', 'ลบตัวเลขที่นับไว้ทั้งหมด?', 'ล้าง', true).then(function (ok) { if (ok) { S.cnt = null; store('em_count', null); drawStockTab(); } }); },
   woPick: function (el) { S.wo = { sku: el.getAttribute('data-sku'), qty: '', reason: (S.wo || {}).reason || 'เสียหาย', lotId: '' }; drawWriteOff(); var n = $('#wo-n'); if (n) n.focus(); },
   woClear: function () { S.wo = Object.assign(S.wo, { sku: '', lotId: '' }); drawWriteOff(); var q = $('#wo-q'); if (q) q.focus(); },
@@ -7218,6 +7280,13 @@ document.addEventListener('input', function (e) {
   if (k === 'stockQ') { S.stockFilter.q = t.value; renderStockRows(); }
   if (t.hasAttribute('data-cnt')) cntSet(t.getAttribute('data-cnt'), t.value);
   if (t.hasAttribute('data-cnt-note')) { cntDraft().note = t.value; cntSave(); }
+  if (t.hasAttribute('data-ccost')) {
+    var cd = cntDraft(), csku = t.getAttribute('data-ccost');
+    cd.costs = cd.costs || {}; cd.costs[csku] = t.value; cntSave();
+    var crow = t.closest('[data-sku]'), cr = stockRows.filter(function (x) { return x.sku === csku; })[0], cc = cd.counts[csku];
+    if (crow && cr) $('[data-cval]', crow).textContent = cc !== undefined && cc !== '' ? money(Number(cc) * cntCost(cr)) : '';
+    drawCountFoot();
+  }
   if (t.id === 'wo-q') woSuggest(t.value);
   if (t.hasAttribute('data-xq') && S.expSel) { S.expSel.found = t.value; }
   if (t.hasAttribute('data-wo-qty') && S.wo) { S.wo.qty = t.value; var p0 = S.idx.bySku[S.wo.sku]; var e0 = $('#wo-est'); if (e0) e0.textContent = '฿' + money(p0 ? (Number(t.value) || 0) * p0.cost : 0); }

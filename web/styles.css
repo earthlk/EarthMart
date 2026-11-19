@@ -960,3 +960,4 @@ a{color:var(--brand-text)}
 .net-q:last-child{border-bottom:0}
 .net-wait{color:var(--warn);font-weight:600}
 @media (max-width:560px){.net-q{grid-template-columns:minmax(0,1fr) auto}.net-q>div:nth-child(2){grid-column:1/-1;order:3}}
+.hintbox.warn{color:var(--warn);background:var(--warn-soft,rgba(214,120,40,.1));font-weight:500}

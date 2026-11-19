@@ -960,6 +960,20 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   // after going live the shop works normally
   m('receive', T, { receiptUid: 'R2', lines: [{ sku, qty: 24, unitCost: 6 }] });
   eq(m('listProducts', T)[0].onHand, 24, 'first real receipt starts the stock');
+  // opening stock: what was already on the shelves, entered once — a stock-in, not a "found extra" profit
+  m('saveProduct', T, { name: 'ขนมปัง', price: 15, type: 'nobarcode', unit: 'ชิ้น' });
+  const bread = m('listProducts', T).find(p => p.name === 'ขนมปัง').sku;
+  ok(!c('stockCount', TC, { countUid: 'OP1', opening: true, lines: [{ sku: bread, counted: 30, cost: 8 }] }).ok, 'cashier cannot set opening stock');
+  const op = m('stockCount', T, { countUid: 'OP1', opening: true, note: 'ของเดิมในร้าน', lines: [{ sku: bread, counted: 30, cost: 8 }, { sku, counted: 40 }] });
+  ok(op.opening && op.changed === 2, 'opening stock saved without approval');
+  const after = Object.fromEntries(m('listProducts', T).map(p => [p.name, p]));
+  eq([after['ขนมปัง'].onHand, after['ขนมปัง'].cost, after['น้ำ'].onHand], [30, 8, 40], 'stock and cost set');
+  const acc = m('accSummary', T, { from: '2026-01-01', to: '2026-12-31' });
+  eq([acc.stock.shrink, acc.stock.opening], [0, 240 + 16 * 6], 'counted as opening stock, not as a stock gain');
+  ok(m('auditLog', T, 10).some(a => a.action === 'STOCK_OPENING'), 'logged');
+  h.__advance(31 * 86400000);
+  const T2 = m('login', m('status').users[0].userId, '1111', DEVA).token;
+  ok(/30 วัน/.test(c('stockCount', T2, { countUid: 'OP2', opening: true, lines: [{ sku: bread, counted: 50 }] }).error), 'only in the first 30 days after going live');
 }
 
 {

@@ -618,7 +618,7 @@ function api_accSetup(token, w) {
 function accFigures_(from, to, ctx) {
   var inR = function (d) { var k = ymd_(d); return k >= from && k <= to; };
   var F = { sales: 0, cash: 0, qr: 0, transfer: 0, credit: 0, bills: 0, refunds: 0, cogs: 0, waste: 0, storeUse: 0,
-            shrinkLoss: 0, shrinkGain: 0, purchases: 0, lotsIn: 0, lotsOut: 0, cashDiff: 0, expenses: 0, byCat: {}, draws: 0, invests: 0, discount: 0 };
+            shrinkLoss: 0, shrinkGain: 0, purchases: 0, opening: 0, lotsIn: 0, lotsOut: 0, cashDiff: 0, expenses: 0, byCat: {}, draws: 0, invests: 0, discount: 0 };
   var billNos = ctx.billNos;
   ctx.sales.forEach(function (b) {
     if (b.status === 'VOID' || !inR(b.createdAt)) return;
@@ -643,6 +643,7 @@ function accFigures_(from, to, ctx) {
     var v = num_(l.qtyIn) * num_(l.unitCost);
     F.lotsIn += v;
     if (ctx.kind[l.receiptNo] === 'count') F.shrinkGain += v;
+    else if (l.receiptNo === 'OPENING' || l.receiptNo === 'IMPORT') F.opening += v;   // stock the shop already had
     else if (ctx.returnNos[l.receiptNo]) F.cogs -= v;     // restocked returns give the cost back
   });
   ctx.receipts.forEach(function (r) { if (inR(r.createdAt)) F.purchases += num_(r.total); });
@@ -730,7 +731,7 @@ function api_accSummary(token, f) {
     var pTo = dayBefore_(from), pFrom = fmtDate_(new Date(new Date(pTo + 'T12:00:00').getTime() - (len - 1) * 86400000), 'yyyy-MM-dd');
     var P = accFigures_(pFrom, pTo, ctx);
     var stockNow = stockNow_();
-    var stock = { start: stockAt_(ctx, dayBefore_(from), stockNow), end: stockAt_(ctx, to, stockNow), purchases: F.purchases,
+    var stock = { start: stockAt_(ctx, dayBefore_(from), stockNow), end: stockAt_(ctx, to, stockNow), purchases: F.purchases, opening: F.opening,
                   cogs: F.cogs, waste: round2_(F.waste + F.storeUse), shrink: F.shrink, now: stockNow };
     // buckets for the chart: by day for up to 31 days, else by month
     var byMonth = len > 31, buckets = [];

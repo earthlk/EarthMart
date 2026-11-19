@@ -177,6 +177,11 @@ function api_stockCount(token, cnt) {
   return respond_(function () {
     var s = session_(token);
     if (!cnt || !cnt.countUid) throw new Error('ข้อมูลไม่ครบ');
+    var opening = !!cnt.opening;
+    if (opening) {
+      owner_(token);
+      if (!openingAllowed_()) throw new Error('ตั้งยอดเปิดร้านได้ภายใน ' + OPENING_DAYS + ' วันแรกหลังเริ่มใช้งานจริงเท่านั้น — หลังจากนั้นใช้ "ตรวจนับ" ตามปกติ');
+    }
     var lines = (cnt.lines || []).filter(function (l) { return l && l.sku && l.counted !== '' && l.counted !== null && l.counted !== undefined; });
     if (!lines.length) throw new Error('ยังไม่ได้นับสินค้า');
     return withLock_(function () {
@@ -194,16 +199,20 @@ function api_stockCount(token, cnt) {
         if (counted < 0) throw new Error('จำนวนของ ' + p.name + ' ติดลบไม่ได้');
         return { p: p, sku: String(l.sku), counted: counted, diff: round2_(counted - num_(p.onHand)) };
       }).filter(function (d) { return d.diff !== 0; });
-      var approver = diffs.length ? consumeApproval_(s, cnt.approvalId, 'STOCK_ADJUST') : '';
+      var costOf = {};
+      lines.forEach(function (l) { if (num_(l.cost) > 0) costOf[String(l.sku)] = num_(l.cost); });
+      var approver = diffs.length && !opening ? consumeApproval_(s, cnt.approvalId, 'STOCK_ADJUST') : '';
+      var label = opening ? 'ยอดเปิดร้าน' : 'ตรวจนับ';
       diffs.forEach(function (d) {
         if (d.diff < 0) minus += fifoTake_(ctx, d.sku, -d.diff, cnt.countUid, d.p);
         else {
           var add = round2_(d.counted - fifoLeft_(ctx, d.sku));
-          var c = fifoLastCost_(ctx, d.sku, d.p);
-          if (add > 0) fifoAddLot_(ctx, { sku: d.sku, receiptNo: cnt.countUid, qtyIn: add, unitCost: c, note: 'ตรวจนับ' });
+          var c = opening && costOf[d.sku] ? costOf[d.sku] : fifoLastCost_(ctx, d.sku, d.p);
+          // opening stock is what the shop already owned: a stock-in, not a "found extra" gain
+          if (add > 0) fifoAddLot_(ctx, { sku: d.sku, receiptNo: opening ? 'OPENING' : cnt.countUid, qtyIn: add, unitCost: c, note: label });
           plus += d.diff * c;
         }
-        moves.push({ sku: d.sku, qtyPieces: d.diff, type: 'ADJUST', refNo: cnt.countUid, note: 'ตรวจนับ' + (cnt.note ? ': ' + cnt.note : '') });
+        moves.push({ sku: d.sku, qtyPieces: d.diff, type: opening ? 'OPEN' : 'ADJUST', refNo: cnt.countUid, note: label + (cnt.note ? ': ' + cnt.note : '') });
         changed++;
       });
       if (moves.length) {
@@ -211,6 +220,10 @@ function api_stockCount(token, cnt) {
         addStockMoves_(s, moves);
       }
       var net = round2_(plus - minus);
+      if (opening) {
+        log_(s, 'STOCK_OPENING', cnt.countUid, 'ตั้งยอด ' + changed + ' รายการ · มูลค่า ' + net + ' บาท' + (cnt.note ? ' · ' + cnt.note : ''), '');
+        return { refNo: cnt.countUid, counted: lines.length, changed: changed, plusValue: round2_(plus), minusValue: round2_(minus), netValue: net, opening: true };
+      }
       log_(s, 'STOCK_COUNT', cnt.countUid, 'นับ ' + lines.length + ' รายการ · ต่าง ' + changed + ' · มูลค่าส่วนต่าง ' + net + ' บาท' + (cnt.note ? ' · ' + cnt.note : ''), approver);
       return { refNo: cnt.countUid, counted: lines.length, changed: changed, plusValue: round2_(plus), minusValue: round2_(minus), netValue: net };
     });
@@ -290,4 +303,15 @@ function expiringLots_(days, products) {
     return { lotId: l.lotId, sku: String(l.sku), name: p.name || l.sku, unit: p.unit || '', receiptNo: l.receiptNo,
              qtyLeft: num_(l.qtyLeft), unitCost: num_(l.unitCost), expiryDate: exp, daysLeft: daysLeft };
   }).filter(function (l) { return l.expiryDate <= limit; }).sort(function (a, b) { return a.expiryDate < b.expiryDate ? -1 : 1; });
+}
+
+
+/** Opening stock (what the shop already had) can be entered before going live and for the first days after. */
+var OPENING_DAYS = 30;
+function openingAllowed_() {
+  var v = getSetting_('liveSince');
+  if (!v) return true;
+  // the sheet may hand back a Date (it turns "2026-11-16 09:00" into one) or the text
+  var t = v instanceof Date ? v.getTime() : new Date(String(v).trim().replace(' ', 'T') + ':00+07:00').getTime();
+  return !(t > 0) || now_().getTime() - t <= OPENING_DAYS * 86400000;
 }

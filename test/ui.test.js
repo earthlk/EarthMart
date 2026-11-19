@@ -283,6 +283,21 @@ call('importProducts', T, [
   let bs = call('bootstrap', T);
   assert.strictEqual(bs.products.find(p => p.sku === 'D0102').onHand, 5, 'counted coffee');
   assert.strictEqual(bs.products.find(p => p.sku === 'W0001').onHand, 12, 'counted water');
+  // opening stock (owner, first 30 days): quantity + cost per piece, no approval, not a stock gain
+  await page.click('[data-act=cntMode][data-m=opening]');
+  await page.waitForSelector('#crows [data-ccost]');
+  await page.fill('#crows [data-sku="D0101"] [data-cnt]', '40');
+  await page.fill('#crows [data-sku="D0101"] [data-ccost]', '1.65');
+  assert.match(await page.textContent('#cfoot'), /มูลค่าสต็อก ฿66\.00/);
+  await shot('09m-opening');
+  await page.click('[data-act=cntCommit]');
+  await page.click('[data-x=yes]');
+  await page.waitForSelector('.toast:has-text("บันทึกยอดเปิดร้านแล้ว")');
+  bs = call('bootstrap', T);
+  const ice = bs.products.find(p => p.sku === 'D0101');
+  assert.deepStrictEqual([ice.onHand, ice.cost], [40, 1.65], 'opening stock and cost set');
+  assert.ok(await page.$('.chip.on[data-m=opening]'), 'stays in opening mode for the next shelf');
+  await page.click('[data-act=cntMode][data-m=""]');
   // write-off by search
   await page.fill('#wo-q', 'กาแฟ');
   await page.waitForSelector('#wo-sug button');
