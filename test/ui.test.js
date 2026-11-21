@@ -270,26 +270,29 @@ call('importProducts', T, [
   await page.click('nav button[data-v=stock]');
   await page.waitForFunction(() => document.querySelectorAll('#srows .stk-grid').length >= 3);
   await page.waitForSelector('#skpi .kpi');
-  // opening stock (owner, until closed or the first regular count): quantity + cost, no approval, not a stock gain
-  await page.click('[data-act=stockTab][data-t=count]');
-  await page.click('[data-act=cntMode][data-m=opening]');
-  await page.waitForSelector('#crows .is-moved');
-  assert.match(await page.textContent('#crows [data-sku="D0102"]'), /มีรับเข้า\/ขายแล้ว/, 'sold items cannot get opening stock');
+  // opening stock: its own one-time page (banner on the stock page), added on top of what was received
   const shelf = call('saveProduct', T, { name: 'ข้าวเกรียบ', price: 20, type: 'nobarcode', unit: 'ห่อ' }).sku;
   await page.click('nav button[data-v=sale]'); await page.click('nav button[data-v=stock]');
-  await page.click('[data-act=stockTab][data-t=count]');
-  await page.waitForSelector('#crows [data-sku="' + shelf + '"] [data-ccost]');
-  await page.fill('#crows [data-sku="' + shelf + '"] [data-cnt]', '12');
-  await page.fill('#crows [data-sku="' + shelf + '"] [data-ccost]', '14');
-  assert.match(await page.textContent('#cfoot'), /มูลค่าสต็อก ฿168\.00/);
+  await page.click('.op-banner [data-v=opening]');
+  await page.waitForSelector('#orows [data-sku="' + shelf + '"] [data-ocost]');
+  assert.match(await page.textContent('.stk-grid.op.head'), /รับเข้าแล้ว/, 'shows what came in through receiving, so it is not counted twice');
+  await page.fill('#orows [data-sku="' + shelf + '"] [data-oqty]', '12');
+  await page.fill('#orows [data-sku="' + shelf + '"] [data-ocost]', '14');
+  await page.fill('#oscan', '8851234567890'); await page.keyboard.press('Enter');   // scan = +1 water
+  assert.match(await page.textContent('#ofoot'), /ใส่แล้ว 2 รายการ · มูลค่า ฿172\.20/);
   await shot('09m-opening');
-  await page.click('[data-act=cntCommit]');
+  const w0 = call('bootstrap', T).products.find(p => p.sku === 'W0001').onHand;
+  await page.click('[data-act=opConfirm]');
   await page.click('[data-x=yes]');
-  await page.waitForSelector('.toast:has-text("บันทึกยอดเปิดร้านแล้ว")');
-  const crisp = call('bootstrap', T).products.find(p => p.sku === shelf);
+  await page.waitForSelector('.toast:has-text("บันทึกสต็อกเปิดร้านแล้ว")');
+  await page.waitForSelector('#srows .stk-grid');
+  const bsO = call('bootstrap', T);
+  const crisp = bsO.products.find(p => p.sku === shelf);
   assert.deepStrictEqual([crisp.onHand, crisp.cost], [12, 14], 'opening stock and cost set');
-  assert.ok(await page.$('.chip.on[data-m=opening]'), 'stays in opening mode for the next shelf');
-  await page.click('[data-act=cntMode][data-m=""]');
+  assert.strictEqual(bsO.products.find(p => p.sku === 'W0001').onHand, w0 + 1, 'added on top of the received water');
+  assert.ok(!(await page.$('.op-banner')), 'one time only: the banner is gone');
+  await page.click('[data-act=stockTab][data-t=count]');
+  assert.ok(!(await page.$('[data-act=cntMode]')), 'the regular count page has no opening mode');
   // count tab: type one count, scan another (pack barcode = +12)
   await page.waitForSelector('#crows [data-cnt]');
   await page.fill('#crows [data-sku="D0102"] [data-cnt]', '5');
@@ -303,7 +306,6 @@ call('importProducts', T, [
   let bs = call('bootstrap', T);
   assert.strictEqual(bs.products.find(p => p.sku === 'D0102').onHand, 5, 'counted coffee');
   assert.strictEqual(bs.products.find(p => p.sku === 'W0001').onHand, 12, 'counted water');
-  assert.ok(!(await page.$('[data-act=cntMode]')), 'the first regular count closes opening stock');
   // write-off by search
   await page.fill('#wo-q', 'กาแฟ');
   await page.waitForSelector('#wo-sug button');
@@ -496,7 +498,7 @@ call('importProducts', T, [
   assert.ok(g.__sheet('Ledger').some(t => t.kind === 'PURCHASE' && Number(t.amount) === -153), 'paid from the bank account');
   const wl = call('lots', T, 'W0001');
   assert.deepStrictEqual(wl.slice(-1).map(l => [l.qtyIn, l.qtyLeft, l.unitCost, l.expiryDate]), [[24, 24, 4.5, '2027-03-31']], 'new FIFO lot');
-  assert.ok(wl.length === 2 && wl[0].unitCost === 4.2, 'opening lot still first');
+  assert.ok(wl.length === 3 && wl[0].unitCost === 4.2, 'opening lots still first (import + opening page)');
   await page.waitForSelector('#rrecent :text("RC")');
   // lots modal from the product editor
   await page.click('nav button[data-v=products]');

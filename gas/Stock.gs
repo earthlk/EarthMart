@@ -31,10 +31,9 @@ function addStockMoves_(sess, moves) {
 function api_stockList(token) {
   return respond_(function () {
     session_(token);
-    var moved = movedSkus_();
     return readAll_('Products').filter(function (p) { return bool_(p.active) && p.type !== 'recipe'; }).map(function (p) {
       return { sku: String(p.sku), name: p.name, category: p.category, subcategory: subcatOf_(p), unit: p.unit || 'ชิ้น',
-               onHand: num_(p.onHand), minStock: num_(p.minStock), manual: p.minManual !== '' && p.minManual !== null && p.minManual !== undefined, cost: num_(p.cost), forSale: forSale_(p), moved: !!moved[String(p.sku)] };
+               onHand: num_(p.onHand), minStock: num_(p.minStock), manual: p.minManual !== '' && p.minManual !== null && p.minManual !== undefined, cost: num_(p.cost), forSale: forSale_(p) };
     });
   });
 }
@@ -178,16 +177,6 @@ function api_stockCount(token, cnt) {
   return respond_(function () {
     var s = session_(token);
     if (!cnt || !cnt.countUid) throw new Error('ข้อมูลไม่ครบ');
-    var opening = !!cnt.opening;
-    if (opening) {
-      owner_(token);
-      if (!openingAllowed_()) throw new Error('ปิดการตั้งยอดเปิดร้านไปแล้ว — ต่อจากนี้ใช้ "ตรวจนับ" ตามปกติ');
-      // a product that has already been received or sold is no longer "what the shop had"
-      var moved = movedSkus_(), names = {};
-      readAll_('Products').forEach(function (p) { names[String(p.sku)] = p.name; });
-      var late = (cnt.lines || []).filter(function (l) { return moved[String(l.sku)]; }).map(function (l) { return names[String(l.sku)] || l.sku; });
-      if (late.length) throw new Error('มีรับเข้าหรือขายไปแล้ว ใช้ยอดเปิดร้านไม่ได้: ' + late.slice(0, 5).join(', ') + (late.length > 5 ? ' …' : '') + ' — ใช้ "ตรวจนับปกติ" แทน');
-    }
     var lines = (cnt.lines || []).filter(function (l) { return l && l.sku && l.counted !== '' && l.counted !== null && l.counted !== undefined; });
     if (!lines.length) throw new Error('ยังไม่ได้นับสินค้า');
     return withLock_(function () {
@@ -205,20 +194,16 @@ function api_stockCount(token, cnt) {
         if (counted < 0) throw new Error('จำนวนของ ' + p.name + ' ติดลบไม่ได้');
         return { p: p, sku: String(l.sku), counted: counted, diff: round2_(counted - num_(p.onHand)) };
       }).filter(function (d) { return d.diff !== 0; });
-      var costOf = {};
-      lines.forEach(function (l) { if (num_(l.cost) > 0) costOf[String(l.sku)] = num_(l.cost); });
-      var approver = diffs.length && !opening ? consumeApproval_(s, cnt.approvalId, 'STOCK_ADJUST') : '';
-      var label = opening ? 'ยอดเปิดร้าน' : 'ตรวจนับ';
+      var approver = diffs.length ? consumeApproval_(s, cnt.approvalId, 'STOCK_ADJUST') : '';
       diffs.forEach(function (d) {
         if (d.diff < 0) minus += fifoTake_(ctx, d.sku, -d.diff, cnt.countUid, d.p);
         else {
           var add = round2_(d.counted - fifoLeft_(ctx, d.sku));
-          var c = opening && costOf[d.sku] ? costOf[d.sku] : fifoLastCost_(ctx, d.sku, d.p);
-          // opening stock is what the shop already owned: a stock-in, not a "found extra" gain
-          if (add > 0) fifoAddLot_(ctx, { sku: d.sku, receiptNo: opening ? 'OPENING' : cnt.countUid, qtyIn: add, unitCost: c, note: label });
+          var c = fifoLastCost_(ctx, d.sku, d.p);
+          if (add > 0) fifoAddLot_(ctx, { sku: d.sku, receiptNo: cnt.countUid, qtyIn: add, unitCost: c, note: 'ตรวจนับ' });
           plus += d.diff * c;
         }
-        moves.push({ sku: d.sku, qtyPieces: d.diff, type: opening ? 'OPEN' : 'ADJUST', refNo: cnt.countUid, note: label + (cnt.note ? ': ' + cnt.note : '') });
+        moves.push({ sku: d.sku, qtyPieces: d.diff, type: 'ADJUST', refNo: cnt.countUid, note: 'ตรวจนับ' + (cnt.note ? ': ' + cnt.note : '') });
         changed++;
       });
       if (moves.length) {
@@ -226,15 +211,6 @@ function api_stockCount(token, cnt) {
         addStockMoves_(s, moves);
       }
       var net = round2_(plus - minus);
-      if (!opening && changed && openingAllowed_()) {
-        // the first regular stock check closes the opening stock
-        saveSettingRaw_('openingDone', '1');
-        log_(s, 'STOCK_OPENING_CLOSE', cnt.countUid, 'ปิดการตั้งยอดเปิดร้าน (ตรวจนับปกติครั้งแรก)', '');
-      }
-      if (opening) {
-        log_(s, 'STOCK_OPENING', cnt.countUid, 'ตั้งยอด ' + changed + ' รายการ · มูลค่า ' + net + ' บาท' + (cnt.note ? ' · ' + cnt.note : ''), '');
-        return { refNo: cnt.countUid, counted: lines.length, changed: changed, plusValue: round2_(plus), minusValue: round2_(minus), netValue: net, opening: true };
-      }
       log_(s, 'STOCK_COUNT', cnt.countUid, 'นับ ' + lines.length + ' รายการ · ต่าง ' + changed + ' · มูลค่าส่วนต่าง ' + net + ' บาท' + (cnt.note ? ' · ' + cnt.note : ''), approver);
       return { refNo: cnt.countUid, counted: lines.length, changed: changed, plusValue: round2_(plus), minusValue: round2_(minus), netValue: net };
     });
@@ -317,22 +293,64 @@ function expiringLots_(days, products) {
 }
 
 
-/** Opening stock (what the shop already had): open from go-live until the owner closes it or the first regular count. */
+/**
+ * Opening stock: a one-time snapshot of what was on the shelves before the shop started using the system.
+ * Entered on its own page and confirmed once. Each quantity is ADDED as an "opening" lot, so whatever was
+ * received or sold in the meantime stays as it is (a new product that arrives later goes in through receiving,
+ * never through here). After the confirm (or "skip"), it is closed for good.
+ */
 function openingAllowed_() { return String(getSetting_('openingDone') || '') !== '1'; }
 
-/** SKUs with any stock movement other than the opening stock (received, sold, counted, written off…). */
-function movedSkus_() {
-  var o = {};
-  readAll_('StockMoves').forEach(function (m) { if (m.type !== 'OPEN') o[String(m.sku)] = 1; });
-  return o;
+function api_openingStock(token, op) {
+  return respond_(function () {
+    var s = owner_(token);
+    if (!op || !op.uid) throw new Error('ข้อมูลไม่ครบ');
+    var lines = (op.lines || []).filter(function (l) { return l && l.sku && num_(l.qty) > 0; });
+    return withLock_(function () {
+      var dup = readAll_('StockMoves').filter(function (m) { return m.refNo === op.uid; })[0];
+      if (dup) return { refNo: op.uid, duplicate: true };
+      if (!openingAllowed_()) throw new Error('ยืนยันสต็อกเปิดร้านไปแล้ว — ทำได้ครั้งเดียว ต่อจากนี้ใช้ "ตรวจนับ"');
+      var products = {};
+      readAll_('Products').forEach(function (p) { products[String(p.sku)] = p; });
+      var ctx = fifoOpen_(), moves = [], value = 0;
+      lines.forEach(function (l) {
+        var p = products[String(l.sku)];
+        if (!p) throw new Error('ไม่พบสินค้า ' + l.sku);
+        if (p.type === 'recipe') throw new Error(p.name + ' เป็นสูตรผสม — ใส่ที่ส่วนประกอบแทน');
+        var qty = round2_(num_(l.qty)), cost = num_(l.cost) > 0 ? num_(l.cost) : fifoLastCost_(ctx, String(l.sku), p);
+        fifoAddLot_(ctx, { sku: String(l.sku), receiptNo: 'OPENING', qtyIn: qty, unitCost: cost, note: 'สต็อกเปิดร้าน' });
+        moves.push({ sku: String(l.sku), qtyPieces: qty, type: 'OPEN', refNo: op.uid, note: 'สต็อกเปิดร้าน' + (op.note ? ': ' + op.note : '') });
+        value += qty * cost;
+      });
+      if (moves.length) { fifoFlush_(ctx); addStockMoves_(s, moves); }
+      saveSettingRaw_('openingDone', '1');
+      value = round2_(value);
+      log_(s, 'STOCK_OPENING', op.uid, 'สต็อกเปิดร้าน ' + moves.length + ' รายการ · มูลค่า ' + value + ' บาท', '');
+      return { refNo: op.uid, items: moves.length, value: value };
+    });
+  });
 }
 
-/** Owner: done entering what the shop had — from now on only regular counts. */
+/** For the opening-stock page: what came in / went out since going live, so it is not counted twice. */
+function api_openingInfo(token) {
+  return respond_(function () {
+    owner_(token);
+    var received = {}, sold = {};
+    readAll_('StockMoves').forEach(function (m) {
+      var k = String(m.sku), q = num_(m.qtyPieces);
+      if (m.type === 'RECEIVE') received[k] = round2_((received[k] || 0) + q);
+      if (m.type === 'SALE' || m.type === 'VOID') sold[k] = round2_((sold[k] || 0) - q);
+    });
+    return { open: openingAllowed_(), received: received, sold: sold };
+  });
+}
+
+/** Owner: the shop had nothing to bring in — close the opening stock without entering anything. */
 function api_closeOpening(token) {
   return respond_(function () {
     var s = owner_(token);
     saveSettingRaw_('openingDone', '1');
-    log_(s, 'STOCK_OPENING_CLOSE', '', 'ปิดการตั้งยอดเปิดร้าน', '');
+    log_(s, 'STOCK_OPENING_CLOSE', '', 'ข้ามสต็อกเปิดร้าน', '');
     return { openingDone: true };
   });
 }

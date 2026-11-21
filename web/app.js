@@ -374,7 +374,7 @@ function reauth() {
 }
 
 /** Views that need the server (fresh data or changes that must be checked right away). */
-var ONLINE_VIEWS = ['bills', 'products', 'stock', 'expiry', 'receive', 'reports', 'acct', 'settings'];
+var ONLINE_VIEWS = ['bills', 'products', 'stock', 'opening', 'expiry', 'receive', 'reports', 'acct', 'settings'];
 function markOfflineNav() {
   $all('.topbar nav [data-v]').forEach(function (b) { b.classList.toggle('needs-net', !!S.offline && ONLINE_VIEWS.indexOf(b.getAttribute('data-v')) >= 0); });
 }
@@ -1155,6 +1155,7 @@ function render() {
     case 'bills': html = frame(renderBills()); break;
     case 'products': html = frame(renderProducts()); break;
     case 'stock': html = frame(renderStock()); break;
+    case 'opening': html = frame(renderOpening()); break;
     case 'receive': html = frame(renderReceive()); break;
     case 'expiry': html = frame(renderExpiry()); break;
     case 'shift': html = frame(renderShift()); break;
@@ -1190,7 +1191,7 @@ window.addEventListener('resize', function () {
 var M_TABS = [['home', 'หน้าหลัก', 'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z'], ['bills', 'บิล', 'M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6M9 15h4'],
   ['stock', 'สต็อก', 'M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10'], ['products', 'สินค้า', 'M4 4h7l9 9-7 7-9-9zM8 8h.01'],
   ['reports', 'รายงาน', 'M4 20V10M10 20V4M16 20v-7M22 20H2', 'owner']];
-var M_TITLE = { home: '', bills: 'บิล', stock: 'สต็อก', receive: 'สต็อก', expiry: 'สต็อก', products: 'สินค้า', reports: 'รายงาน', settings: 'ตั้งค่า' };
+var M_TITLE = { home: '', bills: 'บิล', stock: 'สต็อก', opening: 'สต็อกเปิดร้าน', receive: 'สต็อก', expiry: 'สต็อก', products: 'สินค้า', reports: 'รายงาน', settings: 'ตั้งค่า' };
 
 function mobileFrame(inner) {
   var at = S.view === 'receive' || S.view === 'expiry' ? 'stock' : S.view;
@@ -1258,6 +1259,7 @@ function camBtn(target) {
 /** Feed a barcode read by the camera to the field it was opened for. */
 function camDeliver(target, code) {
   if (target === 'cscan') return cntScan(code);
+  if (target === 'oscan') return opScan(code);
   if (target === 'rscan') { if (!rcScan(code)) toast('ไม่พบสินค้า "' + code + '"', true); return; }
   var el = $('#' + target);
   if (!el) return;
@@ -1267,7 +1269,7 @@ function camDeliver(target, code) {
 
 function camScan(target) {
   if (!('BarcodeDetector' in window)) return toast('มือถือ/เบราว์เซอร์นี้ยังสแกนด้วยกล้องไม่ได้ (เช่น iPhone) — พิมพ์ค้นหาแทน หรือใช้ Chrome บน Android', true);
-  var keep = target === 'cscan' || target === 'rscan';   // counting / receiving: keep scanning
+  var keep = target === 'cscan' || target === 'rscan' || target === 'oscan';   // counting / receiving: keep scanning
   var stream = null, timer = null, last = {}, stopped = false;
   var m = openModal('<header><h1>สแกนด้วยกล้อง</h1><span class="muted">' + (keep ? 'สแกนต่อได้เรื่อย ๆ · กดเสร็จเมื่อพอ' : 'เล็งบาร์โค้ดในกรอบ') + '</span></header>' +
     '<div class="body cam-body"><div class="cam-view"><video playsinline muted></video><div class="cam-frame"></div></div><div class="cam-last muted" id="camlast">กำลังเปิดกล้อง…</div></div>' +
@@ -4291,7 +4293,7 @@ function renderStock() {
   var tabs = [['list', 'คงเหลือ'], ['count', 'ตรวจนับ'], ['moves', 'ประวัติเคลื่อนไหว']].map(function (t) {
     return '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-act="stockTab" data-t="' + t[0] + '">' + t[1] + '</button>';
   }).join('');
-  return '<div class="page stk-' + tab + '" style="flex-direction:column"><div class="kpis" id="skpi"></div>' +
+  return '<div class="page stk-' + tab + '" style="flex-direction:column">' + openingBanner() + '<div class="kpis" id="skpi"></div>' +
     '<div class="stk"><section class="card stk-main"><div class="tabs">' + tabs + '</div><div id="stab" class="stk-tab"></div></section>' +
     '<aside class="stk-side"><div class="card pad" id="swo"></div><button class="card pad exp-link" id="sexp" data-act="goExpiry"></button></aside></div></div>';
 }
@@ -4320,6 +4322,126 @@ function drawStockKpis() {
     k('ใกล้หมด', low, low > 0).replace(/<\/div>$/, sub('ขั้นต่ำคิดจากยอดขาย × รอบรับของของแต่ละสินค้า') + '</div>') +
     k('ของเสียเดือนนี้', '฿' + money(loss)).replace(/<\/div>$/, sub('เสียหาย/สูญหาย ฿' + money(S.ov.lossMonth || 0) + ' · หมดอายุ ฿' + money(S.ov.expiryMonth || 0)) + '</div>') +
     k('เบิกใช้ในร้านเดือนนี้', '฿' + money(S.ov.useMonth || 0)).replace(/<\/div>$/, sub('ค่าใช้จ่าย · เบิกจากหน้าขาย') + '</div>');
+}
+
+/* ================= Opening stock: its own one-time page ================= */
+/** Owner, until confirmed once (or skipped): what was on the shelves before the shop started using the system. */
+function openingOk() { return !!(S.user && S.user.role === 'owner' && String((S.settings || {}).openingDone || '') !== '1'); }
+function openingBanner() {
+  if (!openingOk()) return '';
+  return '<div class="card pad op-banner"><div class="grow"><b>ยังไม่ได้ใส่สต็อกเปิดร้าน</b><div class="muted" style="font-size:13px">ของที่มีอยู่ในร้านก่อนเริ่มใช้ระบบ — ใส่ครั้งเดียว แยกจากการตรวจนับปกติ</div></div>' +
+    '<button class="btn primary" data-act="go" data-v="opening">ใส่สต็อกเปิดร้าน</button></div>';
+}
+function opDraft() {
+  if (!S.op) { try { S.op = JSON.parse(store('em_opening') || 'null'); } catch (e) { S.op = null; } }
+  if (!S.op || !S.op.uid) S.op = { uid: 'OPN' + Date.now().toString(36) + randomId(4), qty: {}, cost: {}, cat: '', q: '' };
+  return S.op;
+}
+function opSave() { store('em_opening', JSON.stringify({ uid: S.op.uid, qty: S.op.qty, cost: S.op.cost })); }
+function opProducts() { return S.products.filter(function (p) { return p.active && p.type !== 'recipe'; }); }
+function opCost(p) { var c = opDraft().cost[p.sku]; return c !== undefined && c !== '' ? Number(c) : Number(p.cost) || 0; }
+function opSum() {
+  var d = opDraft(), n = 0, value = 0, noCost = 0;
+  opProducts().forEach(function (p) {
+    var q = Number(d.qty[p.sku] || 0);
+    if (!(q > 0)) return;
+    n++; value += q * opCost(p);
+    if (!(opCost(p) > 0)) noCost++;
+  });
+  return { n: n, value: value, noCost: noCost };
+}
+
+function renderOpening() {
+  if (!openingOk()) return '<div class="page"><div class="card pad" style="max-width:640px;margin:auto"><h2>สต็อกเปิดร้าน</h2><p class="muted">ใส่ไปแล้ว (ทำได้ครั้งเดียว) — ต่อจากนี้ของเข้าใช้หน้า "รับสินค้า" และนับสต็อกที่ "สต็อก › ตรวจนับ"</p><button class="btn" data-act="go" data-v="stock">ไปหน้าสต็อก</button></div></div>';
+  setTimeout(loadOpeningInfo, 0);
+  return '<div class="page op-page" style="flex-direction:column"><section class="card op-main">' +
+    '<div class="op-head"><div><h2>สต็อกเปิดร้าน</h2><div class="muted" style="font-size:13px;line-height:1.6">ใส่ <b>ของที่มีอยู่ในร้านก่อนเริ่มใช้ระบบ</b> พร้อมทุนต่อชิ้น · บันทึกร่างในเครื่องนี้ไปเรื่อย ๆ ได้ แล้วกด <b>ยืนยัน</b> ครั้งเดียวตอนนับครบ<br>' +
+    'ของที่ <b>รับเข้าใหม่</b> ให้ไปที่หน้า "รับสินค้า" เสมอ — อย่านับรวมตรงนี้ (มีช่อง "รับเข้าแล้ว" ให้ดู)</div></div>' +
+    '<button class="btn sm ghost" data-act="go" data-v="stock">กลับหน้าสต็อก</button></div>' +
+    (!(S.settings || {}).liveSince ? '<div class="hintbox warn">ยังไม่ได้กด "เริ่มใช้งานจริง" — ตอนกด ระบบจะล้างสต็อกทดสอบ · แนะนำ: กดเริ่มใช้งานจริงก่อน (ตั้งค่า › สำรองข้อมูล) แล้วค่อยยืนยันสต็อกเปิดร้าน</div>' : '') +
+    '<div id="ocats"></div><div class="row stk-tools"><label for="oscan" style="white-space:nowrap">สแกน</label>' +
+    '<input id="oscan" class="grow" autocomplete="off" placeholder="สแกนบาร์โค้ด = +1 (สแกนแพ็ค = +12) หรือพิมพ์จำนวนในช่อง">' + camBtn('oscan') +
+    '<label class="sr" for="oq">ค้นหา</label><input id="oq" data-input="opQ" placeholder="ค้นหาชื่อสินค้า" style="max-width:220px" value="' + esc(opDraft().q || '') + '"></div>' +
+    '<div class="stk-grid op head"><div>สินค้า</div><div class="r">รับเข้าแล้ว</div><div class="r">มีอยู่เดิม</div><div class="r">ทุน/ชิ้น</div><div class="r">มูลค่า</div></div>' +
+    '<div id="orows" class="stk-rows"></div><div class="cnt-foot" id="ofoot"></div></section></div>';
+}
+function loadOpeningInfo() {
+  if (S.view !== 'opening') return;
+  drawOpening();
+  Promise.all([api('openingInfo', S.token), reloadCatalog()]).then(function (r) {
+    var i = r[0];
+    S.opInfo = i;
+    if (!i.open) { S.settings.openingDone = '1'; return render(); }
+    drawOpening();
+  }).catch(fail);
+}
+function drawOpening() {
+  var d = opDraft(), box = $('#orows');
+  if (!box) return;
+  var c = {};
+  opProducts().forEach(function (p) { var k = p.category || 'ไม่มีหมวด'; c[k] = (c[k] || 0) + 1; });
+  $('#ocats').innerHTML = '<div class="chips"><span class="muted" style="font-size:13px">หมวด</span><button class="chip' + (!d.cat ? ' on' : '') + '" data-act="opCat" data-c="">ทั้งหมด ' + opProducts().length + '</button>' +
+    Object.keys(c).sort().map(function (k) { return '<button class="chip' + (d.cat === k ? ' on' : '') + '" data-act="opCat" data-c="' + esc(k) + '">' + esc(k) + ' ' + c[k] + '</button>'; }).join('') + '</div>';
+  var q = String(d.q || '').toLowerCase(), info = S.opInfo || { received: {}, sold: {} };
+  var rows = opProducts().filter(function (p) {
+    if (d.cat && (p.category || 'ไม่มีหมวด') !== d.cat) return false;
+    return !q || String(p.name).toLowerCase().indexOf(q) >= 0;
+  }).sort(function (a, b) { return String(a.category).localeCompare(String(b.category), 'th') || String(a.subcategory || '').localeCompare(String(b.subcategory || ''), 'th') || a.name.localeCompare(b.name, 'th'); });
+  box.innerHTML = rows.map(function (p) {
+    var v = d.qty[p.sku], has = v !== undefined && v !== '', cost = opCost(p), rec = info.received[p.sku] || 0;
+    return '<div class="stk-grid op" data-sku="' + esc(p.sku) + '"><div>' + esc(p.name) + ' <span class="muted" style="font-size:13px">' + esc(p.unit || 'ชิ้น') + (p.subcategory ? ' · ' + esc(p.subcategory) : '') + '</span></div>' +
+      '<div class="r num ' + (rec ? 'warn-text' : 'muted') + '" title="รับเข้าผ่านหน้ารับสินค้าแล้ว — ไม่ต้องนับรวม">' + (rec ? '+' + rec : '—') + '</div>' +
+      '<div class="r"><input data-oqty="' + esc(p.sku) + '" value="' + (has ? esc(v) : '') + '" type="number" min="0" inputmode="numeric" placeholder="—" aria-label="มีอยู่เดิม ' + esc(p.name) + '" style="width:90px;height:36px;text-align:right"></div>' +
+      '<div class="r"><input data-ocost="' + esc(p.sku) + '" value="' + (cost > 0 ? cost : '') + '" type="number" min="0" step="0.01" inputmode="decimal" placeholder="ทุน" aria-label="ทุนต่อชิ้น ' + esc(p.name) + '" style="width:90px;height:36px;text-align:right' + (has && Number(v) > 0 && !(cost > 0) ? ';border-color:var(--warn)' : '') + '"></div>' +
+      '<div class="r num" data-oval>' + (has && Number(v) > 0 ? money(Number(v) * cost) : '') + '</div></div>';
+  }).join('') || '<div class="muted" style="padding:16px">ไม่พบสินค้า</div>';
+  drawOpeningFoot();
+}
+function drawOpeningFoot() {
+  var f = $('#ofoot'); if (!f) return;
+  var s = opSum();
+  f.innerHTML = '<span>ใส่แล้ว <b>' + s.n + '</b> รายการ · มูลค่า <b>฿' + money(s.value) + '</b></span>' +
+    (s.noCost ? '<span class="warn-text">ยังไม่มีทุน ' + s.noCost + ' รายการ</span>' : '') + '<span class="grow"></span>' +
+    (s.n ? '<button class="btn sm ghost" data-act="opClear">ล้างร่าง</button>' : '<button class="btn sm ghost" data-act="opSkip">ร้านไม่มีของเดิม — ข้าม</button>') +
+    '<button class="btn primary" data-act="opConfirm"' + (s.n ? '' : ' disabled') + '>ยืนยันสต็อกเปิดร้าน</button>';
+}
+function opRow(sku) {
+  var row = $('#orows [data-sku="' + sku + '"]'), p = S.idx.bySku[sku];
+  if (!row || !p) return;
+  var v = opDraft().qty[sku], cost = opCost(p);
+  $('[data-oval]', row).textContent = v !== undefined && v !== '' && Number(v) > 0 ? money(Number(v) * cost) : '';
+  drawOpeningFoot();
+}
+function opScan(v) {
+  v = String(v || '').trim();
+  if (!v) return;
+  var code = S.barcodes.filter(function (b) { return b.barcode === v; })[0];
+  var sku = code ? code.sku : (S.products.filter(function (p) { return p.plu === v || p.sku === v; })[0] || {}).sku;
+  var p = sku && S.idx.bySku[sku];
+  if (!p || p.type === 'recipe') { beep(); return toast('ไม่พบสินค้า ' + v, true); }
+  var d = opDraft();
+  d.qty[sku] = String(Number(d.qty[sku] || 0) + (code ? code.multiplier : 1)); opSave();
+  var row = $('#orows [data-sku="' + sku + '"]');
+  if (!row) { d.cat = ''; d.q = ''; if ($('#oq')) $('#oq').value = ''; drawOpening(); row = $('#orows [data-sku="' + sku + '"]'); }
+  else { $('[data-oqty]', row).value = d.qty[sku]; opRow(sku); }
+  if (row) { row.scrollIntoView({ block: 'nearest' }); row.classList.add('flash'); setTimeout(function () { row.classList.remove('flash'); }, 500); }
+  toast(p.name + ' = ' + d.qty[sku]);
+}
+function opConfirm() {
+  var d = opDraft(), s = opSum();
+  var lines = opProducts().filter(function (p) { return Number(d.qty[p.sku] || 0) > 0; }).map(function (p) { return { sku: p.sku, qty: Number(d.qty[p.sku]), cost: opCost(p) }; });
+  confirm2('ยืนยันสต็อกเปิดร้าน', lines.length + ' รายการ · มูลค่า ฿' + money(s.value) +
+    (s.noCost ? ' · ⚠ ยังไม่มีทุน ' + s.noCost + ' รายการ (มูลค่าจะเป็น 0)' : '') +
+    ' — ยอดนี้จะถูกเพิ่มเข้าสต็อกเป็น "สต็อกเปิดร้าน" (ไม่นับเป็นกำไร) และ <b>ทำได้ครั้งเดียว</b>', 'ยืนยัน').then(function (ok) {
+    if (!ok) return;
+    return api('openingStock', S.token, { uid: d.uid, lines: lines }).then(function (r) {
+      S.op = null; store('em_opening', null);
+      S.settings.openingDone = '1';
+      toast('บันทึกสต็อกเปิดร้านแล้ว ' + (r.items || lines.length) + ' รายการ · มูลค่า ฿' + money(r.value || s.value));
+      S.stockTab = 'list'; S.stockLoaded = false;
+      return reloadCatalog().then(function () { go('stock'); });
+    });
+  }).catch(fail);
 }
 
 function stockCats() {
@@ -4400,37 +4522,24 @@ function cntDraft() {
 }
 function cntSave() { store('em_count', JSON.stringify(S.cnt)); }
 
-/** Opening stock (what the shop already had): owner only, until closed by hand or by the first regular count. */
-function openingOk() { return !!(S.user && S.user.role === 'owner' && String((S.settings || {}).openingDone || '') !== '1'); }
-function cntOpening() { var d = cntDraft(); return !!d.opening && openingOk(); }
-function cntCost(r) { var d = cntDraft(), c = (d.costs || {})[r.sku]; return c !== undefined && c !== '' ? Number(c) : r.cost; }
-
 function cntSummary() {
-  var d = cntDraft(), n = 0, diff = 0, plus = 0, minus = 0, value = 0, noCost = 0, op = cntOpening();
+  var d = cntDraft(), n = 0, diff = 0, plus = 0, minus = 0;
   stockRows.forEach(function (r) {
     var c = d.counts[r.sku];
     if (c === undefined || c === '') return;
     n++;
-    var cost = op ? cntCost(r) : r.cost;
-    value += Number(c) * cost;
-    if (op && Number(c) > 0 && !(cost > 0)) noCost++;
     var x = Number(c) - r.onHand;
-    if (x) { diff++; if (x > 0) plus += x * cost; else minus += -x * cost; }
+    if (x) { diff++; if (x > 0) plus += x * r.cost; else minus += -x * r.cost; }
   });
-  return { n: n, diff: diff, plus: plus, minus: minus, value: value, noCost: noCost };
+  return { n: n, diff: diff, plus: plus, minus: minus };
 }
 
 function drawCountTab(box) {
-  var d = cntDraft(), op = cntOpening();
-  var mode = openingOk() ? '<div class="row cnt-mode" style="gap:6px;flex-wrap:wrap"><button class="chip' + (op ? '' : ' on') + '" data-act="cntMode" data-m="">ตรวจนับปกติ</button>' +
-    '<button class="chip' + (op ? ' on' : '') + '" data-act="cntMode" data-m="opening">ตั้งยอดเปิดร้าน (ของที่มีอยู่แล้ว)</button></div>' +
-    (op ? '<div class="hintbox">ใส่จำนวนของที่มีอยู่ในร้านตอนนี้ (สแกนทีละชิ้นก็ได้) และ<b>ทุนต่อชิ้น</b> · บันทึกเป็น "สต็อกเปิดร้าน" ไม่นับเป็นกำไรหรือขาดทุน · ไม่ต้องทำครั้งเดียวจบ ทยอยใส่ทีละหมวดแล้วกดบันทึกได้หลายรอบ · สินค้าที่รับเข้าหรือขายไปแล้วใส่ไม่ได้ · ใส่ครบแล้วกด "เสร็จแล้ว ปิดยอดเปิดร้าน" (หรือปิดเองเมื่อตรวจนับปกติครั้งแรก)</div>' +
-      (!(S.settings || {}).liveSince ? '<div class="hintbox warn">ยังไม่ได้กด "เริ่มใช้งานจริง" — ตอนกด ระบบจะล้างสต็อกทดสอบรวมถึงยอดที่ใส่ตรงนี้ด้วย · แนะนำ: กดเริ่มใช้งานจริงก่อน (ตั้งค่า › สำรองข้อมูล) แล้วค่อยใส่ยอดเปิดร้าน</div>' : '') : '') : '';
-  box.innerHTML = mode + stockCats() + '<div class="row stk-tools"><label for="cscan" style="white-space:nowrap">สแกนนับ</label>' +
+  var d = cntDraft();
+  box.innerHTML = stockCats() + '<div class="row stk-tools"><label for="cscan" style="white-space:nowrap">สแกนนับ</label>' +
     '<input id="cscan" class="grow" autocomplete="off" placeholder="สแกนบาร์โค้ด = +1 (สแกนแพ็ค = +12) หรือพิมพ์จำนวนในช่องนับได้">' + camBtn('cscan') +
     '<label class="sr" for="cnote">หมายเหตุ</label><input id="cnote" data-cnt-note value="' + esc(d.note) + '" placeholder="หมายเหตุ เช่น นับสิ้นเดือน" style="width:200px"></div>' +
-    (op ? '<div class="stk-grid cnt head"><div>สินค้า</div><div class="r">ในระบบ</div><div class="r">มีอยู่จริง</div><div class="r">ทุน/ชิ้น</div><div class="r">มูลค่า</div></div>'
-      : '<div class="stk-grid cnt head"><div>สินค้า</div><div class="r">ในระบบ</div><div class="r">นับได้</div><div class="r">ส่วนต่าง</div><div class="r">มูลค่า (ประมาณ)</div></div>') +
+    '<div class="stk-grid cnt head"><div>สินค้า</div><div class="r">ในระบบ</div><div class="r">นับได้</div><div class="r">ส่วนต่าง</div><div class="r">มูลค่า (ประมาณ)</div></div>' +
     '<div id="crows" class="stk-rows"></div><div class="cnt-foot" id="cfoot"></div>';
   drawCountRows();
 }
@@ -4444,17 +4553,6 @@ function drawCountRows() {
     var c = d.counts[r.sku];
     var has = c !== undefined && c !== '';
     var x = has ? round2(Number(c) - r.onHand) : 0;
-    if (cntOpening() && r.moved) {
-      return '<div class="stk-grid cnt is-moved" data-sku="' + esc(r.sku) + '"><div>' + esc(r.name) + ' <span class="muted" style="font-size:13px">' + esc(r.unit) + '</span></div>' +
-        '<div class="r num">' + r.onHand + '</div><div class="muted" style="grid-column:span 3;text-align:right;font-size:13px">มีรับเข้า/ขายแล้ว — ใช้ตรวจนับปกติ</div></div>';
-    }
-    if (cntOpening()) {
-      var cost = cntCost(r);
-      return '<div class="stk-grid cnt" data-sku="' + esc(r.sku) + '"><div>' + esc(r.name) + ' <span class="muted" style="font-size:13px">' + esc(r.unit) + '</span></div>' +
-        '<div class="r num">' + r.onHand + '</div><div class="r"><input data-cnt="' + esc(r.sku) + '" value="' + (has ? esc(c) : '') + '" type="number" min="0" inputmode="numeric" placeholder="—" aria-label="มีอยู่จริง ' + esc(r.name) + '" style="width:90px;height:36px;text-align:right"></div>' +
-        '<div class="r"><input data-ccost="' + esc(r.sku) + '" value="' + (cost > 0 ? cost : '') + '" type="number" min="0" step="0.01" inputmode="decimal" placeholder="ทุน" aria-label="ทุนต่อชิ้น ' + esc(r.name) + '" style="width:90px;height:36px;text-align:right' + (has && Number(c) > 0 && !(cost > 0) ? ';border-color:var(--warn)' : '') + '"></div>' +
-        '<div class="r num" data-cval>' + (has ? money(Number(c) * cost) : '') + '</div></div>';
-    }
     return '<div class="stk-grid cnt" data-sku="' + esc(r.sku) + '"><div>' + esc(r.name) + ' <span class="muted" style="font-size:13px">' + esc(r.unit) + '</span></div>' +
       '<div class="r num">' + r.onHand + '</div><div class="r"><input data-cnt="' + esc(r.sku) + '" value="' + (has ? esc(c) : '') + '" type="number" min="0" inputmode="numeric" placeholder="—" aria-label="นับได้ ' + esc(r.name) + '" style="width:90px;height:36px;text-align:right"></div>' +
       '<div class="r num" data-cdiff style="font-weight:600;color:' + (!has || !x ? 'var(--muted)' : x < 0 ? 'var(--warn)' : 'var(--brand-text)') + '">' + (has ? (x > 0 ? '+' : '') + x : '') + '</div>' +
@@ -4467,13 +4565,6 @@ function drawCountFoot() {
   var f = $('#cfoot');
   if (!f) return;
   var s = cntSummary();
-  if (cntOpening()) {
-    f.innerHTML = '<span>ใส่แล้ว <b>' + s.n + '</b> รายการ · มูลค่าสต็อก <b>฿' + money(s.value) + '</b></span>' +
-      (s.noCost ? '<span class="warn-text">ยังไม่มีทุน ' + s.noCost + ' รายการ</span>' : '') + '<span class="grow"></span>' +
-      (s.n ? '<button class="btn sm ghost" data-act="cntClear">ล้าง</button>' : '<button class="btn sm" data-act="cntCloseOpening">เสร็จแล้ว ปิดยอดเปิดร้าน</button>') +
-      '<button class="btn primary" data-act="cntCommit"' + (s.n ? '' : ' disabled') + '>บันทึกยอดเปิดร้าน</button>';
-    return;
-  }
   f.innerHTML = '<span>นับแล้ว <b>' + s.n + '</b> รายการ · ต่างจากระบบ <b>' + s.diff + '</b></span>' +
     '<span class="brand-text">เกิน +฿' + money(s.plus) + '</span><span class="warn-text">ขาด −฿' + money(s.minus) + '</span><span class="grow"></span>' +
     (s.n ? '<button class="btn sm ghost" data-act="cntClear">ล้าง</button>' : '') +
@@ -4482,7 +4573,6 @@ function drawCountFoot() {
 
 function cntSet(sku, v) {
   var d = cntDraft();
-  if (cntOpening() && stockRows.some(function (x) { return x.sku === sku && x.moved; })) { toast('สินค้านี้มีรับเข้า/ขายแล้ว — ใช้ "ตรวจนับปกติ"', true); return; }
   if (v === '' || v === null) delete d.counts[sku]; else d.counts[sku] = v;
   cntSave();
   var row = $('#crows [data-sku="' + sku + '"]');
@@ -4490,7 +4580,6 @@ function cntSet(sku, v) {
   if (row && r) {
     var has = v !== '' && v !== null, x = has ? round2(Number(v) - r.onHand) : 0;
     var inp = $('[data-cnt]', row); if (inp && document.activeElement !== inp) inp.value = has ? v : '';
-    if (cntOpening()) { $('[data-cval]', row).textContent = has ? money(Number(v) * cntCost(r)) : ''; drawCountFoot(); return; }
     var dd = $('[data-cdiff]', row); dd.textContent = has ? (x > 0 ? '+' : '') + x : ''; dd.style.color = !has || !x ? 'var(--muted)' : x < 0 ? 'var(--warn)' : 'var(--brand-text)';
     $('[data-cval]', row).textContent = has && x ? (x > 0 ? '+' : '−') + money(Math.abs(x) * r.cost) : '';
   }
@@ -4515,24 +4604,6 @@ function cntScan(v) {
 
 function cntCommit() {
   var d = cntDraft(), s = cntSummary();
-  if (cntOpening()) {
-    var ol = Object.keys(d.counts).filter(function (k) { return d.counts[k] !== ''; }).map(function (k) {
-      var r = stockRows.filter(function (x) { return x.sku === k; })[0];
-      return { sku: k, counted: Number(d.counts[k]), cost: r ? cntCost(r) : 0 };
-    });
-    confirm2('บันทึกยอดเปิดร้าน', ol.length + ' รายการ · มูลค่าสต็อก ฿' + money(s.value) +
-      (s.noCost ? ' · ⚠ ยังไม่มีทุน ' + s.noCost + ' รายการ (มูลค่าจะเป็น 0 — ใส่ทุนก่อนดีกว่า)' : '') +
-      ' — สต็อกของรายการเหล่านี้จะเท่ากับที่ใส่ (รายการที่ไม่ได้ใส่จะไม่ถูกแตะ)', 'บันทึก').then(function (ok) {
-      if (!ok) return;
-      return api('stockCount', S.token, { countUid: d.uid, opening: true, note: d.note, lines: ol }).then(function (r) {
-        S.cnt = { uid: 'CNT' + Date.now().toString(36) + randomId(4), counts: {}, note: '', opening: true };   // ready for the next shelf
-        cntSave();
-        toast('บันทึกยอดเปิดร้านแล้ว ' + r.changed + ' รายการ · มูลค่า ฿' + money(r.netValue));
-        return reloadCatalog().then(loadStock);
-      });
-    }).catch(fail);
-    return;
-  }
   var lines = Object.keys(d.counts).filter(function (k) { return d.counts[k] !== ''; }).map(function (k) { return { sku: k, counted: Number(d.counts[k]) }; });
   confirm2('บันทึกผลตรวจนับ', 'นับ ' + s.n + ' รายการ · ต่างจากระบบ ' + s.diff + ' รายการ · เกิน ฿' + money(s.plus) + ' ขาด ฿' + money(s.minus) +
     ' — สต็อกจะถูกปรับตามที่นับได้ (สินค้าที่ไม่ได้นับจะไม่ถูกแตะ)', 'บันทึก').then(function (ok) {
@@ -4541,7 +4612,6 @@ function cntCommit() {
       if (id === null) return;
       return api('stockCount', S.token, { countUid: d.uid, note: d.note, lines: lines, approvalId: id }).then(function (r) {
         S.cnt = null; store('em_count', null);
-        if (r.changed && S.settings) S.settings.openingDone = '1';   // the first regular count closes the opening stock
         toast('บันทึกแล้ว · ปรับ ' + r.changed + ' รายการ · สุทธิ ฿' + money(r.netValue));
         return reloadCatalog().then(loadStock);
       });
@@ -6225,7 +6295,7 @@ function printShift(s) {
 
 /* Reports: filters on the left, tabs on the right. S.rep = { f: {...}, tab, data } */
 var REP_TABS = [['overview', 'ภาพรวม'], ['products', 'สินค้า'], ['categories', 'หมวด'], ['staff', 'พนักงาน'], ['shifts', 'กะ'], ['slow', 'ไม่เคลื่อนไหว'], ['stock', 'มูลค่าสต็อก']];
-var ACTION_TH = { STOCK_OPENING: 'ตั้งยอดเปิดร้าน', STOCK_OPENING_CLOSE: 'ปิดการตั้งยอดเปิดร้าน', KEY_LAYOUT: 'จัดตำแหน่งปุ่มหน้าขาย', PRODUCT_DELETE: 'ลบสินค้า', PRODUCT_ARCHIVE: 'ปิดใช้งานสินค้า', GO_LIVE: 'เริ่มใช้งานจริง (ล้างข้อมูลทดสอบ)', VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
+var ACTION_TH = { STOCK_OPENING: 'สต็อกเปิดร้าน', STOCK_OPENING_CLOSE: 'ข้ามสต็อกเปิดร้าน', KEY_LAYOUT: 'จัดตำแหน่งปุ่มหน้าขาย', PRODUCT_DELETE: 'ลบสินค้า', PRODUCT_ARCHIVE: 'ปิดใช้งานสินค้า', GO_LIVE: 'เริ่มใช้งานจริง (ล้างข้อมูลทดสอบ)', VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
   STOCK_ADJUST: 'ปรับสต็อก', PRICE_CHANGE: 'แก้ราคา', APPROVE_FAIL: 'PIN อนุมัติผิด', NO_SALE: 'เปิดลิ้นชัก', WRITEOFF: 'ตัดของเสีย',
   STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า',
   BELOW_COST: 'ขายต่ำกว่าทุน', LOW_MARGIN: 'กำไรต่ำ', OVERSELL: 'ขายเกินสต็อก', OFFLINE_CHECK: 'ตรวจรายการออฟไลน์' };
@@ -6887,8 +6957,7 @@ function goLiveModal() {
       // Test sales still waiting on this PC must not come back after the wipe.
       ['em_outbox', 'em_offshift', 'em_shiftmap', 'em_offno', 'em_held', 'em_receive', 'em_count', 'em_cache'].forEach(function (k) { store(k, null); });
       toast('เริ่มใช้งานจริงแล้ว · ต่อไป: ใส่ยอดของที่มีอยู่ในร้าน');
-      S.cnt = { uid: 'CNT' + Date.now().toString(36) + randomId(4), counts: {}, note: 'ยอดเปิดร้าน', opening: true }; cntSave();
-      return boot().then(function () { S.stockTab = 'count'; go('stock'); });
+      return boot().then(function () { go('opening'); });
     }).catch(function (e) { ok.disabled = false; ok.textContent = 'ล้างข้อมูลทดสอบ · เริ่มใช้จริง'; fail(e); });
   };
 }
@@ -6960,20 +7029,14 @@ var ACTIONS = {
   stockCat: function (el) { S.stockFilter.cat = el.getAttribute('data-c'); S.stockFilter.sub = ''; drawStockTab(); },
   stockSub: function (el) { S.stockFilter.sub = el.getAttribute('data-c'); drawStockTab(); },
   cntCommit: cntCommit,
-  cntCloseOpening: function () {
-    confirm2('ปิดยอดเปิดร้าน', 'ใส่ของที่มีอยู่ในร้านครบแล้วใช่ไหม? ปิดแล้วจะกลับมาใช้โหมดนี้ไม่ได้ — ต่อจากนี้ของเข้าใช้ "รับสินค้า" และนับสต็อกด้วย "ตรวจนับปกติ"', 'ปิดยอดเปิดร้าน').then(function (ok) {
+  opCat: function (el) { opDraft().cat = el.getAttribute('data-c'); drawOpening(); },
+  opClear: function () { confirm2('ล้างร่าง', 'ลบตัวเลขที่ใส่ไว้ทั้งหมด?', 'ล้าง', true).then(function (ok) { if (ok) { S.op = null; store('em_opening', null); drawOpening(); } }); },
+  opConfirm: function () { opConfirm(); },
+  opSkip: function () {
+    confirm2('ข้ามสต็อกเปิดร้าน', 'ร้านไม่มีของเดิมที่ต้องใส่ใช่ไหม? ข้ามแล้วกลับมาใส่ไม่ได้', 'ข้าม').then(function (ok) {
       if (!ok) return;
-      return api('closeOpening', S.token).then(function () {
-        S.settings.openingDone = '1';
-        var d = cntDraft(); d.opening = false; cntSave();
-        toast('ปิดการตั้งยอดเปิดร้านแล้ว'); drawStockTab();
-      });
+      return api('closeOpening', S.token).then(function () { S.settings.openingDone = '1'; toast('ข้ามสต็อกเปิดร้านแล้ว'); go('stock'); });
     }).catch(fail);
-  },
-  cntMode: function (el) {
-    var d = cntDraft();
-    if (Object.keys(d.counts).length && !!d.opening !== !!el.getAttribute('data-m')) return toast('บันทึกหรือล้างตัวเลขที่ใส่ไว้ก่อนเปลี่ยนโหมด', true);
-    d.opening = !!el.getAttribute('data-m'); cntSave(); drawStockTab();
   },
   cntClear: function () { confirm2('ล้างการนับ', 'ลบตัวเลขที่นับไว้ทั้งหมด?', 'ล้าง', true).then(function (ok) { if (ok) { S.cnt = null; store('em_count', null); drawStockTab(); } }); },
   woPick: function (el) { S.wo = { sku: el.getAttribute('data-sku'), qty: '', reason: (S.wo || {}).reason || 'เสียหาย', lotId: '' }; drawWriteOff(); var n = $('#wo-n'); if (n) n.focus(); },
@@ -7285,14 +7348,10 @@ document.addEventListener('input', function (e) {
   if (k === 'bulkQ') { S.prodFilter.q = t.value; drawBulk(); }
   if (k === 'stockQ') { S.stockFilter.q = t.value; renderStockRows(); }
   if (t.hasAttribute('data-cnt')) cntSet(t.getAttribute('data-cnt'), t.value);
+  if (t.hasAttribute('data-oqty')) { var od = opDraft(), oq = t.getAttribute('data-oqty'); if (t.value === '') delete od.qty[oq]; else od.qty[oq] = t.value; opSave(); opRow(oq); }
+  if (t.hasAttribute('data-ocost')) { var oc = opDraft(); oc.cost[t.getAttribute('data-ocost')] = t.value; opSave(); opRow(t.getAttribute('data-ocost')); }
+  if (k === 'opQ') { opDraft().q = t.value; drawOpening(); var oqi = $('#oq'); if (oqi) { oqi.focus(); oqi.setSelectionRange(oqi.value.length, oqi.value.length); } }
   if (t.hasAttribute('data-cnt-note')) { cntDraft().note = t.value; cntSave(); }
-  if (t.hasAttribute('data-ccost')) {
-    var cd = cntDraft(), csku = t.getAttribute('data-ccost');
-    cd.costs = cd.costs || {}; cd.costs[csku] = t.value; cntSave();
-    var crow = t.closest('[data-sku]'), cr = stockRows.filter(function (x) { return x.sku === csku; })[0], cc = cd.counts[csku];
-    if (crow && cr) $('[data-cval]', crow).textContent = cc !== undefined && cc !== '' ? money(Number(cc) * cntCost(cr)) : '';
-    drawCountFoot();
-  }
   if (t.id === 'wo-q') woSuggest(t.value);
   if (t.hasAttribute('data-xq') && S.expSel) { S.expSel.found = t.value; }
   if (t.hasAttribute('data-wo-qty') && S.wo) { S.wo.qty = t.value; var p0 = S.idx.bySku[S.wo.sku]; var e0 = $('#wo-est'); if (e0) e0.textContent = '฿' + money(p0 ? (Number(t.value) || 0) * p0.cost : 0); }
@@ -7358,6 +7417,7 @@ document.addEventListener('keydown', function (e) {
     else if (e.key === 'Enter') { e.preventDefault(); pinKey('ok'); }
     return;
   }
+  if (S.view === 'opening' && !modalStack.length && e.key === 'Enter' && e.target.id === 'oscan') { e.preventDefault(); opScan(e.target.value); e.target.value = ''; return; }
   if (S.view === 'stock' && !modalStack.length && e.key === 'Enter') {
     if (e.target.id === 'cscan') { e.preventDefault(); cntScan(e.target.value); e.target.value = ''; return; }
     if (e.target.id === 'wo-q') { e.preventDefault(); var fb = $('#wo-sug button'); if (fb) fb.click(); else toast('ไม่พบสินค้า', true); return; }
