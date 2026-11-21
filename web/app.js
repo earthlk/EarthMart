@@ -2842,45 +2842,84 @@ function labOpen(kind, promoId) {
 /* ---------------- Product photos (quick keys) ---------------- */
 var IMG_CACHE = 'em-images', imgPending = {};
 function imgKey(id) { return location.origin + location.pathname.replace(/[^/]*$/, '') + '__img/' + encodeURIComponent(id); }
-/** Object URL of a product photo: memory, then this device, then the server (kept for next time). */
-function loadImg(id) {
+/**
+ * Product photos: memory → this device (Cache Storage) → server. Server fetches are queued and sent in batches
+ * (12 photos per call, at most 2 calls at a time, quietly), photos on screen first — instead of one request
+ * per photo all at once, which flooded Apps Script and slowed everything else after a restart.
+ */
+var imgQueue = { hi: [], lo: [], wait: {}, running: 0 };
+function loadImg(id, low) {
   S.imgUrl = S.imgUrl || {};
   if (S.imgUrl[id]) return Promise.resolve(S.imgUrl[id]);
-  if (imgPending[id]) return imgPending[id];
+  if (imgPending[id]) { if (!low) imgBump(id); return imgPending[id]; }
   var key = imgKey(id);
   var keep = function (blob) { S.imgUrl[id] = URL.createObjectURL(blob); return S.imgUrl[id]; };
-  var fromApi = function () {
+  var fromServer = function () {
     if (!S.token || S.offline) return Promise.reject(new Error('offline'));
-    return api('productImage', S.token, id).then(function (r) { return fetch(r.dataUrl).then(function (x) { return x.blob(); }); }).then(function (blob) {
+    return new Promise(function (ok, no) {
+      imgQueue.wait[id] = { ok: ok, no: no };
+      imgQueue[low ? 'lo' : 'hi'].push(id);
+      imgPump();
+    }).then(function (dataUrl) { return fetch(dataUrl).then(function (x) { return x.blob(); }); }).then(function (blob) {
       if (window.caches) caches.open(IMG_CACHE).then(function (c) { c.put(key, new Response(blob, { headers: { 'Content-Type': blob.type || 'image/jpeg' } })); }).catch(function () {});
       return keep(blob);
     });
   };
-  imgPending[id] = (window.caches ? caches.open(IMG_CACHE).then(function (c) { return c.match(key); }).then(function (hit) { return hit ? hit.blob().then(keep) : fromApi(); }) : fromApi())
+  imgPending[id] = (window.caches ? caches.open(IMG_CACHE).then(function (c) { return c.match(key); }).then(function (hit) { return hit ? hit.blob().then(keep) : fromServer(); }) : fromServer())
     .then(function (u) { delete imgPending[id]; return u; }, function (e) { delete imgPending[id]; throw e; });
   return imgPending[id];
 }
+/** A photo now needed on screen jumps the background queue. */
+function imgBump(id) {
+  var i = imgQueue.lo.indexOf(id);
+  if (i >= 0) { imgQueue.lo.splice(i, 1); imgQueue.hi.push(id); }
+}
+function imgPump() {
+  if (imgQueue.running >= 2 || imgQueue.timer) return;
+  imgQueue.timer = setTimeout(function () {   // gather what the screen asks for in the same moment
+    imgQueue.timer = null;
+    var from = imgQueue.hi.length ? imgQueue.hi : imgQueue.lo;
+    if (!from.length) return;
+    var ids = from.splice(0, 12);
+    imgQueue.running++;
+    var settle = function (images, err) {
+      ids.forEach(function (id) {
+        var w = imgQueue.wait[id]; delete imgQueue.wait[id];
+        if (!w) return;
+        if (images && images[id]) w.ok(images[id]); else w.no(err || new Error('ไม่พบรูป'));
+      });
+      imgQueue.running--;
+      if (imgQueue.hi.length || imgQueue.lo.length) imgPump();
+    };
+    apiQuiet('productImages', S.token, ids).then(function (r) { settle(r.images || {}); }, function (e) { settle(null, e); });
+    if (imgQueue.running < 2 && (imgQueue.hi.length || imgQueue.lo.length)) imgPump();
+  }, 30);
+}
 /** Swap icons for photos wherever a [data-pimg] is on screen. */
 function fillImages() {
+  var want = {};
   $all('[data-pimg]').forEach(function (el) {
     var id = el.getAttribute('data-pimg');
     if (!id) return;
     if (S.imgUrl && S.imgUrl[id]) {
       if (!el.querySelector('img.kimg')) { el.innerHTML = '<img class="kimg" src="' + S.imgUrl[id] + '" alt="">'; el.classList.add('has-img'); }
-    } else loadImg(id).then(fillImages).catch(function () {});
+    } else want[id] = 1;
   });
+  Object.keys(want).forEach(function (id) { loadImg(id).then(fillImagesSoon).catch(function () {}); });
 }
-/** Counter keeps every product photo on the device (offline sale screen, customer display). */
+var fillTimer = null;
+function fillImagesSoon() { if (!fillTimer) fillTimer = setTimeout(function () { fillTimer = null; fillImages(); }, 60); }
+/** Counter keeps every product photo on the device (offline sale screen, customer display) — in the background. */
 function syncImages() {
   if (!S.isCounter || !window.caches || !S.token || S.offline) return;
   var ids = (S.products || []).filter(function (p) { return p.image && p.active; }).map(function (p) { return p.image; });
   caches.open(IMG_CACHE).then(function (c) {
     return c.keys().then(function (keys) {
-      var want = ids.map(imgKey);
-      keys.forEach(function (k) { if (want.indexOf(k.url) < 0) c.delete(k); });
-      return ids.reduce(function (pr, id) { return pr.then(function () { return loadImg(id).catch(function () {}); }); }, Promise.resolve());
+      var want = ids.map(imgKey), have = {};
+      keys.forEach(function (k) { if (want.indexOf(k.url) < 0) c.delete(k); else have[k.url] = 1; });
+      return Promise.all(ids.filter(function (id) { return !have[imgKey(id)]; }).map(function (id) { return loadImg(id, true).catch(function () {}); }));
     });
-  }).then(fillImages).catch(function () {});
+  }).then(fillImagesSoon).catch(function () {});
 }
 function prodImgSet(sku, image) {
   var p = S.idx.bySku[sku];

@@ -65,3 +65,23 @@ function api_productImage(token, imageId) {
     return { image: imageId, dataUrl: 'data:' + (blob.getContentType() || 'image/jpeg') + ';base64,' + Utilities.base64Encode(blob.getBytes()) };
   });
 }
+
+/** Several photos in one call (devices fetch them in batches instead of one request per photo). */
+var IMAGES_PER_CALL = 12;
+function api_productImages(token, ids) {
+  return respond_(function () {
+    session_(token);
+    ids = (ids || []).map(String).slice(0, IMAGES_PER_CALL);
+    var known = {};
+    readAll_('Products').forEach(function (p) { if (p.image) known[String(p.image)] = 1; });
+    var images = {}, missing = [];
+    ids.forEach(function (id) {
+      if (!known[id]) { missing.push(id); return; }
+      try {
+        var blob = DriveApp.getFileById(id).getBlob();
+        images[id] = 'data:' + (blob.getContentType() || 'image/jpeg') + ';base64,' + Utilities.base64Encode(blob.getBytes());
+      } catch (e) { missing.push(id); }
+    });
+    return { images: images, missing: missing };
+  });
+}

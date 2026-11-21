@@ -793,6 +793,8 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   const up = m('uploadProductImage', T, 'C1', img);
   ok(up.image && m('bootstrap', T).products.find(p => p.sku === 'C1').image === up.image, 'product carries its photo id');
   eq(m('productImage', T, up.image).dataUrl, img, 'photo comes back');
+  const batch = m('productImages', T, [up.image, 'nope']);
+  eq([batch.images[up.image], batch.missing], [img, ['nope']], 'several photos in one call; unknown ids reported');
   const p0 = m('bootstrap', T).products.find(p => p.sku === 'C1');
   m('saveProduct', T, Object.assign({}, p0, { price: 35 }), [], []);
   eq(m('bootstrap', T).products.find(p => p.sku === 'C1').image, up.image, 'editing the product keeps the photo');
