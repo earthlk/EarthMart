@@ -278,13 +278,25 @@ call('importProducts', T, [
   await page.click('[data-act=opStart]');
   await page.click('[data-x=yes]');
   await page.waitForSelector('#orows [data-sku="' + shelf + '"] [data-ocost]');
-  assert.deepStrictEqual(await page.$$eval('header nav button', a => a.map(x => x.textContent)), ['ตั้งยอดเปิดร้าน'], 'other pages locked');
+  assert.deepStrictEqual(await page.$$eval('header nav button', a => a.map(x => x.textContent)), ['ตั้งยอดเปิดร้าน', 'สินค้า'], 'other pages locked (products stay open for adding items)');
   assert.ok(!call('commitSale', T, { saleUid: 'OPLOCK', payMethod: 'cash', received: 10, lines: [{ sku: 'D0102', qty: 1 }] }), 'server refuses a sale while counting');
   await page.evaluate(() => window.__S && 0);
+  // a product not in the system yet: scan its barcode → add it → back to counting with 1 counted
+  await page.fill('#oscan', '8859999000017'); await page.keyboard.press('Enter');
+  await page.click('.modal [data-x=yes]');
+  await page.waitForSelector('#e-name');
+  assert.ok(await page.evaluate(() => /8859999000017/.test(document.querySelector('#ped').innerHTML) || [...document.querySelectorAll('#ped input')].some(i => i.value === '8859999000017')), 'barcode carried into the new product');
+  await page.fill('#e-name', 'ถั่วอบกรอบ');
+  await page.fill('#e-price', '10');
+  await page.click('[data-ed=save]');
+  await page.waitForSelector('.op-main');
+  const nut = call('bootstrap', T).products.find(p => p.name === 'ถั่วอบกรอบ');
+  assert.strictEqual(await page.inputValue('#orows [data-sku="' + nut.sku + '"] [data-oqty]'), '1', 'new product counted as 1');
+  await page.fill('#orows [data-sku="' + nut.sku + '"] [data-ocost]', '6');
   await page.fill('#orows [data-sku="' + shelf + '"] [data-oqty]', '12');
   await page.fill('#orows [data-sku="' + shelf + '"] [data-ocost]', '14');
   await page.fill('#oscan', '8851234567890'); await page.keyboard.press('Enter');   // scan = 1 water
-  assert.match(await page.textContent('#ofoot'), /นับแล้ว 2 รายการ · มูลค่า ฿172\.20/);
+  assert.match(await page.textContent('#ofoot'), /นับแล้ว 3 รายการ · มูลค่า ฿178\.20/);
   await shot('09m-opening');
   await page.click('[data-act=opConfirm]');
   await page.click('[data-x=yes]');

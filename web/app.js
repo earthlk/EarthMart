@@ -931,7 +931,7 @@ function applyBoot(d) {
   setCatalog(d.products, d.barcodes, d.recipes);
   saveCache(true);
   applyTheme();
-  if (openingLocked() && S.view !== 'opening' && S.view !== 'login') return go('opening');
+  if (openingLocked() && S.view !== 'opening' && S.view !== 'login' && S.view !== 'products') return go('opening');
   if (!openingLocked() && S.view === 'opening' && !modalStack.length) return go('home');
   if (S.view === 'shift' && !hadShift && S.shift && S.isCounter) return go('sale');
   if (S.view === 'sale' && S.isCounter && !S.shift) return go('shift');
@@ -1105,10 +1105,11 @@ var NAV = [
 ];
 
 function go(view) {
-  if (openingLocked() && view !== 'login') view = 'opening';   // ตั้งยอดเปิดร้าน: nothing else until it is finished
+  // ตั้งยอดเปิดร้าน: only counting, and adding / fixing products (they move no stock), until it is finished
+  if (openingLocked() && view !== 'login' && !(view === 'products' && S.user && S.user.role === 'owner')) view = 'opening';
   if (isMobile() && (view === 'sale' || view === 'shift')) view = 'home';
   if (view === 'home' && !isMobile()) view = S.isCounter && !S.shift ? 'shift' : 'sale';
-  if (openingLocked()) view = 'opening';
+  if (openingLocked() && view !== 'products') view = 'opening';
   if (view === 'sale' && S.isCounter && !S.shift) view = 'shift';
   if ((S.offline || !S.token) && ONLINE_VIEWS.indexOf(view) >= 0) return toast('หน้านี้ต้องต่อเน็ต — ตอนออฟไลน์ใช้ได้เฉพาะ ขาย และ กะ', true);
   S.view = view;
@@ -1129,7 +1130,8 @@ function go(view) {
 
 function frame(inner) {
   if (isMobile()) return mobileFrame(inner);
-  var nav = openingLocked() ? '<button class="on" data-act="go" data-v="opening">ตั้งยอดเปิดร้าน</button>' : NAV.filter(function (n) { return !n[2] || (S.user && S.user.role === n[2]); }).map(function (n) {
+  var nav = openingLocked() ? '<button class="' + (S.view === 'opening' ? 'on' : '') + '" data-act="go" data-v="opening">ตั้งยอดเปิดร้าน</button>' +
+    (S.user && S.user.role === 'owner' ? '<button class="' + (S.view === 'products' ? 'on' : '') + '" data-act="go" data-v="products">สินค้า</button>' : '') : NAV.filter(function (n) { return !n[2] || (S.user && S.user.role === n[2]); }).map(function (n) {
     return '<button data-act="go" data-v="' + n[0] + '" class="' + (S.view === n[0] ? 'on' : '') + '">' + n[1] +
       (n[0] === 'expiry' ? '<span class="badge">' + (S.expiryTodo || '') + '</span>' : '') + '</button>';
   }).join('');
@@ -3794,7 +3796,7 @@ function edClick(el) {
   if (a === 'addcomp') edAddComp(el.getAttribute('data-sku'));
   if (a === 'delcode') { S.ed.codes.splice(Number(el.getAttribute('data-i')), 1); S.ed.dirty = true; drawEditor(); }
   if (a === 'internal') api('newInternalBarcode', S.token).then(edAddCode).catch(fail);
-  if (a === 'cancel') { S.ed.dirty = false; selectProduct(null); }
+  if (a === 'cancel') { S.ed.dirty = false; selectProduct(null); if (S.opReturn && openingLocked()) { S.opReturn = null; go('opening'); } }
   if (a === 'save') saveEditor();
   if (a === 'delete') deleteProduct(S.ed.p);
 }
@@ -3839,6 +3841,14 @@ function saveEditor() {
     if (pc) pc.innerHTML = '<option value="">ทุกหมวด</option>' + categories().map(function (c) { return '<option ' + (S.prodFilter.cat === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('');
     if (psb) psb.innerHTML = subOptions(S.prodFilter.cat, S.prodFilter.sub);
     if (S.ed !== ed) { renderProductRows(); return; }   // already moved on to another product
+    if (S.opReturn && openingLocked()) {   // added from ตั้งยอดเปิดร้าน: back to counting, a scanned item counts as 1
+      var back = S.opReturn; S.opReturn = null; S.ed = null; S.prodSel = null;
+      if (back.barcode) { var od = opDraft(); od.qty[r.sku] = String(Number(od.qty[r.sku] || 0) + 1); opSave(); }
+      opDraft().cat = ''; opDraft().q = '';
+      go('opening');
+      setTimeout(function () { var row = $('#orows [data-sku="' + r.sku + '"]'); if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('flash'); var qi = $('[data-oqty]', row); if (qi && !back.barcode) qi.focus(); } }, 300);
+      return;
+    }
     S.ed = null; S.prodSel = null;
     selectProduct(r.sku);
     if (!r.products) reloadCatalog().then(function () { if (S.view === 'products' && S.ed && !S.ed.dirty && S.ed.p.sku === r.sku) { S.ed = null; selectProduct(r.sku); } }).catch(function () {});
@@ -4380,7 +4390,8 @@ function renderOpening() {
     '<div class="op-head"><div><h2>ตั้งยอดเปิดร้าน <span class="op-lock">ล็อกการขาย/รับของทุกเครื่อง</span></h2><div class="muted" style="font-size:13px;line-height:1.6">นับของที่อยู่ในร้านตอนนี้ใส่ช่อง <b>นับได้</b> พร้อม <b>ทุนต่อชิ้น</b> · ตัวเลขเก็บไว้ในเครื่องนี้ ปิดหน้าแล้วกลับมานับต่อได้<br>สินค้าที่ไม่ได้นับจะคงยอดเดิม</div></div></div>' +
     '<div id="ocats"></div><div class="row stk-tools"><label for="oscan" style="white-space:nowrap">สแกน</label>' +
     '<input id="oscan" class="grow" autocomplete="off" placeholder="สแกนบาร์โค้ด = +1 (สแกนแพ็ค = +12) หรือพิมพ์จำนวนในช่อง">' + camBtn('oscan') +
-    '<label class="sr" for="oq">ค้นหา</label><input id="oq" data-input="opQ" placeholder="ค้นหาชื่อสินค้า" style="max-width:220px" value="' + esc(opDraft().q || '') + '"></div>' +
+    '<label class="sr" for="oq">ค้นหา</label><input id="oq" data-input="opQ" placeholder="ค้นหาชื่อสินค้า" style="max-width:220px" value="' + esc(opDraft().q || '') + '">' +
+    '<button class="btn" data-act="opNewProduct">+ เพิ่มสินค้าใหม่</button></div>' +
     '<div class="stk-grid op head"><div>สินค้า</div><div class="r">ในระบบ</div><div class="r">นับได้</div><div class="r">ทุน/ชิ้น</div><div class="r">มูลค่า</div></div>' +
     '<div id="orows" class="stk-rows"></div><div class="cnt-foot" id="ofoot"></div></section></div>';
 }
@@ -4431,7 +4442,12 @@ function opScan(v) {
   var code = S.barcodes.filter(function (b) { return b.barcode === v; })[0];
   var sku = code ? code.sku : (S.products.filter(function (p) { return p.plu === v || p.sku === v; })[0] || {}).sku;
   var p = sku && S.idx.bySku[sku];
-  if (!p || p.type === 'recipe') { beep(); return toast('ไม่พบสินค้า ' + v, true); }
+  if (p && p.type === 'recipe') { beep(); return toast(p.name + ' เป็นสูตรผสม — นับที่ส่วนประกอบแทน', true); }
+  if (!p) {
+    beep();
+    if (!/^\d{6,14}$/.test(v)) return toast('ไม่พบสินค้า ' + v, true);
+    return confirm2('ยังไม่มีสินค้านี้', 'บาร์โค้ด ' + v + ' ยังไม่มีในระบบ — เพิ่มเป็นสินค้าใหม่เลยไหม? (บันทึกแล้วจะกลับมาหน้านับ พร้อมนับให้ 1)', 'เพิ่มสินค้า').then(function (ok) { if (ok) opNewProduct(v); });
+  }
   var d = opDraft();
   d.qty[sku] = String(Number(d.qty[sku] || 0) + (code ? code.multiplier : 1)); opSave();
   var row = $('#orows [data-sku="' + sku + '"]');
@@ -4440,6 +4456,16 @@ function opScan(v) {
   if (row) { row.scrollIntoView({ block: 'nearest' }); row.classList.add('flash'); setTimeout(function () { row.classList.remove('flash'); }, 500); }
   toast(p.name + ' = ' + d.qty[sku]);
 }
+/** Add a product without leaving the count: opens the product editor, comes back here after saving. */
+function opNewProduct(barcode) {
+  S.opReturn = { barcode: barcode || '' };
+  S.promoMode = false; S.labelMode = false;
+  go('products');
+  S.ed = null; S.prodSel = null;
+  selectProduct('');
+  if (barcode) edAddCode(barcode);
+}
+
 function opConfirm() {
   var d = opDraft(), s = opSum();
   var lines = opProducts().filter(function (p) { return opHas(p.sku); }).map(function (p) { return { sku: p.sku, qty: Number(d.qty[p.sku]), cost: opCost(p) }; });
@@ -7046,6 +7072,7 @@ var ACTIONS = {
   cntCommit: cntCommit,
   opCat: function (el) { opDraft().cat = el.getAttribute('data-c'); drawOpening(); },
   opConfirm: function () { opConfirm(); },
+  opNewProduct: function () { opNewProduct(''); },
   opStart: function () {
     confirm2('เริ่มตั้งยอดเปิดร้าน', 'ระหว่างนับ ทุกเครื่องจะขาย รับของ หรือใช้หน้าอื่นไม่ได้ จนกว่าจะกด "ตั้งยอดเปิดร้านเสร็จสิ้น" (หรือยกเลิก) — เริ่มเลยไหม?', 'เริ่ม').then(function (ok) {
       if (!ok) return;

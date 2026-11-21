@@ -129,7 +129,7 @@ const server = http.createServer((req, res) => {
     ok('startOpening', T);
     await page.click('#syncpill');
     await page.waitForSelector('.op-main, .op-intro', { timeout: 15000 });
-    assert.deepStrictEqual(await page.$$eval('header nav button', a => a.map(x => x.textContent)), ['ตั้งยอดเปิดร้าน'], 'locked by another device');
+    assert.deepStrictEqual(await page.$$eval('header nav button', a => a.map(x => x.textContent)), ['ตั้งยอดเปิดร้าน', 'สินค้า'], 'locked by another device');
     ok('cancelOpening', T);
     await page.click('#syncpill');
     await page.waitForFunction(() => document.querySelectorAll('header nav button').length > 5, null, { timeout: 15000 });
