@@ -270,44 +270,36 @@ call('importProducts', T, [
   await page.click('nav button[data-v=stock]');
   await page.waitForFunction(() => document.querySelectorAll('#srows .stk-grid').length >= 3);
   await page.waitForSelector('#skpi .kpi');
-  // ตั้งยอดเปิดร้าน: start locks everything (every device), count, finish sets stock = count and unlocks
+  // ตั้งยอดเปิดร้าน mode, switched on in Settings: only settings / products / stock count / accounting until finished
   const shelf = call('saveProduct', T, { name: 'ข้าวเกรียบ', price: 20, type: 'nobarcode', unit: 'ห่อ' }).sku;
-  await page.click('nav button[data-v=sale]'); await page.click('nav button[data-v=stock]');
-  await page.click('.op-banner [data-v=opening]');
-  await page.waitForSelector('.op-steps');
+  await page.click('nav button[data-v=settings]');
+  await page.click('[data-act=setTab][data-t=backup]');
   await page.click('[data-act=opStart]');
   await page.click('[data-x=yes]');
-  await page.waitForSelector('#orows [data-sku="' + shelf + '"] [data-ocost]');
-  assert.deepStrictEqual(await page.$$eval('header nav button', a => a.map(x => x.textContent)), ['ตั้งยอดเปิดร้าน', 'สินค้า'], 'other pages locked (products stay open for adding items)');
-  assert.ok(!call('commitSale', T, { saleUid: 'OPLOCK', payMethod: 'cash', received: 10, lines: [{ sku: 'D0102', qty: 1 }] }), 'server refuses a sale while counting');
-  await page.evaluate(() => window.__S && 0);
-  // a product not in the system yet: scan its barcode → add it → back to counting with 1 counted
-  await page.fill('#oscan', '8859999000017'); await page.keyboard.press('Enter');
-  await page.click('.modal [data-x=yes]');
-  await page.waitForSelector('#e-name');
-  assert.ok(await page.evaluate(() => /8859999000017/.test(document.querySelector('#ped').innerHTML) || [...document.querySelectorAll('#ped input')].some(i => i.value === '8859999000017')), 'barcode carried into the new product');
-  await page.fill('#e-name', 'ถั่วอบกรอบ');
-  await page.fill('#e-price', '10');
-  await page.click('[data-ed=save]');
-  await page.waitForSelector('.op-main');
-  const nut = call('bootstrap', T).products.find(p => p.name === 'ถั่วอบกรอบ');
-  assert.strictEqual(await page.inputValue('#orows [data-sku="' + nut.sku + '"] [data-oqty]'), '1', 'new product counted as 1');
-  await page.fill('#orows [data-sku="' + nut.sku + '"] [data-ocost]', '6');
-  await page.fill('#orows [data-sku="' + shelf + '"] [data-oqty]', '12');
-  await page.fill('#orows [data-sku="' + shelf + '"] [data-ocost]', '14');
-  await page.fill('#oscan', '8851234567890'); await page.keyboard.press('Enter');   // scan = 1 water
-  assert.match(await page.textContent('#ofoot'), /นับแล้ว 3 รายการ · มูลค่า ฿178\.20/);
+  await page.waitForSelector('.op-bar');
+  assert.deepStrictEqual(await page.$$eval('header nav button', a => a.map(x => x.textContent)), ['สินค้า', 'สต็อก', 'บัญชี', 'ตั้งค่า'], 'only these pages while setting up');
+  assert.ok(!call('commitSale', T, { saleUid: 'OPLOCK', payMethod: 'cash', received: 10, lines: [{ sku: 'D0102', qty: 1 }] }), 'server refuses a sale meanwhile');
+  await page.waitForSelector('#crows [data-sku="' + shelf + '"] [data-ccost]');
+  await page.fill('#crows [data-sku="' + shelf + '"] [data-cnt]', '12');
+  await page.fill('#crows [data-sku="' + shelf + '"] [data-ccost]', '14');
+  await page.fill('#cscan', '8851234567890'); await page.keyboard.press('Enter');   // scan = 1 water
+  assert.match(await page.textContent('#cfoot'), /ใส่แล้ว 2 รายการ · มูลค่าสต็อก ฿172\.20/);
   await shot('09m-opening');
-  await page.click('[data-act=opConfirm]');
+  await page.click('[data-act=cntCommit]');
   await page.click('[data-x=yes]');
-  await page.waitForSelector('.toast:has-text("ตั้งยอดเปิดร้านเสร็จแล้ว")');
-  await page.waitForSelector('#srows .stk-grid');
+  await page.waitForSelector('.toast:has-text("บันทึกยอดเปิดร้านแล้ว")');
   const bsO = call('bootstrap', T);
   const crisp = bsO.products.find(p => p.sku === shelf);
   assert.deepStrictEqual([crisp.onHand, crisp.cost], [12, 14], 'opening stock and cost set');
   assert.strictEqual(bsO.products.find(p => p.sku === 'W0001').onHand, 1, 'stock = the count');
-  assert.ok((await page.$$('header nav button')).length > 5, 'unlocked');
-  assert.ok(!(await page.$('.op-banner')), 'one time only: the banner is gone');
+  // money: accounting is open during the mode
+  await page.click('header nav button[data-v=acct]');
+  await page.waitForSelector('.op-bar');
+  await page.click('[data-act=opFinish]');
+  await page.click('[data-x=yes]');
+  await page.waitForSelector('.toast:has-text("ตั้งยอดเปิดร้านเสร็จแล้ว")');
+  assert.ok((await page.$$('header nav button')).length > 5 && !(await page.$('.op-bar')), 'unlocked');
+  await page.click('nav button[data-v=stock]');
   // count tab: type one count, scan another (pack barcode = +12)
   await page.click('[data-act=stockTab][data-t=count]');
   await page.waitForSelector('#crows [data-cnt]');
