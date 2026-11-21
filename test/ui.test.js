@@ -196,6 +196,7 @@ call('importProducts', T, [
   await page.keyboard.press('F12');
   await page.click('#kp [data-k="3"]'); await page.click('#kp [data-k="0"]');   // touch keypad
   await shot('04b-pay-cash');
+  assert.strictEqual(await page.$eval('#kp', el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 4, 'pay keypad is a 4-column grid');
   assert.strictEqual(await page.inputValue('#recv'), '30');
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__serialWrites.length === 2);
@@ -269,8 +270,27 @@ call('importProducts', T, [
   await page.click('nav button[data-v=stock]');
   await page.waitForFunction(() => document.querySelectorAll('#srows .stk-grid').length >= 3);
   await page.waitForSelector('#skpi .kpi');
-  // count tab: type one count, scan another (pack barcode = +12)
+  // opening stock (owner, until closed or the first regular count): quantity + cost, no approval, not a stock gain
   await page.click('[data-act=stockTab][data-t=count]');
+  await page.click('[data-act=cntMode][data-m=opening]');
+  await page.waitForSelector('#crows .is-moved');
+  assert.match(await page.textContent('#crows [data-sku="D0102"]'), /มีรับเข้า\/ขายแล้ว/, 'sold items cannot get opening stock');
+  const shelf = call('saveProduct', T, { name: 'ข้าวเกรียบ', price: 20, type: 'nobarcode', unit: 'ห่อ' }).sku;
+  await page.click('nav button[data-v=sale]'); await page.click('nav button[data-v=stock]');
+  await page.click('[data-act=stockTab][data-t=count]');
+  await page.waitForSelector('#crows [data-sku="' + shelf + '"] [data-ccost]');
+  await page.fill('#crows [data-sku="' + shelf + '"] [data-cnt]', '12');
+  await page.fill('#crows [data-sku="' + shelf + '"] [data-ccost]', '14');
+  assert.match(await page.textContent('#cfoot'), /มูลค่าสต็อก ฿168\.00/);
+  await shot('09m-opening');
+  await page.click('[data-act=cntCommit]');
+  await page.click('[data-x=yes]');
+  await page.waitForSelector('.toast:has-text("บันทึกยอดเปิดร้านแล้ว")');
+  const crisp = call('bootstrap', T).products.find(p => p.sku === shelf);
+  assert.deepStrictEqual([crisp.onHand, crisp.cost], [12, 14], 'opening stock and cost set');
+  assert.ok(await page.$('.chip.on[data-m=opening]'), 'stays in opening mode for the next shelf');
+  await page.click('[data-act=cntMode][data-m=""]');
+  // count tab: type one count, scan another (pack barcode = +12)
   await page.waitForSelector('#crows [data-cnt]');
   await page.fill('#crows [data-sku="D0102"] [data-cnt]', '5');
   await page.fill('#cscan', '8851234567906'); await page.keyboard.press('Enter');
@@ -283,21 +303,7 @@ call('importProducts', T, [
   let bs = call('bootstrap', T);
   assert.strictEqual(bs.products.find(p => p.sku === 'D0102').onHand, 5, 'counted coffee');
   assert.strictEqual(bs.products.find(p => p.sku === 'W0001').onHand, 12, 'counted water');
-  // opening stock (owner, first 30 days): quantity + cost per piece, no approval, not a stock gain
-  await page.click('[data-act=cntMode][data-m=opening]');
-  await page.waitForSelector('#crows [data-ccost]');
-  await page.fill('#crows [data-sku="D0101"] [data-cnt]', '40');
-  await page.fill('#crows [data-sku="D0101"] [data-ccost]', '1.65');
-  assert.match(await page.textContent('#cfoot'), /มูลค่าสต็อก ฿66\.00/);
-  await shot('09m-opening');
-  await page.click('[data-act=cntCommit]');
-  await page.click('[data-x=yes]');
-  await page.waitForSelector('.toast:has-text("บันทึกยอดเปิดร้านแล้ว")');
-  bs = call('bootstrap', T);
-  const ice = bs.products.find(p => p.sku === 'D0101');
-  assert.deepStrictEqual([ice.onHand, ice.cost], [40, 1.65], 'opening stock and cost set');
-  assert.ok(await page.$('.chip.on[data-m=opening]'), 'stays in opening mode for the next shelf');
-  await page.click('[data-act=cntMode][data-m=""]');
+  assert.ok(!(await page.$('[data-act=cntMode]')), 'the first regular count closes opening stock');
   // write-off by search
   await page.fill('#wo-q', 'กาแฟ');
   await page.waitForSelector('#wo-sug button');

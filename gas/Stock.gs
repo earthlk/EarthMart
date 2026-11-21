@@ -31,9 +31,10 @@ function addStockMoves_(sess, moves) {
 function api_stockList(token) {
   return respond_(function () {
     session_(token);
+    var moved = movedSkus_();
     return readAll_('Products').filter(function (p) { return bool_(p.active) && p.type !== 'recipe'; }).map(function (p) {
       return { sku: String(p.sku), name: p.name, category: p.category, subcategory: subcatOf_(p), unit: p.unit || 'ชิ้น',
-               onHand: num_(p.onHand), minStock: num_(p.minStock), manual: p.minManual !== '' && p.minManual !== null && p.minManual !== undefined, cost: num_(p.cost), forSale: forSale_(p) };
+               onHand: num_(p.onHand), minStock: num_(p.minStock), manual: p.minManual !== '' && p.minManual !== null && p.minManual !== undefined, cost: num_(p.cost), forSale: forSale_(p), moved: !!moved[String(p.sku)] };
     });
   });
 }
@@ -180,7 +181,12 @@ function api_stockCount(token, cnt) {
     var opening = !!cnt.opening;
     if (opening) {
       owner_(token);
-      if (!openingAllowed_()) throw new Error('ตั้งยอดเปิดร้านได้ภายใน ' + OPENING_DAYS + ' วันแรกหลังเริ่มใช้งานจริงเท่านั้น — หลังจากนั้นใช้ "ตรวจนับ" ตามปกติ');
+      if (!openingAllowed_()) throw new Error('ปิดการตั้งยอดเปิดร้านไปแล้ว — ต่อจากนี้ใช้ "ตรวจนับ" ตามปกติ');
+      // a product that has already been received or sold is no longer "what the shop had"
+      var moved = movedSkus_(), names = {};
+      readAll_('Products').forEach(function (p) { names[String(p.sku)] = p.name; });
+      var late = (cnt.lines || []).filter(function (l) { return moved[String(l.sku)]; }).map(function (l) { return names[String(l.sku)] || l.sku; });
+      if (late.length) throw new Error('มีรับเข้าหรือขายไปแล้ว ใช้ยอดเปิดร้านไม่ได้: ' + late.slice(0, 5).join(', ') + (late.length > 5 ? ' …' : '') + ' — ใช้ "ตรวจนับปกติ" แทน');
     }
     var lines = (cnt.lines || []).filter(function (l) { return l && l.sku && l.counted !== '' && l.counted !== null && l.counted !== undefined; });
     if (!lines.length) throw new Error('ยังไม่ได้นับสินค้า');
@@ -220,6 +226,11 @@ function api_stockCount(token, cnt) {
         addStockMoves_(s, moves);
       }
       var net = round2_(plus - minus);
+      if (!opening && changed && openingAllowed_()) {
+        // the first regular stock check closes the opening stock
+        saveSettingRaw_('openingDone', '1');
+        log_(s, 'STOCK_OPENING_CLOSE', cnt.countUid, 'ปิดการตั้งยอดเปิดร้าน (ตรวจนับปกติครั้งแรก)', '');
+      }
       if (opening) {
         log_(s, 'STOCK_OPENING', cnt.countUid, 'ตั้งยอด ' + changed + ' รายการ · มูลค่า ' + net + ' บาท' + (cnt.note ? ' · ' + cnt.note : ''), '');
         return { refNo: cnt.countUid, counted: lines.length, changed: changed, plusValue: round2_(plus), minusValue: round2_(minus), netValue: net, opening: true };
@@ -306,12 +317,22 @@ function expiringLots_(days, products) {
 }
 
 
-/** Opening stock (what the shop already had) can be entered before going live and for the first days after. */
-var OPENING_DAYS = 30;
-function openingAllowed_() {
-  var v = getSetting_('liveSince');
-  if (!v) return true;
-  // the sheet may hand back a Date (it turns "2026-11-16 09:00" into one) or the text
-  var t = v instanceof Date ? v.getTime() : new Date(String(v).trim().replace(' ', 'T') + ':00+07:00').getTime();
-  return !(t > 0) || now_().getTime() - t <= OPENING_DAYS * 86400000;
+/** Opening stock (what the shop already had): open from go-live until the owner closes it or the first regular count. */
+function openingAllowed_() { return String(getSetting_('openingDone') || '') !== '1'; }
+
+/** SKUs with any stock movement other than the opening stock (received, sold, counted, written off…). */
+function movedSkus_() {
+  var o = {};
+  readAll_('StockMoves').forEach(function (m) { if (m.type !== 'OPEN') o[String(m.sku)] = 1; });
+  return o;
+}
+
+/** Owner: done entering what the shop had — from now on only regular counts. */
+function api_closeOpening(token) {
+  return respond_(function () {
+    var s = owner_(token);
+    saveSettingRaw_('openingDone', '1');
+    log_(s, 'STOCK_OPENING_CLOSE', '', 'ปิดการตั้งยอดเปิดร้าน', '');
+    return { openingDone: true };
+  });
 }

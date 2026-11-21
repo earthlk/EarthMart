@@ -67,6 +67,7 @@ function api_goLive(token, opts) {
 
       var today = fmtDate_(now_(), 'yyyy-MM-dd');
       saveSettingRaw_('liveSince', fmtDate_(now_(), 'yyyy-MM-dd HH:mm'));
+      saveSettingRaw_('openingDone', '');   // the opening stock count starts now
       saveSettingRaw_('accStart', today);
       log_(s, 'GO_LIVE', backup, JSON.stringify({ cleared: sheets, before: before, keptDevices: devs.length }), '');
       return { liveSince: getSetting_('liveSince'), backup: backup, cleared: sheets, before: before };

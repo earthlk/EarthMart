@@ -933,18 +933,18 @@ a{color:var(--brand-text)}
 @media (max-width:1100px){.syncpill{font-size:0;gap:0;padding:0 11px}}
 
 /* Sale keys in rows (sub-groups) + press-and-hold to arrange */
-.keypad{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;align-content:start}
-.keypad .keys{flex:none;overflow:visible;align-items:stretch}
-.keypad .key{height:100%;min-height:0}
+.salekeys{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;align-content:start}
+.salekeys .keys{flex:none;overflow:visible;align-items:stretch}
+.salekeys .key{height:100%;min-height:0}
 .krow{display:flex;flex-direction:column;gap:6px}
 .krow-h{font-size:13px;font-weight:600;color:var(--muted);padding:2px 2px 0;display:flex;align-items:center;gap:8px;user-select:none}
 .krow-h::after{content:"";flex:1;height:1px;background:var(--line)}
-.keypad.can-arrange .key,.keypad.can-arrange .krow-h{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-.keypad.can-arrange .krow-h{cursor:grab}
+.salekeys.can-arrange .key,.salekeys.can-arrange .krow-h{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.salekeys.can-arrange .krow-h{cursor:grab}
 .krow-new{display:none;border:2px dashed var(--line-strong);border-radius:12px;padding:18px;text-align:center;color:var(--muted);font-size:14px}
 .arranging .krow-new{display:block}
 .krow-new.over{border-color:var(--brand);color:var(--brand-text);background:var(--brand-soft)}
-.arranging .keypad .keys{min-height:60px;outline:1px dashed var(--line);outline-offset:4px;border-radius:12px}
+.arranging .salekeys .keys{min-height:60px;outline:1px dashed var(--line);outline-offset:4px;border-radius:12px}
 .key.dragging,.krow.dragging{opacity:.3}
 .kghost{position:fixed;left:0;top:0;z-index:9999;pointer-events:none;opacity:.92;box-shadow:0 12px 30px rgba(0,0,0,.25);transform-origin:0 0;overflow:hidden;background:var(--surface);border-radius:12px}
 .arranging,.arranging *{cursor:grabbing !important}
@@ -961,3 +961,4 @@ a{color:var(--brand-text)}
 .net-wait{color:var(--warn);font-weight:600}
 @media (max-width:560px){.net-q{grid-template-columns:minmax(0,1fr) auto}.net-q>div:nth-child(2){grid-column:1/-1;order:3}}
 .hintbox.warn{color:var(--warn);background:var(--warn-soft,rgba(214,120,40,.1));font-weight:500}
+.stk-grid.cnt.is-moved{opacity:.6}

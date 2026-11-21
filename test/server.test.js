@@ -964,16 +964,21 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   m('saveProduct', T, { name: 'ขนมปัง', price: 15, type: 'nobarcode', unit: 'ชิ้น' });
   const bread = m('listProducts', T).find(p => p.name === 'ขนมปัง').sku;
   ok(!c('stockCount', TC, { countUid: 'OP1', opening: true, lines: [{ sku: bread, counted: 30, cost: 8 }] }).ok, 'cashier cannot set opening stock');
-  const op = m('stockCount', T, { countUid: 'OP1', opening: true, note: 'ของเดิมในร้าน', lines: [{ sku: bread, counted: 30, cost: 8 }, { sku, counted: 40 }] });
-  ok(op.opening && op.changed === 2, 'opening stock saved without approval');
+  ok(/มีรับเข้าหรือขาย/.test(c('stockCount', T, { countUid: 'OP0', opening: true, lines: [{ sku, counted: 40 }] }).error), 'a product already received cannot get opening stock');
+  const op = m('stockCount', T, { countUid: 'OP1', opening: true, note: 'ของเดิมในร้าน', lines: [{ sku: bread, counted: 30, cost: 8 }] });
+  ok(op.opening && op.changed === 1, 'opening stock saved without approval');
   const after = Object.fromEntries(m('listProducts', T).map(p => [p.name, p]));
-  eq([after['ขนมปัง'].onHand, after['ขนมปัง'].cost, after['น้ำ'].onHand], [30, 8, 40], 'stock and cost set');
+  eq([after['ขนมปัง'].onHand, after['ขนมปัง'].cost], [30, 8], 'stock and cost set');
+  m('stockCount', T, { countUid: 'OP1b', opening: true, lines: [{ sku: bread, counted: 32, cost: 8 }] });
+  eq(m('listProducts', T).find(p => p.sku === bread).onHand, 32, 'opening can be corrected while nothing was sold');
   const acc = m('accSummary', T, { from: '2026-01-01', to: '2026-12-31' });
-  eq([acc.stock.shrink, acc.stock.opening], [0, 240 + 16 * 6], 'counted as opening stock, not as a stock gain');
+  eq([acc.stock.shrink, acc.stock.opening], [0, 256], 'counted as opening stock, not as a stock gain');
   ok(m('auditLog', T, 10).some(a => a.action === 'STOCK_OPENING'), 'logged');
-  h.__advance(31 * 86400000);
-  const T2 = m('login', m('status').users[0].userId, '1111', DEVA).token;
-  ok(/30 วัน/.test(c('stockCount', T2, { countUid: 'OP2', opening: true, lines: [{ sku: bread, counted: 50 }] }).error), 'only in the first 30 days after going live');
+  eq(m('stockList', T).find(r => r.sku === bread).moved, false, 'stock list: opening only');
+  // the first regular count closes it
+  m('stockCount', T, { countUid: 'C1', lines: [{ sku: bread, counted: 31 }] });
+  eq(m('status').settings.openingDone, '1', 'first regular count closes opening stock');
+  ok(/ปิดการตั้งยอดเปิดร้าน/.test(c('stockCount', T, { countUid: 'OP2', opening: true, lines: [{ sku: bread, counted: 50 }] }).error), 'no opening stock after that');
 }
 
 {

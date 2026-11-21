@@ -65,7 +65,7 @@ const server = http.createServer((req, res) => {
     await page.goto(SITE + '#connect=' + encodeURIComponent(link));
     await page.waitForSelector('.login');
     for (const d of '1234') await page.click('.pinpad [data-k="' + d + '"]');
-    await page.waitForSelector('.keypad');
+    await page.waitForSelector('.salekeys');
 
     // rows in order with their names
     assert.deepStrictEqual(await page.$$eval('.krow-h', a => a.map(x => x.textContent)), ['น้ำอัดลม', 'ชูกำลัง'], 'one row per sub-group');
@@ -120,7 +120,7 @@ const server = http.createServer((req, res) => {
 
     // survives a refresh
     await page.reload();
-    await page.waitForSelector('.keypad');
+    await page.waitForSelector('.salekeys');
     assert.deepStrictEqual(await page.$$eval('.krow-h', a => a.map(x => x.textContent)), ['ชูกำลัง', 'น้ำอัดลม', 'น้ำผลไม้'], 'layout kept after refresh');
     await page.waitForFunction(() => /ยอดรวม/.test(document.getElementById('totalbar').textContent));
     await shot('k3-after');

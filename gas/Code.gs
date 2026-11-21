@@ -89,6 +89,7 @@ var DEFAULT_SETTINGS = {
   expenseCats: '',
   accStart: '',
   liveSince: '',
+  openingDone: '',
   reorderDays: '7',
   syncMinutes: '5',
   accStartAssets: ''
