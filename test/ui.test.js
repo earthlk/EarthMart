@@ -270,30 +270,34 @@ call('importProducts', T, [
   await page.click('nav button[data-v=stock]');
   await page.waitForFunction(() => document.querySelectorAll('#srows .stk-grid').length >= 3);
   await page.waitForSelector('#skpi .kpi');
-  // opening stock: its own one-time page (banner on the stock page), added on top of what was received
+  // ตั้งยอดเปิดร้าน: start locks everything (every device), count, finish sets stock = count and unlocks
   const shelf = call('saveProduct', T, { name: 'ข้าวเกรียบ', price: 20, type: 'nobarcode', unit: 'ห่อ' }).sku;
   await page.click('nav button[data-v=sale]'); await page.click('nav button[data-v=stock]');
   await page.click('.op-banner [data-v=opening]');
+  await page.waitForSelector('.op-steps');
+  await page.click('[data-act=opStart]');
+  await page.click('[data-x=yes]');
   await page.waitForSelector('#orows [data-sku="' + shelf + '"] [data-ocost]');
-  assert.match(await page.textContent('.stk-grid.op.head'), /รับเข้าแล้ว/, 'shows what came in through receiving, so it is not counted twice');
+  assert.deepStrictEqual(await page.$$eval('header nav button', a => a.map(x => x.textContent)), ['ตั้งยอดเปิดร้าน'], 'other pages locked');
+  assert.ok(!call('commitSale', T, { saleUid: 'OPLOCK', payMethod: 'cash', received: 10, lines: [{ sku: 'D0102', qty: 1 }] }), 'server refuses a sale while counting');
+  await page.evaluate(() => window.__S && 0);
   await page.fill('#orows [data-sku="' + shelf + '"] [data-oqty]', '12');
   await page.fill('#orows [data-sku="' + shelf + '"] [data-ocost]', '14');
-  await page.fill('#oscan', '8851234567890'); await page.keyboard.press('Enter');   // scan = +1 water
-  assert.match(await page.textContent('#ofoot'), /ใส่แล้ว 2 รายการ · มูลค่า ฿172\.20/);
+  await page.fill('#oscan', '8851234567890'); await page.keyboard.press('Enter');   // scan = 1 water
+  assert.match(await page.textContent('#ofoot'), /นับแล้ว 2 รายการ · มูลค่า ฿172\.20/);
   await shot('09m-opening');
-  const w0 = call('bootstrap', T).products.find(p => p.sku === 'W0001').onHand;
   await page.click('[data-act=opConfirm]');
   await page.click('[data-x=yes]');
-  await page.waitForSelector('.toast:has-text("บันทึกสต็อกเปิดร้านแล้ว")');
+  await page.waitForSelector('.toast:has-text("ตั้งยอดเปิดร้านเสร็จแล้ว")');
   await page.waitForSelector('#srows .stk-grid');
   const bsO = call('bootstrap', T);
   const crisp = bsO.products.find(p => p.sku === shelf);
   assert.deepStrictEqual([crisp.onHand, crisp.cost], [12, 14], 'opening stock and cost set');
-  assert.strictEqual(bsO.products.find(p => p.sku === 'W0001').onHand, w0 + 1, 'added on top of the received water');
+  assert.strictEqual(bsO.products.find(p => p.sku === 'W0001').onHand, 1, 'stock = the count');
+  assert.ok((await page.$$('header nav button')).length > 5, 'unlocked');
   assert.ok(!(await page.$('.op-banner')), 'one time only: the banner is gone');
-  await page.click('[data-act=stockTab][data-t=count]');
-  assert.ok(!(await page.$('[data-act=cntMode]')), 'the regular count page has no opening mode');
   // count tab: type one count, scan another (pack barcode = +12)
+  await page.click('[data-act=stockTab][data-t=count]');
   await page.waitForSelector('#crows [data-cnt]');
   await page.fill('#crows [data-sku="D0102"] [data-cnt]', '5');
   await page.fill('#cscan', '8851234567906'); await page.keyboard.press('Enter');
@@ -498,7 +502,7 @@ call('importProducts', T, [
   assert.ok(g.__sheet('Ledger').some(t => t.kind === 'PURCHASE' && Number(t.amount) === -153), 'paid from the bank account');
   const wl = call('lots', T, 'W0001');
   assert.deepStrictEqual(wl.slice(-1).map(l => [l.qtyIn, l.qtyLeft, l.unitCost, l.expiryDate]), [[24, 24, 4.5, '2027-03-31']], 'new FIFO lot');
-  assert.ok(wl.length === 3 && wl[0].unitCost === 4.2, 'opening lots still first (import + opening page)');
+  assert.ok(wl.length >= 2 && wl[0].unitCost === 4.2, 'opening lot still first');
   await page.waitForSelector('#rrecent :text("RC")');
   // lots modal from the product editor
   await page.click('nav button[data-v=products]');

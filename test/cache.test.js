@@ -124,6 +124,16 @@ const server = http.createServer((req, res) => {
     await new Promise(r => setTimeout(r, 500));
     assert.ok(seen.includes('bootstrap'), 'timer fires a background sync');
 
+    // 5b. Opening stock started on another device: this one locks at the next sync, unlocks after cancel
+    await page.clock.uninstall?.();
+    ok('startOpening', T);
+    await page.click('#syncpill');
+    await page.waitForSelector('.op-main, .op-intro', { timeout: 15000 });
+    assert.deepStrictEqual(await page.$$eval('header nav button', a => a.map(x => x.textContent)), ['ตั้งยอดเปิดร้าน'], 'locked by another device');
+    ok('cancelOpening', T);
+    await page.click('#syncpill');
+    await page.waitForFunction(() => document.querySelectorAll('header nav button').length > 5, null, { timeout: 15000 });
+
     // 6. Signed out elsewhere (token no longer valid): refresh lands on sign-in
     await page.evaluate(() => sessionStorage.setItem('em_token', 'nope') || localStorage.setItem('em_token', 'nope'));
     await page.evaluate(() => { try { sstore('em_token', 'nope'); } catch (e) {} });

@@ -43,6 +43,7 @@ function api_commitSale(token, sale) {
 
       // Sales queued while offline carry the time they were made and their shift (sent later from the outbox).
       var off = offlineSale_(sale, s);
+      if (!off.at) noOpening_();   // bills made offline before the lock still go in
       var shift = off.shift || openShiftForDevice_(s.deviceId);
       if (!shift) throw new Error('ยังไม่ได้เปิดกะ');
       // Who rang it up: whoever signed in offline on the counter (signed with their PIN), else this session.
@@ -353,6 +354,7 @@ function api_voidSale(token, billNo, reason, approvalId) {
   return respond_(function () {
     var s = session_(token);
     requireCounter_(s);
+    noOpening_();
     if (!String(reason || '').trim()) throw new Error('ต้องใส่เหตุผล');
     var approver = consumeApproval_(s, approvalId, 'VOID');
     return withLock_(function () {
@@ -397,6 +399,7 @@ function api_returnSale(token, ret) {
   return respond_(function () {
     var s = session_(token);
     requireCounter_(s);
+    noOpening_();
     if (!ret || !ret.returnUid || !ret.billNo) throw new Error('ข้อมูลไม่ครบ');
     if (REFUND_METHODS.indexOf(ret.refundMethod) < 0) throw new Error('เลือกวิธีคืนเงิน');
     if (!String(ret.reason || '').trim()) throw new Error('ต้องใส่เหตุผล');

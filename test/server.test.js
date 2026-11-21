@@ -963,21 +963,27 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   // opening stock: what was already on the shelves, entered once — a stock-in, not a "found extra" profit
   m('saveProduct', T, { name: 'ขนมปัง', price: 15, type: 'nobarcode', unit: 'ชิ้น' });
   const bread = m('listProducts', T).find(p => p.name === 'ขนมปัง').sku;
-  ok(!c('openingStock', TC, { uid: 'OP1', lines: [{ sku: bread, qty: 30, cost: 8 }] }).ok, 'cashier cannot set opening stock');
-  const info = m('openingInfo', T);
-  eq([info.open, info.received[sku]], [true, 24], 'opening page sees what was received since going live');
-  // regular counts do not touch the opening stock
-  m('stockCount', T, { countUid: 'C1', lines: [{ sku: bread, counted: 2 }] });
-  eq(m('openingInfo', T).open, true, 'a regular count leaves the opening stock open');
-  // one confirm: quantities are ADDED as opening lots (the 24 received waters stay as they are)
-  const op = m('openingStock', T, { uid: 'OP1', lines: [{ sku: bread, qty: 30, cost: 8 }, { sku, qty: 10, cost: 5 }] });
-  eq([op.items, op.value], [2, 290], 'opening stock saved');
+  ok(!c('startOpening', TC).ok, 'cashier cannot start the opening stock');
+  ok(/ยังไม่ได้เริ่ม/.test(c('openingStock', T, { uid: 'OP0', lines: [{ sku: bread, qty: 1 }] }).error), 'must be started first');
+  m('startOpening', T);
+  eq(m('status').settings.openingActive, '1', 'shop locked on every device');
+  ok(/กำลังตั้งยอดเปิดร้าน/.test(c('commitSale', TC, { saleUid: 'LOCK1', payMethod: 'cash', received: 100, lines: [{ sku, qty: 1 }] }).error), 'no sales while counting');
+  ok(/กำลังตั้งยอดเปิดร้าน/.test(c('receive', T, { receiptUid: 'LOCK2', lines: [{ sku, qty: 1, unitCost: 5 }] }).error), 'no receiving while counting');
+  ok(/กำลังตั้งยอดเปิดร้าน/.test(c('stockCount', T, { countUid: 'LOCK3', lines: [{ sku, counted: 1 }] }).error), 'no regular count while counting');
+  // cancel unlocks without saving; start again
+  m('cancelOpening', T);
+  eq(m('status').settings.openingActive, '', 'cancel unlocks');
+  m('startOpening', T);
+  // finish: each counted product becomes exactly the count (water had 24 → 30), uncounted ones keep their stock
+  const op = m('openingStock', T, { uid: 'OP1', lines: [{ sku: bread, qty: 30, cost: 8 }, { sku, qty: 30 }] });
+  eq([op.items, op.value], [2, 30 * 8 + 30 * 6], 'opening stock saved');
   const after = Object.fromEntries(m('listProducts', T).map(p => [p.name, p]));
-  eq([after['ขนมปัง'].onHand, after['น้ำ'].onHand], [32, 34], 'added on top of what was received / counted');
+  eq([after['ขนมปัง'].onHand, after['ขนมปัง'].cost, after['น้ำ'].onHand], [30, 8, 30], 'stock = the count');
+  eq([m('status').settings.openingActive, m('status').settings.openingDone], ['', '1'], 'unlocked and done');
   eq(m('openingStock', T, { uid: 'OP1', lines: [{ sku: bread, qty: 30 }] }).duplicate, true, 'same request twice is ignored');
-  ok(/ครั้งเดียว/.test(c('openingStock', T, { uid: 'OP2', lines: [{ sku: bread, qty: 5 }] }).error), 'only once');
+  ok(/ครั้งเดียว/.test(c('startOpening', T).error), 'only once');
   const acc = m('accSummary', T, { from: '2026-01-01', to: '2026-12-31' });
-  eq(acc.stock.opening, 290, 'accounting: opening stock on its own line, not a gain');
+  eq([acc.stock.shrink, acc.stock.opening], [0, 240 + 36], 'accounting: opening stock on its own line, not a gain');
   ok(m('auditLog', T, 10).some(a => a.action === 'STOCK_OPENING'), 'logged');
 }
 

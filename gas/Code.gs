@@ -90,6 +90,7 @@ var DEFAULT_SETTINGS = {
   accStart: '',
   liveSince: '',
   openingDone: '',
+  openingActive: '',
   reorderDays: '7',
   syncMinutes: '5',
   accStartAssets: ''

@@ -139,6 +139,7 @@ function fifoFlush_(ctx) {
 function api_receive(token, rc) {
   return respond_(function () {
     var s = session_(token);
+    noOpening_();
     if (!rc || !rc.receiptUid) throw new Error('ข้อมูลไม่ครบ');
     if (!rc.lines || !rc.lines.length) throw new Error('ยังไม่มีสินค้า');
     return withLock_(function () {
