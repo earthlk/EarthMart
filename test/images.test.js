@@ -60,7 +60,13 @@ const server = http.createServer((req, res) => {
     await page.waitForSelector('.login');
     for (const d of '1234') await page.click('.pinpad [data-k="' + d + '"]');
     await page.waitForSelector('.salekeys');
+    // while photos are coming: the loading bar shows, and selling still works
+    await page.waitForSelector('#busy', { timeout: 5000 });
+    await page.click('.salekeys .key >> nth=0');
+    await page.waitForSelector('#lines .line');
+    assert.ok(!(await page.$('#saving.show')), 'no saving screen');
     await page.waitForFunction(() => document.querySelectorAll('.salekeys img.kimg').length === 30, null, { timeout: 20000 });
+    await page.waitForFunction(() => !document.getElementById('busy'), null, { timeout: 10000 });
     const single = calls.filter(f => f === 'productImage').length, batches = calls.filter(f => f === 'productImages').length;
     assert.strictEqual(single, 0, 'no one-photo-per-call requests');
     assert.ok(batches >= 3 && batches <= 6, 'photos come in batches (' + batches + ' calls for 30)');

@@ -2844,7 +2844,7 @@ var IMG_CACHE = 'em-images', imgPending = {};
 function imgKey(id) { return location.origin + location.pathname.replace(/[^/]*$/, '') + '__img/' + encodeURIComponent(id); }
 /**
  * Product photos: memory → this device (Cache Storage) → server. Server fetches are queued and sent in batches
- * (12 photos per call, at most 2 calls at a time, quietly), photos on screen first — instead of one request
+ * (12 photos per call, at most 2 calls at a time, with the loading bar), photos on screen first — instead of one request
  * per photo all at once, which flooded Apps Script and slowed everything else after a restart.
  */
 var imgQueue = { hi: [], lo: [], wait: {}, running: 0 };
@@ -2891,7 +2891,8 @@ function imgPump() {
       imgQueue.running--;
       if (imgQueue.hi.length || imgQueue.lo.length) imgPump();
     };
-    apiQuiet('productImages', S.token, ids).then(function (r) { settle(r.images || {}); }, function (e) { settle(null, e); });
+    api('productImages', S.token, ids).then(   // shows the thin loading bar (not the saving screen): the shop stays usable
+      function (r) { settle(r.images || {}); }, function (e) { settle(null, e); });
     if (imgQueue.running < 2 && (imgQueue.hi.length || imgQueue.lo.length)) imgPump();
   }, 30);
 }
