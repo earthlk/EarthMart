@@ -5954,18 +5954,18 @@ function drawNetOffline(saved, e) {
       '<div class="muted" style="font-size:13px">ดูเครื่องที่ต่ออยู่ เปิด/ปิดระบบ Whitelist ทั้งหมด ทำได้ที่เครื่องหน้าร้าน</div></div>';
     return;
   }
-  box.innerHTML = '<div class="card pad col" style="gap:10px;max-width:720px"><h2>อินเทอร์เน็ตร้าน</h2>' +
+  box.innerHTML = '<div class="net-split"><div class="card pad col" style="gap:10px"><h2>อินเทอร์เน็ตร้าน</h2>' +
     '<div class="banner warn" style="border-radius:10px">' + esc(e.message) + '</div>' +
     '<div class="muted" style="line-height:1.7">เปิดหน้านี้จากไอคอน <b>EarthMart Counter</b> บนเครื่องหน้าร้าน<br>' +
     'ถ้ายังไม่มีไอคอน ให้รัน Install-EarthMart.bat จากชุดติดตั้งล่าสุด (ตั้งค่า › การเชื่อมต่อ / ติดตั้ง)</div>' +
-    '<button class="btn" data-act="netReload" style="align-self:flex-start">ลองใหม่</button></div>' + netSavedList(saved);
+    '<button class="btn" data-act="netReload" style="align-self:flex-start">ลองใหม่</button></div>' + netSavedList(saved) + '</div>';
 }
 
 function drawNetSetup(saved) {
   var box = netBox(); if (!box) return;
-  box.innerHTML = '<div class="card pad col" style="gap:12px;max-width:560px"><h2>ตั้งค่าการเชื่อมเราเตอร์</h2><div class="muted">ทำครั้งเดียวบนเครื่องหน้าร้าน · ใช้รหัส admin ของเราเตอร์ AIS (หน้า 192.168.1.1)</div>' +
+  box.innerHTML = '<div class="net-split"><div class="card pad col" style="gap:12px;max-width:560px"><h2>ตั้งค่าการเชื่อมเราเตอร์</h2><div class="muted">ทำครั้งเดียวบนเครื่องหน้าร้าน · ใช้รหัส admin ของเราเตอร์ AIS (หน้า 192.168.1.1)</div>' +
     netSetupFields() + '<div class="muted" style="font-size:13px;line-height:1.6">รหัสผ่านเก็บในเครื่องนี้เท่านั้น</div>' +
-    '<button class="btn primary" data-act="netPair">เชื่อมเราเตอร์</button></div>' + netSavedList(saved || []);
+    '<button class="btn primary" data-act="netPair">เชื่อมเราเตอร์</button></div>' + netSavedList(saved || []) + '</div>';
   netCapBind(box);
 }
 
@@ -6003,9 +6003,9 @@ function netCapBind(scope, lazy) {
 /** Session gone (the router logs out after a while, or someone opened 192.168.1.1): log in again with the captcha. */
 function drawNetLogin(saved) {
   var box = netBox(); if (!box) return;
-  box.innerHTML = '<div class="card pad col" style="gap:12px;max-width:520px"><h2>ล็อกอินเราเตอร์</h2>' +
+  box.innerHTML = '<div class="net-split"><div class="card pad col" style="gap:12px;max-width:520px"><h2>ล็อกอินเราเตอร์</h2>' +
     '<div class="muted" style="line-height:1.6">พิมพ์ตัวอักษรในภาพเพื่อล็อกอินเราเตอร์<br>ต้องล็อกอินใหม่เมื่อปิดคอม หรือมีคนเปิดหน้า 192.168.1.1</div>' +
-    netCapHtml() + '<div class="row" style="gap:8px"><button class="btn primary" data-act="netLogin">ล็อกอิน</button><button class="btn" data-act="netSetup">ตั้งค่าการเชื่อม</button></div></div>' + netSavedList(saved || []);
+    netCapHtml() + '<div class="row" style="gap:8px"><button class="btn primary" data-act="netLogin">ล็อกอิน</button><button class="btn" data-act="netSetup">ตั้งค่าการเชื่อม</button></div></div>' + netSavedList(saved || []) + '</div>';
   netCapBind(box);
   var c = $('#net-code', box);
   if (c) c.addEventListener('keydown', function (e) { if (e.key === 'Enter') NET_ACTIONS.netLogin(); });
