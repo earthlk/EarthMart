@@ -1495,8 +1495,11 @@ function renderSale() {
   var keysHaveImg = keyList.some(function (p) { return p.image; });
   var keyHtml = function (p) {
       var c = KEY_COLORS[p.color] || KEY_COLORS.gray;
-      return '<button class="key" data-act="quickKey" data-sku="' + esc(p.sku) + '"><span class="ic' + (p.image && S.imgUrl && S.imgUrl[p.image] ? ' has-img' : '') + '"' + pimgAttr(p) + ' style="background:' + c[0] + ';color:' + c[1] + '">' +
-        picHtml(p) + '</span>' + (promosFor(p.sku).length ? '<span class="kpromo">โปร</span>' : '') + '<span class="nm">' + esc(p.name) + '</span><span class="pr">' +
+      // no photo and no icon: a plain coloured key with the name, not a two-letter placeholder tile
+      var bare = !p.image && !iconSvg(p.icon);
+      return '<button class="key' + (bare ? ' bare' : '') + '" data-act="quickKey" data-sku="' + esc(p.sku) + '"' + (bare ? ' style="background:' + c[0] + ';border-color:' + c[0] + ';color:' + c[1] + '"' : '') + '>' +
+        (bare ? '' : '<span class="ic' + (p.image && S.imgUrl && S.imgUrl[p.image] ? ' has-img' : '') + '"' + pimgAttr(p) + ' style="background:' + c[0] + ';color:' + c[1] + '">' + picHtml(p) + '</span>') +
+        (promosFor(p.sku).length ? '<span class="kpromo">โปร</span>' : '') + '<span class="nm">' + esc(p.name) + '</span><span class="pr">' +
         (p.openPrice ? 'ราคาเปิด' : '฿' + money(p.price)) + '</span></button>';
     };
   // Rows = sub-groups (subcategory), in the order of their first key; keys without a row go last
@@ -1511,7 +1514,7 @@ function renderSale() {
   var keys = rows.map(function (r) {
     var named = rows.length > 1 || r;
     return '<div class="krow" data-row="' + esc(r) + '">' + (named ? '<div class="krow-h"' + (owner ? ' title="กดค้างแล้วลากเพื่อย้ายแถว"' : '') + '>' + esc(r || 'อื่นๆ') + '</div>' : '') +
-      '<div class="keys' + (keysHaveImg ? ' with-img' : '') + '">' + byRow[r].map(keyHtml).join('') + '</div></div>';
+      '<div class="keys' + (keysHaveImg ? ' with-img' : '') + (byRow[r].every(function (p) { return !p.image && !iconSvg(p.icon); }) ? ' bare' : '') + '">' + byRow[r].map(keyHtml).join('') + '</div></div>';
   }).join('');
   if (!gnames.length) keys = '<div class="muted">ยังไม่มีปุ่มขายด่วน — ตั้งได้ในหน้าสินค้า (ติ๊ก "ปุ่มขายด่วน")</div>';
   else if (owner) keys += '<div class="krow-new">ลากปุ่มมาวางที่นี่ = สร้างแถวใหม่</div>';
@@ -2269,16 +2272,19 @@ function payText(rc) {
 }
 
 function printReceipt(rc) {
-  var st = S.settings;
+  $('#print').innerHTML = receiptHtml(rc, S.settings, S.user ? S.user.name : '');
+  window.print();
+}
+function receiptHtml(rc, st, who) {
   var lines = rc.lines.map(function (l) {
     return '<tr><td colspan="2">' + esc(l.name) + (l.unitName && l.unitName !== 'ชิ้น' ? ' (' + esc(l.unitName) + ')' : '') + '</td></tr>' +
       '<tr><td>&nbsp;&nbsp;' + l.qty + ' × ' + money(l.unitPrice) + (l.lineDiscount ? ' ลด ' + money(l.lineDiscount) : '') + '</td><td style="text-align:right">' + money(l.lineTotal) + '</td></tr>';
   }).join('');
-  $('#print').innerHTML = '<div class="c big">' + esc(st.shopName || '') + '</div>' +
+  return '<div class="c big">' + esc(st.shopName || '') + '</div>' +
     (st.shopAddress ? '<div class="c">' + esc(st.shopAddress) + '</div>' : '') +
     (st.taxId ? '<div class="c">เลขผู้เสียภาษี ' + esc(st.taxId) + '</div>' : '') +
     '<div class="c">ใบเสร็จรับเงิน' + (rc.status === 'VOID' ? ' (ยกเลิก)' : '') + '</div><hr>' +
-    '<div>เลขที่ ' + esc(rc.billNo) + '<br>' + dateTime(rc.createdAt) + ' · ' + esc(S.user ? S.user.name : '') + '</div><hr>' +
+    '<div>เลขที่ ' + esc(rc.billNo) + '<br>' + dateTime(rc.createdAt) + ' · ' + esc(who || '') + '</div><hr>' +
     '<table>' + lines + '</table><hr><table>' +
     (rc.discount ? '<tr><td>รวม</td><td style="text-align:right">' + money(rc.subtotal) + '</td></tr>' : '') +
     (rc.promos || []).map(function (x) { return '<tr><td>โปร ' + esc(x.name) + (x.times > 1 ? ' ×' + x.times : '') + '</td><td style="text-align:right">-' + money(x.discount) + '</td></tr>'; }).join('') +
@@ -2290,8 +2296,18 @@ function printReceipt(rc) {
       : '<tr><td>' + payName(rc.payMethod) + '</td><td style="text-align:right">' + money(rc.received) + '</td></tr>') +
     (rc.payMethod === 'cash' || rc.payMethod === 'split' && rc.change > 0 ? '<tr><td>เงินทอน</td><td style="text-align:right">' + money(rc.change) + '</td></tr>' : '') +
     '</table><hr><div class="c">' + esc(st.receiptFooter || '') + '</div>';
-  window.print();
 }
+/* Settings › ร้าน: sample bill drawn with the form's current values */
+function receiptPreview() {
+  var st = Object.assign({}, S.settings);
+  $all('[data-sec=shop] [data-skey]').forEach(function (i) { st[i.getAttribute('data-skey')] = i.value; });
+  var pre = st.billPrefix || '';
+  var rc = { billNo: pre + '2611-000123', createdAt: new Date().toISOString(), status: 'OK', payMethod: 'cash',
+    lines: [{ name: 'น้ำดื่ม 600 มล.', qty: 2, unitPrice: 7, lineTotal: 14 }, { name: 'กาแฟเย็น', qty: 1, unitPrice: 35, lineTotal: 35 }],
+    subtotal: 49, discount: 0, total: 49, received: 100, change: 51, promos: [] };
+  return receiptHtml(rc, st, S.user ? S.user.name : '');
+}
+function refreshReceiptPreview() { var el = $('#rcpt-prev'); if (el) el.innerHTML = receiptPreview(); }
 
 /* ---------------------- PromptPay QR (EMVCo) ---------------------- */
 
@@ -3224,7 +3240,7 @@ function renderPromos() {
     '<div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">โปรโมชั่น</h2><span class="grow"></span>' +
     '<button class="btn" data-act="promoClose">‹ กลับหน้าสินค้า</button><button class="btn primary" data-act="promoNew">+ สร้างโปรโมชั่น</button></div>' +
     '<div class="muted" style="font-size:13px">ของใกล้หมดอายุที่ลดราคาแล้วไม่ร่วมโปร · 1 ชิ้นเข้าได้โปรเดียว</div></section>' +
-    '<div id="promo-rows" class="promo-list">' + skelList(4) + '</div></div>';
+    '<div id="promo-rows" class="card promo-list">' + skelList(4) + '</div></div>';
 }
 
 function promoStatus(p) {
@@ -3252,14 +3268,14 @@ function loadPromos() {
     list = list.slice().sort(function (a, b) { return order[promoStatus(a)[1]] - order[promoStatus(b)[1]]; });
     box.innerHTML = list.length ? list.map(function (p) {
       var st = promoStatus(p);
-      return '<div class="card pad promo-card' + (st[1] === 'gray' ? ' off' : '') + '"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">' +
-        '<div class="col" style="gap:2px;min-width:0"><b style="font-size:16px">' + esc(p.name) + '</b><span>' + esc(promoText(p)) + '</span>' +
-        '<span class="muted" style="font-size:13px">' + PROMO_TYPE_TH[p.type] + ' · ' + esc(promoWhenText(p)) + '</span></div>' +
-        '<span class="tag ' + st[1] + '" style="white-space:nowrap">' + st[0] + '</span></div>' +
-        '<div class="row" style="gap:8px;margin-top:8px"><button class="btn sm" data-act="promoEdit" data-id="' + esc(p.promoId) + '">แก้ไข</button>' +
+      return '<div class="promo-row promo-card' + (st[1] === 'gray' ? ' off' : '') + '">' +
+        '<div class="pr-what"><b>' + esc(p.name) + '</b><span class="muted">' + esc(promoText(p)) + '</span></div>' +
+        '<div class="pr-when"><span>' + esc(promoWhenText(p)) + '</span><span class="muted">' + PROMO_TYPE_TH[p.type] + '</span></div>' +
+        '<span class="tag ' + st[1] + '" style="white-space:nowrap;justify-self:start">' + st[0] + '</span>' +
+        '<div class="row pr-acts" style="gap:6px"><button class="btn sm" data-act="promoEdit" data-id="' + esc(p.promoId) + '">แก้ไข</button>' +
         '<button class="btn sm" data-act="promoToggle" data-id="' + esc(p.promoId) + '" data-on="' + (p.active ? '0' : '1') + '">' + (p.active ? 'ปิดโปร' : 'เปิดโปร') + '</button>' +
         (st[1] !== 'gray' ? '<button class="btn sm" data-act="labPromo" data-id="' + esc(p.promoId) + '">พิมพ์ป้ายโปร</button>' : '') + '</div></div>';
-    }).join('') : '<div class="card pad empty">ยังไม่มีโปรโมชั่น — กด "+ สร้างโปรโมชั่น"</div>';
+    }).join('') : '<div class="pad empty">ยังไม่มีโปรโมชั่น — กด "+ สร้างโปรโมชั่น"</div>';
   }).catch(fail);
 }
 
@@ -3580,11 +3596,13 @@ function renderProductRows() {
     var ean = piece ? '<span class="num">' + esc(piece.barcode) + '</span>' : (p.plu ? '<span class="muted">— PLU ' + esc(p.plu) + '</span>' :
       '<span class="muted">' + (p.forSale === false ? '— (ไม่ขายเป็นชิ้น)' : '—') + '</span>');
     var isRecipe = p.type === 'recipe';
+    // tags only for what differs from a plain piece product: packs/cases, internal codes, not on the sale screen…
     var tags = codes.map(function (b) {
       var internal = /^2\d{12}$/.test(b.barcode);
-      return '<span class="tag ' + (internal ? 'amber' : 'blue') + '">' + (internal ? 'โค้ดภายใน' : esc(b.unitName) + (b.multiplier > 1 ? ' ' + b.multiplier : '')) + '</span>';
+      if (internal) return '<span class="tag amber">โค้ดภายใน</span>';
+      return b.multiplier > 1 ? '<span class="tag blue">' + esc(b.unitName) + ' ' + b.multiplier + '</span>' : '';
     }).join('') + (isRecipe ? '<span class="tag green" title="' + esc(recipeText(p.sku)) + '">สูตรผสม</span>' : '') +
-      (p.forSale === false ? '<span class="tag gray">วัตถุดิบ</span>' : '') + (p.quickKey ? '<span class="tag green">ปุ่มด่วน</span>' : '') + (p.openPrice ? '<span class="tag amber">ราคาเปิด</span>' : '') +
+      (p.forSale === false ? '<span class="tag gray">วัตถุดิบ</span>' : '') + (p.openPrice ? '<span class="tag amber">ราคาเปิด</span>' : '') +
       (!p.active ? '<span class="tag gray">ปิดใช้งาน</span>' : '');
     var low = p.minStock > 0 && p.onHand <= p.minStock;
     return '<div class="prod-grid' + (S.prodSel === p.sku ? ' on' : '') + '" data-act="selProduct" data-sku="' + esc(p.sku) + '"' + (p.active ? '' : ' style="opacity:.55"') + '>' +
@@ -5290,11 +5308,12 @@ function drawAccOverview(d) {
   var html = (d.missingCost ? '<div class="banner warn" style="border-radius:10px">มีสินค้า ' + d.missingCost + ' รายการที่ยังไม่มีราคาทุน — กำไรจะสูงเกินจริง (ใส่ทุนในหน้าสินค้า / รับสินค้า)</div>' : '') +
     (!A.start ? '<div class="banner" style="border-radius:10px">ยังไม่ได้ตั้งยอดเริ่มต้น (เงินในธนาคาร / เงินสดสำรอง) · <a href="#" data-act="accSetup">ตั้งตอนนี้</a></div>' : '') +
     '<div class="acc-grid"><div class="col" style="gap:16px;min-width:0">' +
-    '<div class="acc-kpis">' + kpiCard('ยอดขาย', m0(f.netSales), f.bills + ' บิล · ' + m0(f.netSales / days) + '/วัน') +
-    kpiCard('ต้นทุนสินค้าที่ขาย', m0(f.cogs), accPct(f.cogs, f.netSales)) +
-    kpiCard('กำไรขั้นต้น', m0(f.gross), accPct(f.gross, f.netSales) + ' ของยอดขาย') +
-    kpiCard('รายจ่ายร้าน + ของเสีย', m0(loss), 'รวมของขาดจากตรวจนับ', 'warn') +
-    kpiCard('กำไรสุทธิ', m0(f.net), 'ไม่รวมเงินถอนใช้ส่วนตัว', f.net >= 0 ? 'good' : 'warn') + '</div>' +
+    // read left to right as the sum it is: sales − cost = gross − spending = net
+    '<div class="card acc-flow">' + kpiCard('ยอดขาย', m0(f.netSales), f.bills + ' บิล · ' + m0(f.netSales / days) + '/วัน', 'flat') + '<i class="op">−</i>' +
+    kpiCard('ต้นทุนสินค้า', m0(f.cogs), accPct(f.cogs, f.netSales), 'flat') + '<i class="op">=</i>' +
+    kpiCard('กำไรขั้นต้น', m0(f.gross), accPct(f.gross, f.netSales) + ' ของยอดขาย', 'flat') + '<i class="op">−</i>' +
+    kpiCard('รายจ่าย + ของเสีย', m0(loss), 'รวมของขาดจากตรวจนับ', 'flat') + '<i class="op">=</i>' +
+    kpiCard('กำไรสุทธิ', m0(f.net), 'ไม่รวมเงินถอนใช้ส่วนตัว', 'flat hero ' + (f.net >= 0 ? 'good' : 'warn')) + '</div>' +
     '<div class="card pad"><div class="acc-h"><b>ที่มากำไรสุทธิ</b><a href="#" data-act="accTab" data-t="pl">ดูงบกำไรขาดทุน ›</a></div>' +
     (f.netSales > 0 ? '<div class="acc-split"><i style="flex:' + Math.max(0, f.cogs) + ';background:#D9DDD8">ต้นทุนสินค้า ' + m0(f.cogs) + '</i><i style="flex:' + Math.max(0, loss) + ';background:#F6C7A8">รายจ่าย</i>' +
       (f.net > 0 ? '<i style="flex:' + f.net + ';background:var(--brand);color:var(--brand-ink)">กำไร</i>' : '') + '</div>' +
@@ -6689,13 +6708,18 @@ function drawReport() {
     var unit = month ? 'รายเดือน' : 'รายวัน';
     var catView = r.catView || 'compare';
     var leak = round2(sm.voidTotal + sm.refunds + sm.discount);
-    html = head + '<div class="kpis kpis6">' + kpi('ยอดขายสุทธิ', '฿' + money(sm.net), sm.refunds ? 'ขาย ฿' + money(sm.gross) + ' − คืน ฿' + money(sm.refunds) : '', 'brand-text') +
-      kpi('จำนวนบิล', sm.bills, sm.bills ? 'เฉลี่ย ฿' + money(sm.avgBill) + ' / บิล' : '') +
-      kpi('กำไรขั้นต้น', '฿' + money(sm.profit) + ' ' + pct(sm.margin), 'ต้นทุน ฿' + money(sm.cost)) +
-      kpi('กำไรหลังหัก', '฿' + money(sm.after), sm.net ? (Math.round(sm.after / sm.net * 1000) / 10) + '% ของยอดขาย' : '') +
-      kpi('ของเสีย · หมดอายุ · เบิกใช้', '฿' + money(lossAll), 'เสีย ฿' + money(sm.loss) + ' · หมดอายุ ฿' + money(sm.expiry) + ' · เบิก ฿' + money(sm.use), lossAll ? 'warn-text' : '') +
-      kpi('ยกเลิก · คืน · ส่วนลด', '฿' + money(leak), 'ยกเลิก ' + sm.voids + ' บิล ฿' + money(sm.voidTotal) + ' · คืน ฿' + money(sm.refunds) + ' · ส่วนลด ฿' + money(round2(sm.discount - (sm.promo || 0))) +
-        (sm.promo ? ' · โปร ฿' + money(sm.promo) : ''), leak ? 'warn-text' : '') + '</div>' +
+    // only the parts that actually happened: "หมดอายุ ฿19.00", never "เสีย ฿0.00"
+    var parts = function (arr) { return arr.filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ' ฿' + money(x[1]); }).join(' · '); };
+    var stat = function (k, v, sub, cls) { return '<div class="stat' + (cls ? ' ' + cls : '') + '"><span>' + k + '</span><b class="num">' + v + '</b>' + (sub ? '<small>' + sub + '</small>' : '') + '</div>'; };
+    var leakBox = function (k, v, sub) { return '<div class="rep-leak"><span>' + k + '</span><b class="num">฿' + money(v) + '</b><small>' + sub + '</small></div>'; };
+    html = head + '<div class="card kpis rep-hero">' + stat('ยอดขายสุทธิ', '฿' + money(sm.net), sm.refunds ? 'ขาย ฿' + money(sm.gross) + ' − คืน ฿' + money(sm.refunds) : '', 'hero') +
+      stat('กำไรหลังหัก', '฿' + money(sm.after), sm.net ? (Math.round(sm.after / sm.net * 1000) / 10) + '% ของยอดขาย' : '', 'hero2') +
+      stat('กำไรขั้นต้น', '฿' + money(sm.profit), (sm.net ? pct(sm.margin) + ' · ' : '') + 'ต้นทุน ฿' + money(sm.cost)) +
+      stat('จำนวนบิล', sm.bills, sm.bills ? 'เฉลี่ย ฿' + money(sm.avgBill) + ' / บิล' : '') + '</div>' +
+      (lossAll || leak ? '<div class="rep-leaks">' +
+        (lossAll ? leakBox('ของเสีย · หมดอายุ · เบิกใช้', lossAll, parts([['เสีย', sm.loss], ['หมดอายุ', sm.expiry], ['เบิก', sm.use]])) : '') +
+        (leak ? leakBox('ยกเลิก · คืน · ส่วนลด', leak, (sm.voids ? 'ยกเลิก ' + sm.voids + ' บิล ฿' + money(sm.voidTotal) : '') +
+          (sm.voids && (sm.refunds || sm.discount) ? ' · ' : '') + parts([['คืน', sm.refunds], ['ส่วนลด', round2(sm.discount - (sm.promo || 0))], ['โปร', sm.promo || 0]])) : '') + '</div>' : '') +
       '<div class="card pad chart-card"><div class="ch-h"><h2>ยอดขาย' + unit + '</h2><span class="muted" id="c-trend-s"></span></div><div class="ch-box"><canvas id="c-trend"></canvas></div></div>' +
       '<div class="card pad chart-card"><div class="ch-h"><h2>ยอดขาย' + unit + ' แยกตามหมวด</h2><span class="grow"></span><div class="seg-sm">' +
         [['compare', 'เทียบกัน'], ['cards', 'แยกการ์ด']].map(function (o) { return '<button class="' + (catView === o[0] ? 'on' : '') + '" data-act="repCatView" data-v="' + o[0] + '">' + o[1] + '</button>'; }).join('') + '</div></div>' +
@@ -6822,11 +6846,15 @@ function renderSettings() {
   return '<div class="page set-page"><nav class="card set-nav" aria-label="หมวดตั้งค่า">' + SET_TABS.map(function (t) {
     return '<button type="button" data-act="setTab" data-t="' + t[0] + '" class="' + (tab === t[0] ? 'on' : '') + '"><b>' + t[1] + '</b><small>' + t[2] + '</small></button>';
   }).join('') + '</nav><div class="set-body">' +
-    sec('shop', '<form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>ร้าน / ใบเสร็จ</h2>' + f('shopName', 'ชื่อร้าน (บนใบเสร็จ)') + f('shopAddress', 'ที่อยู่') +
+    sec('shop', '<div class="set-cols"><form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>ร้าน / ใบเสร็จ</h2>' + f('shopName', 'ชื่อร้าน (บนใบเสร็จ)') + f('shopAddress', 'ที่อยู่') +
     f('taxId', 'เลขผู้เสียภาษี', 'ถ้ามี') + f('promptPayId', 'พร้อมเพย์', 'เบอร์มือถือ / เลขบัตร 13 หลัก') + f('receiptFooter', 'ข้อความท้ายใบเสร็จ') +
     f('billPrefix', 'คำนำหน้าเลขบิล', 'เว้นว่างได้') +
     '<div class="field"><label for="s-autoPrint">พิมพ์ใบเสร็จอัตโนมัติหลังรับเงิน</label><select id="s-autoPrint" data-skey="autoPrint">' +
       '<option value="1">พิมพ์ทุกบิล (ยกเลิกได้ในหน้าชำระเงิน)</option><option value="0"' + (st.autoPrint === '0' ? ' selected' : '') + '>ไม่พิมพ์ (ติ๊กพิมพ์เองเฉพาะบิลที่ลูกค้าขอ)</option></select></div>' +
+      '<button class="btn primary" type="submit">บันทึก</button></form>' +
+    '<div class="col" style="gap:16px"><div class="card pad rcpt-card"><div class="sec-title"><b>ตัวอย่างใบเสร็จ</b><span class="muted" style="font-size:12px">กว้าง 72 มม.</span></div>' +
+      '<div class="rcpt-prev" id="rcpt-prev">' + receiptPreview() + '</div></div>' +
+    '<form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>การทำงานของโปรแกรม</h2>' +
     '<div class="field"><label for="s-reorderDays">รอบรับของ (ค่าเริ่มต้น) <small class="muted">— สำหรับสินค้าใหม่</small></label><select id="s-reorderDays" data-skey="reorderDays">' +
       [['3', '3 วัน'], ['5', '5 วัน'], ['7', '7 วัน (สัปดาห์ละครั้ง)'], ['10', '10 วัน'], ['14', '14 วัน (2 สัปดาห์)'], ['30', '30 วัน (เดือนละครั้ง)']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.reorderDays || '7') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
@@ -6836,14 +6864,14 @@ function renderSettings() {
     '<div class="field"><label for="s-autoLockMinutes">ล็อกหน้าจอเมื่อไม่มีใครใช้ (ต้องใส่ PIN ใหม่)</label><select id="s-autoLockMinutes" data-skey="autoLockMinutes">' +
       [['0', 'ไม่ล็อก'], ['5', '5 นาที'], ['10', '10 นาที'], ['15', '15 นาที'], ['30', '30 นาที'], ['60', '1 ชั่วโมง'], ['120', '2 ชั่วโมง']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.autoLockMinutes === undefined ? '5' : st.autoLockMinutes) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
-      '<button class="btn primary" type="submit">บันทึก</button></form>') +
+      '<button class="btn primary" type="submit">บันทึก</button></form></div></div>') +
     sec('customer', '<div class="set-cols"><form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>จอลูกค้า</h2>' + f('customerWelcome', 'ข้อความต้อนรับ', 'ยินดีต้อนรับค่ะ') + f('shopHours', 'เวลาเปิด–ปิด', 'เช่น เปิดทุกวัน 06:00–22:00') +
     f('customerPromoTitle', 'ข้อความโปร (หัวข้อ · เป็นสไลด์ข้อความ)', 'เว้นว่าง = ไม่แสดง') + f('customerPromoText', 'ข้อความโปร (รายละเอียด)', 'เช่น ซื้อ 2 ขวด 25 บาท') +
     '<div class="grid3">' + f('slideSeconds', 'วินาทีต่อสไลด์', '8', 'number') +
     '<div class="field"><label for="s-slidesAuto">สไลด์จากโปรโมชั่น</label><select id="s-slidesAuto" data-skey="slidesAuto"><option value="1">แสดง</option><option value="0"' + (st.slidesAuto === '0' ? ' selected' : '') + '>ไม่แสดง</option></select></div>' +
     '<div class="field"><label for="s-cdHints">บอกโปรตอนสแกน</label><select id="s-cdHints" data-skey="cdHints"><option value="1">เปิด</option><option value="0"' + (st.cdHints === '0' ? ' selected' : '') + '>ปิด</option></select></div></div>' +
       '<button class="btn primary" type="submit">บันทึก</button></form>' + slidesCard() + '</div>') +
-    sec('look', '<form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>ธีมสี / LINE</h2>' + '<div class="field"><label for="s-theme">โหมดสี (ทั้งร้าน)</label><select id="s-theme" data-skey="theme">' + ['light', 'dark', 'system'].map(function (t) {
+    sec('look', '<div class="set-cols even"><form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>ธีมสี</h2>' + '<div class="field"><label for="s-theme">โหมดสี (ทั้งร้าน)</label><select id="s-theme" data-skey="theme">' + ['light', 'dark', 'system'].map(function (t) {
       return '<option value="' + t + '"' + (st.theme === t ? ' selected' : '') + '>' + { light: 'สว่าง', dark: 'มืด', system: 'ตามเครื่อง' }[t] + '</option>';
     }).join('') + '</select></div>' +
     '<div class="field"><label for="s-palette">สีหลัก</label><select id="s-palette" data-skey="palette">' + pal.map(function (p) {
@@ -6851,30 +6879,33 @@ function renderSettings() {
     }).join('') + '</select></div>' +
     '<div class="field"><label for="localtheme">โหมดสีเฉพาะเครื่องนี้</label><select id="localtheme" data-change="localTheme"><option value="">ตามร้าน</option>' +
     '<option value="light"' + (local === 'light' ? ' selected' : '') + '>สว่าง</option><option value="dark"' + (local === 'dark' ? ' selected' : '') + '>มืด</option></select></div>' +
+      '<button class="btn primary" type="submit">บันทึก</button></form>' +
+    '<form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>แจ้งเตือน LINE</h2>' +
     f('lineChannelToken', 'LINE Channel access token', 'เว้นว่าง = ไม่ส่ง', 'password') + f('lineTargetId', 'LINE ผู้รับ (userId / groupId)') +
-      '<button class="btn primary" type="submit">บันทึก</button></form>') +
-    sec('device', '<div class="card pad col set-card" style="gap:10px"><h2>เครื่องนี้</h2>' + '<div class="muted" style="font-size:13px;word-break:break-all">รหัส ' + esc(S.deviceId) + '</div>' +
+      '<button class="btn primary" type="submit">บันทึก</button></form></div>') +
+    sec('device', '<div class="set-cols even"><div class="card pad col set-card" style="gap:10px"><h2>เครื่องนี้</h2>' + '<div class="muted" style="font-size:13px;word-break:break-all">รหัส ' + esc(S.deviceId) + '</div>' +
     '<div>' + (S.isCounter ? '<span class="tag green">เครื่องหน้าร้าน</span>' : '<span class="tag warn">ยังไม่ได้ลงทะเบียน</span>') + '</div>' +
     (S.isCounter ? '<button class="btn warn" data-act="unregisterThis">ยกเลิกการลงทะเบียนเครื่องนี้</button>' : '<button class="btn primary" data-act="registerThis">ลงทะเบียนเป็นเครื่องหน้าร้าน</button>') +
-    '<div id="devlist" class="muted" style="font-size:13px"></div><hr style="border:0;border-top:1px solid var(--line);width:100%">' +
-    drawerSettings() + '</div>') +
+    '<div id="devlist" class="muted" style="font-size:13px"></div></div>' +
+    (window.CashDrawer ? '<div class="card pad col set-card" style="gap:10px">' + drawerSettings() + '</div>' : '') + '</div>') +
     sec('users', '<div class="card pad set-card wide"><h2>พนักงาน & สิทธิ์</h2><div id="userlist">' + skelList(3) + '</div>' +
     '<form class="row" data-form="addUser" style="margin-top:10px;flex-wrap:wrap"><label class="sr" for="nu-name">ชื่อ</label><input id="nu-name" placeholder="ชื่อ" style="width:140px">' +
     '<label class="sr" for="nu-role">สิทธิ์</label><select id="nu-role"><option value="cashier">แคชเชียร์</option><option value="owner">เจ้าของ</option></select>' +
     '<label class="sr" for="nu-pin">PIN</label><input id="nu-pin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN 4–6 หลัก" style="width:120px">' +
     '<button class="btn" type="submit">+ เพิ่ม</button></form></div>' + '') +
     sec('net', '<div id="netbox" class="net-wrap"><div class="card pad"><div class="muted" style="margin-bottom:8px">กำลังเชื่อมตัวช่วยอินเทอร์เน็ต…</div>' + skelList(4) + '</div></div>') +
-    sec('connect', '<div class="card pad col set-card" style="gap:10px">' + '<h2>การเชื่อมต่อ</h2><div class="muted" style="font-size:13px;word-break:break-all">' + esc(conn().url.replace(/(macros\/s\/.{6}).*(.{6}\/exec)/, '$1…$2')) + '</div>' +
+    sec('connect', '<div class="set-cols even"><div class="card pad col set-card" style="gap:10px">' + '<h2>การเชื่อมต่อ</h2><div class="muted" style="font-size:13px;word-break:break-all">' + esc(conn().url.replace(/(macros\/s\/.{6}).*(.{6}\/exec)/, '$1…$2')) + '</div>' +
     '<div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="copyConnect">คัดลอกลิงก์ตั้งค่าเครื่องอื่น</button><button class="btn sm ghost" data-act="connect">เปลี่ยน</button></div>' +
-    '<div class="muted" style="font-size:12px">ลิงก์นี้มี API key — ส่งให้เฉพาะเครื่องของร้าน</div>' +
-    '<hr style="border:0;border-top:1px solid var(--line);width:100%"><h2>ไฟล์เปิดในเครื่อง</h2>' +
+    '<div class="muted" style="font-size:12px">ลิงก์นี้มี API key — ส่งให้เฉพาะเครื่องของร้าน</div></div>' +
+    '<div class="card pad col set-card" style="gap:10px"><h2>ไฟล์ติดตั้ง</h2>' +
     (window.EM_LOCAL ? '<div class="muted" style="font-size:13px">เครื่องนี้เปิดจากไฟล์ในคอม · เวอร์ชัน ' + esc(window.EM_BUILD || '') + ' (เวลาไทย)<br>ไฟล์ไม่อัปเดตเอง — มีฟีเจอร์ใหม่ให้ดาวน์โหลดชุดติดตั้งแล้วรัน Install-EarthMart.bat อีกครั้ง</div>' +
       '<a class="btn sm" href="https://earthlk.github.io/EarthMart/EarthMart-Setup.zip" target="_blank" rel="noopener">ดาวน์โหลดชุดติดตั้งล่าสุด</a>'
       : '<div class="muted" style="font-size:13px">ติดตั้งบนคอมเครื่องอื่น: แตก ZIP แล้วรัน Install-EarthMart.bat</div>' +
-      '<div class="row" style="gap:6px;flex-wrap:wrap"><a class="btn sm" href="EarthMart-Setup.zip" download>ชุดติดตั้ง Windows (.zip)</a><a class="btn sm ghost" href="EarthMart-local.html" download="EarthMart.html">เฉพาะไฟล์ .html</a></div>') +'</div>') +
-    sec('backup', '<div class="set-cols"><div class="card pad col set-card" style="gap:10px">' + '<h2>สำรองข้อมูล</h2>' +
-      '<button class="btn" data-act="backupNow">สำรองตอนนี้</button>' + '<div id="golive"></div>' + '</div>' +
-      '<div class="card pad" style="max-height:calc(100vh - 140px);overflow:auto"><h2>บันทึกการทำงาน (ล่าสุด 100)</h2><table class="table"><tbody id="auditrows">' + skelRows(8, 3) + '</tbody></table></div></div>') +
+      '<div class="row" style="gap:6px;flex-wrap:wrap"><a class="btn sm" href="EarthMart-Setup.zip" download>ชุดติดตั้ง Windows (.zip)</a><a class="btn sm ghost" href="EarthMart-local.html" download="EarthMart.html">เฉพาะไฟล์ .html</a></div>') + '</div></div>') +
+    sec('backup', '<div class="set-cols"><div class="col" style="gap:16px"><div class="card pad col set-card" style="gap:10px">' + '<h2>สำรองข้อมูล</h2>' +
+      '<button class="btn" data-act="backupNow">สำรองตอนนี้</button></div>' +
+      '<section class="card pad col danger-zone" style="gap:10px"><h2>กระทบทุกเครื่อง</h2><div id="golive">' + skelList(2) + '</div></section>' +
+      '</div><div class="card pad" style="max-height:calc(100vh - 140px);overflow:auto"><h2>บันทึกการทำงาน (ล่าสุด 100)</h2><table class="table"><tbody id="auditrows">' + skelRows(8, 3) + '</tbody></table></div></div>') +
     '</div></div>';
 }
 
@@ -6945,8 +6976,8 @@ function loadGoLive() {
   if (!box) return;
   api('goLivePreview', S.token).then(function (p) {
     S.goLive = p;
-    if (p.liveSince) { box.innerHTML = '<hr style="border:0;border-top:1px solid var(--line)"><div class="muted" style="font-size:13px">เริ่มใช้งานจริงเมื่อ <b>' + esc(thDateY(p.liveSince) + ' ' + String(p.liveSince).slice(11, 16)) + '</b></div><div style="margin-top:12px">' + openingSettingsCard() + '</div>'; return; }
-    box.innerHTML = '<hr style="border:0;border-top:1px solid var(--line)"><h3 style="margin:4px 0">เริ่มใช้งานจริง</h3>' +
+    if (p.liveSince) { box.innerHTML = '<div class="muted" style="font-size:13px">เริ่มใช้งานจริงเมื่อ <b>' + esc(thDateY(p.liveSince) + ' ' + String(p.liveSince).slice(11, 16)) + '</b></div><div style="margin-top:12px">' + openingSettingsCard() + '</div>'; return; }
+    box.innerHTML = '<h3 style="margin:4px 0">เริ่มใช้งานจริง</h3>' +
       '<div class="muted" style="font-size:13px;line-height:1.6">ล้างบิล กะ สต็อก และบัญชีที่ทดลองไว้ ครั้งเดียวก่อนเปิดร้าน (สำรองทั้งไฟล์ให้ก่อน)</div>' +
       '<button class="btn warn" data-act="goLive">เริ่มใช้งานจริง…</button><div style="margin-top:12px">' + openingSettingsCard() + '</div>';
   }).catch(function () {});
@@ -7545,6 +7576,9 @@ if (window.MutationObserver) new MutationObserver(function () {
 }).observe(document.body, { childList: true, subtree: true });
 ['input', 'change'].forEach(function (ev) {
   document.addEventListener(ev, function (e) { if (e.target.type === 'date') thDateFields(); }, true);
+});
+document.addEventListener('input', function (e) {
+  if (e.target.closest && e.target.closest('[data-sec=shop]') && e.target.hasAttribute('data-skey')) refreshReceiptPreview();
 });
 document.addEventListener('click', function (e) {
   if (e.target.type === 'date' && e.target.showPicker) { try { e.target.showPicker(); } catch (er) { /* not allowed here */ } }

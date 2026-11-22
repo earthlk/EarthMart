@@ -55,6 +55,9 @@ a{color:var(--brand-text)}
 .row{display:flex;gap:8px;align-items:center}
 .col{display:flex;flex-direction:column;gap:6px}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0}
+/* type scale: value 15 · label 13 medium · note 12 muted — labels must not compete with what was typed */
+.field>label{font-size:13px;font-weight:500;color:var(--muted-2)}
+.field>label small{font-weight:400}
 .sr{position:absolute;left:-9999px}
 
 /* ===== Buttons ===== */
@@ -145,6 +148,11 @@ a{color:var(--brand-text)}
 .key .nm{font-size:15px}
 .key .nm{font-weight:600;line-height:1.25}
 .key .pr{margin-top:auto;color:var(--brand-text);font-weight:600}
+.key.bare{justify-content:space-between}
+.keys.bare{grid-auto-rows:96px}
+.key.bare .nm{font-size:17px;color:inherit}
+.key.bare .pr{color:inherit;font-size:16px}
+.key.bare:hover{filter:brightness(.97)}
 .total{display:flex;align-items:center;gap:16px;padding:14px 18px}
 .total .btn.qr-pay{height:64px;font-size:17px;border-color:var(--brand-line);color:var(--brand-text);font-weight:600;border-radius:12px}
 .total .amt{font-size:46px;font-weight:700;color:var(--brand-text);line-height:1}
@@ -527,7 +535,13 @@ a{color:var(--brand-text)}
 .promo-tag{display:inline-block;margin-top:4px;padding:1px 8px;border-radius:10px;background:var(--brand-soft);color:var(--brand-text);font-size:12px;font-weight:700}
 .key{position:relative}
 .kpromo{position:absolute;top:6px;right:6px;padding:1px 6px;border-radius:8px;background:var(--brand);color:var(--brand-ink);font-size:11px;font-weight:700}
-.promo-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.promo-list{display:flex;flex-direction:column;padding:0;overflow:hidden}
+.promo-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1.3fr) 110px auto;gap:16px;align-items:center;padding:12px 18px;border-top:1px solid var(--line)}
+.promo-row:first-child{border-top:0}
+.promo-row .pr-what,.promo-row .pr-when{display:flex;flex-direction:column;gap:2px;min-width:0}
+.promo-row .pr-what b{font-size:15px}
+.promo-row .muted{font-size:13px}
+.promo-row .pr-acts{justify-content:flex-end;flex-wrap:wrap}
 .promo-card.off{opacity:.6}
 .tag.blue{background:var(--tag-blue-bg);color:var(--tag-blue)}
 .promo-ed{gap:12px}
@@ -540,7 +554,9 @@ a{color:var(--brand-text)}
 .pchip .pq{display:inline-flex;align-items:center;gap:4px}
 .pchip .pq button,.pchip .px{width:26px;height:26px;border-radius:13px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);cursor:pointer;font:inherit;line-height:1}
 .pe-prev{min-height:20px;font-weight:600}
-#app.m .promo-list{grid-template-columns:1fr}
+#app.m .promo-row{grid-template-columns:1fr auto;gap:6px 10px;padding:12px 14px}
+#app.m .promo-row .pr-when{grid-column:1 / -1;order:3}
+#app.m .promo-row .pr-acts{grid-column:1 / -1;order:4;justify-content:flex-start}
 
 /* ===== Slides manager ===== */
 .set-grid2{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}
@@ -610,6 +626,7 @@ a{color:var(--brand-text)}
 .ic .kimg{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
 /* Product photos are mostly bottles, cans and bags: show them upright and whole (portrait card). */
 .keys.with-img{grid-auto-rows:220px;grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+.keys.with-img.bare{grid-auto-rows:96px}
 .keys.with-img .key .ic:not(.has-img){width:100%;height:auto;flex:1 1 0;min-height:0;border-radius:8px}
 .keys.with-img .key .ic:not(.has-img) svg{width:44px;height:44px}
 .key .ic.has-img{width:100%;height:auto;flex:1 1 0;min-height:0;border-radius:8px;background:#fff !important}
@@ -842,6 +859,18 @@ a{color:var(--brand-text)}
 .set-card{max-width:640px}.set-card.wide{max-width:none}
 .set-cols{display:grid;grid-template-columns:minmax(0,560px) minmax(0,1fr);gap:16px;align-items:start}
 .set-cols .set-card{max-width:none}
+.set-cols.even{grid-template-columns:repeat(2,minmax(0,1fr));max-width:1180px}
+/* Settings › ร้าน: paper-like receipt preview */
+.rcpt-card{display:flex;flex-direction:column;gap:12px}
+.rcpt-prev{align-self:center;width:300px;max-width:100%;background:#fff;color:#000;padding:16px 14px;font-size:12px;line-height:1.45;
+  border:1px solid var(--line);border-radius:4px;box-shadow:0 1px 0 var(--line)}
+.rcpt-prev .c{text-align:center}.rcpt-prev .big{font-size:16px;font-weight:700}
+.rcpt-prev table{width:100%;border-collapse:collapse}.rcpt-prev td{padding:1px 0;vertical-align:top}
+.rcpt-prev hr{border:0;border-top:1px dashed #000;margin:6px 0}
+/* Settings › สำรองข้อมูล: actions that change every device */
+.danger-zone{border-color:var(--warn-line);background:var(--warn-soft)}
+.danger-zone h2{color:var(--warn)}
+.danger-zone .op-card{border:0;padding:12px 0 0;margin:0;background:none;box-shadow:none;border-top:1px solid var(--line);border-radius:0}
 #app.m .set-page{grid-template-columns:1fr;grid-auto-rows:max-content;align-content:start}
 #app.m .set-nav{position:static;flex-direction:row;flex-wrap:nowrap;overflow-x:auto;flex:none}
 #app.m .set-nav button{flex:none;white-space:nowrap;padding:8px 12px}
@@ -994,3 +1023,33 @@ a{color:var(--brand-text)}
 .datef>input[type=date]::-webkit-datetime-edit{color:transparent}
 .datef-t{position:absolute;left:11px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--ink);white-space:nowrap;font-size:inherit}
 .datef>input[type=date]:disabled+.datef-t{color:var(--muted)}
+
+/* Report overview: one strip of headline numbers, sales first and biggest (1px gaps draw the dividers) */
+.kpis.rep-hero{display:grid;grid-template-columns:1.4fr 1.2fr 1fr 1fr;gap:1px;padding:0;background:var(--line);overflow:hidden}
+.rep-hero .stat{display:flex;flex-direction:column;gap:2px;padding:16px 20px;min-width:0;background:var(--surface)}
+.rep-hero .stat span{font-size:13px;color:var(--muted)}
+.rep-hero .stat b{font-size:24px;font-weight:700;line-height:1.2}
+.rep-hero .stat small{font-size:12px;color:var(--muted)}
+.rep-hero .stat.hero b{font-size:36px;color:var(--brand-text)}
+.rep-hero .stat.hero2 b{font-size:30px}
+.rep-leaks{display:flex;gap:12px;flex-wrap:wrap}
+.rep-leak{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--warn-line);background:var(--warn-soft);border-radius:10px;flex:1 1 320px;min-width:0}
+.rep-leak span{font-size:13px;color:var(--muted)}
+.rep-leak b{color:var(--warn);font-size:18px}
+.rep-leak small{font-size:12px;color:var(--muted)}
+@media (max-width:1100px){ .kpis.rep-hero{grid-template-columns:1fr 1fr} }
+#app.m .kpis.rep-hero{grid-template-columns:1fr 1fr;gap:1px}
+#app.m .rep-hero .stat{padding:12px 14px}
+#app.m .rep-hero .stat.hero{grid-column:1 / -1}
+#app.m .rep-hero .stat:last-child{grid-column:1 / -1}
+#app.m .rep-hero .stat.hero b{font-size:30px}
+#app.m .rep-hero .stat b,#app.m .rep-hero .stat.hero2 b{font-size:20px}
+/* Accounting overview: sales − cost = gross − spending = net */
+.acc-flow{display:flex;align-items:stretch;padding:0;overflow:hidden}
+.acc-flow .acc-kpi.flat{flex:1 1 0;border:0;border-radius:0;background:none;box-shadow:none;padding:14px 16px}
+.acc-flow .acc-kpi.flat b{font-size:20px}
+.acc-flow .acc-kpi.hero{flex:1.4 1 0;background:var(--brand-soft)}
+.acc-flow .acc-kpi.hero b{font-size:30px}
+.acc-flow .acc-kpi.hero.warn{background:var(--warn-soft)}
+.acc-flow .op{display:flex;align-items:center;font-style:normal;font-size:18px;color:var(--muted);padding:0 2px}
+@media (max-width:1200px){ .acc-flow{flex-wrap:wrap} .acc-flow .acc-kpi.flat{flex:1 1 30%} .acc-flow .op{display:none} .acc-flow .acc-kpi.hero{flex-basis:100%} }
