@@ -73,7 +73,16 @@ function timeOf(iso) { var d = new Date(iso); return isNaN(d) ? '' : String(d.ge
 function dateTime(iso) {
   var d = new Date(iso);
   if (isNaN(d)) return '';
-  return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + (d.getFullYear() + 543) + ' ' + timeOf(iso);
+  return thDateY(d) + ' ' + timeOf(iso);
+}
+var TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+/* "21 พ.ย. 69" from a Date or 'YYYY-MM-DD…' (no timezone shift for plain dates) */
+function thDateY(v) {
+  var y, m, d;
+  if (v instanceof Date) { y = v.getFullYear(); m = v.getMonth(); d = v.getDate(); }
+  else { var p = String(v || '').slice(0, 10).split('-'); if (p.length !== 3) return ''; y = +p[0]; m = +p[1] - 1; d = +p[2]; }
+  if (isNaN(y) || !TH_MON[m]) return '';
+  return d + ' ' + TH_MON[m] + ' ' + String(y + 543).slice(-2);
 }
 function randomId(n) {
   var a = new Uint8Array(n || 12);
@@ -245,7 +254,7 @@ function outboxModal() {
         (x.error ? '<span class="warn-text">' + esc(x.error) + '</span>' : '<span class="tag amber">รอส่ง</span>') + '</td><td class="r">' +
         (x.error && S.user.role === 'owner' ? '<button class="btn sm" data-del="' + esc(x.id) + '">ลบออก</button>' : '') + '</td></tr>';
     }).join('') + '</tbody></table>' : '<div class="empty">ไม่มีรายการค้างส่ง</div>') +
-    '<div class="muted" style="font-size:13px">ส่งอัตโนมัติเมื่อเชื่อมต่อได้ · รายการที่ส่งไม่ผ่าน (เช่น สินค้าถูกลบ) ให้เจ้าของตรวจแล้วลบออก · อย่าล้างข้อมูลเบราว์เซอร์ระหว่างมีรายการค้าง</div></div>' +
+    '<div class="muted" style="font-size:13px">อย่าล้างข้อมูลเบราว์เซอร์ระหว่างที่ยังมีรายการค้าง</div></div>' +
     '<footer><button class="btn" data-x="close">ปิด</button>' +
     (!S.offline && S.user && !S.token ? '<button class="btn primary" data-x="relog">เข้าสู่ระบบ</button>' :
       '<button class="btn primary" data-x="sync"' + (list.length ? '' : ' disabled') + '>ส่งตอนนี้</button>') + '</footer>');
@@ -765,8 +774,8 @@ function showConnect(msg) {
   var c = conn();
   $('#app').innerHTML = '<header class="topbar"><span class="brand">EarthMart</span></header>' +
     '<div class="center"><form class="card pad col" data-form="connect" style="width:min(560px,100%);gap:12px">' +
-    '<h2>เชื่อมต่อกับร้าน</h2><div class="muted" style="font-size:14px">ตั้งครั้งเดียวต่อเครื่อง · ค่าทั้งสองได้จากขั้นตอน Deploy ในคู่มือ ' +
-    'หรือเปิด "ลิงก์ตั้งค่าเครื่อง" จากหน้าตั้งค่าของเครื่องที่ใช้งานอยู่แล้ว</div>' +
+    '<h2>เชื่อมต่อกับร้าน</h2><div class="muted" style="font-size:14px">ใส่ค่าจากคู่มือ หรือเปิด "ลิงก์ตั้งค่าเครื่อง" ' +
+    'จากเครื่องที่ใช้อยู่แล้ว</div>' +
     (msg ? '<div class="banner" style="border-radius:8px">' + esc(msg) + '</div>' : '') +
     '<div class="field"><label for="c-link">วาง "ลิงก์ตั้งค่าเครื่อง" (ง่ายสุด)</label><input id="c-link" data-input="connectLink" placeholder="https://…#connect=…" autocomplete="off"></div>' +
     '<div class="muted" style="font-size:12px;text-align:center">— หรือใส่เอง —</div>' +
@@ -831,7 +840,7 @@ function renderLogin() {
     '<div class="center"><div class="card login"><div class="users"><h2 style="margin:0 0 6px">เลือกผู้ใช้</h2>' + users + '</div>' +
     '<div class="pin"><div class="muted">' + (who ? 'ใส่ PIN ของ ' + esc(who.name) : 'เลือกผู้ใช้ก่อน') + '</div>' +
     '<div class="dots' + (S.loginBusy ? ' busy' : '') + '">' + dots + '</div><div class="pinpad">' + keys + '</div>' +
-    '<div class="muted" style="font-size:13px">' + (S.loginBusy ? 'กำลังเข้าสู่ระบบ…' : 'ใส่ PIN ครบแล้วเข้าให้เอง · พิมพ์จากคีย์บอร์ดได้') + '</div></div></div></div>';
+    '<div class="muted" style="font-size:13px">' + (S.loginBusy ? 'กำลังเข้าสู่ระบบ…' : '') + '</div></div></div></div>';
 }
 
 /** PIN length of a user (0 = not known yet: older users until their first sign-in on the new version). */
@@ -1651,7 +1660,7 @@ function renderCartOnly() {
   var bar = $('#totalbar');
   var pt = (S.cart.promos || []).reduce(function (a, x) { return a + x.discount; }, 0);
   var hint = promoHint();
-  if (bar) bar.innerHTML = '<div class="grow">' + (hint ? '<div class="promo-hint" id="phint">💡 ' + esc(hint) + '</div>' : '') + '<div class="muted">' + t.items + ' ชิ้น' + (pt ? ' · <span class="brand-text" title="' + esc((S.cart.promos || []).map(function (x) { return x.name + (x.times > 1 ? ' ×' + x.times : ''); }).join(', ')) + '">โปร ฿' + money(pt) + '</span>' : '') +
+  if (bar) bar.innerHTML = '<div class="grow">' + (hint ? '<div class="promo-hint" id="phint">' + esc(hint) + '</div>' : '') + '<div class="muted">' + t.items + ' ชิ้น' + (pt ? ' · <span class="brand-text" title="' + esc((S.cart.promos || []).map(function (x) { return x.name + (x.times > 1 ? ' ×' + x.times : ''); }).join(', ')) + '">โปร ฿' + money(pt) + '</span>' : '') +
     (round2(t.discount - pt) > 0 ? ' · ส่วนลด ฿' + money(round2(t.discount - pt)) : '') +
     '</div><div class="row" style="align-items:baseline"><b style="font-size:18px">ยอดรวม</b><span class="amt num">฿' + money(t.total) + '</span></div></div>' +
     (S.settings.promptPayId ? '<button class="btn qr-pay" data-act="payQr" ' + (S.cart.lines.length && S.shift ? '' : 'disabled') + '>QR พร้อมเพย์</button>' : '') +
@@ -2170,7 +2179,7 @@ function storeUseModal() {
     '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">' + USE_NOTES.map(function (n) {
       return '<button type="button" class="chip" data-n="' + n + '" style="height:32px;font-size:13px;padding:0 12px">' + n + '</button>';
     }).join('') + '</div></div>' +
-    '<div class="hintbox">ฝา หลอด แก้วของเครื่องดื่มชง ระบบตัดให้ตอนขายแล้ว ไม่ต้องเบิก · ถ้าหยิบไปใช้แล้วไม่บันทึก ตอนตรวจนับจะกลายเป็น "สูญหาย"</div></div>' +
+    '<div class="hintbox">ฝา หลอด แก้ว ของเครื่องดื่มชงตัดตอนขายแล้ว ไม่ต้องเบิก</div></div>' +
     '<footer><span class="grow muted" id="su-cost" style="font-size:13px"></span><button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">บันทึกเบิกใช้</button></footer>');
   var q = $('#su-q', m), note = $('#su-note', m);
   var unitCost = function (l) { var p = S.idx.bySku[l.sku]; return round2((p && p.cost || 0) * l.mult); };
@@ -2337,7 +2346,7 @@ function dayLabel(ymd) {
 
 function renderBills() {
   var b = billsState();
-  var crumb = '<nav class="crumb"><button data-act="billsGo" data-l="year" data-k="' + b.y + '" class="' + (b.level === 'year' ? 'on' : '') + '">ปี ' + b.y + '</button>' +
+  var crumb = '<nav class="crumb"><button data-act="billsGo" data-l="year" data-k="' + b.y + '" class="' + (b.level === 'year' ? 'on' : '') + '">ปี ' + beYear(b.y) + '</button>' +
     (b.level !== 'year' ? '<span>›</span><button data-act="billsGo" data-l="month" data-k="' + b.m + '" class="' + (b.level === 'month' ? 'on' : '') + '">' + TH_MONTH[Number(b.m.slice(5)) - 1] + '</button>' : '') +
     (b.level === 'day' ? '<span>›</span><button class="on">' + dayLabel(b.d) + '</button>' : '') + '</nav>';
   var search = '<form class="row" data-form="billFind" style="gap:6px"><label class="sr" for="bfind">ค้นหาเลขบิล</label>' +
@@ -2394,7 +2403,7 @@ function loadBills() {
     billsKpis(d.total);
     var next = b.level === 'year' ? 'month' : 'day';
     tb.innerHTML = d.rows.length ? d.rows.map(function (r) {
-      var label = b.level === 'year' ? TH_MONTH[Number(r.key.slice(5)) - 1] + ' ' + r.key.slice(0, 4) : dayLabel(r.key);
+      var label = b.level === 'year' ? TH_MONTH[Number(r.key.slice(5)) - 1] + ' ' + beYear(r.key.slice(0, 4)) : dayLabel(r.key);
       return '<tr class="click" data-act="billsGo" data-l="' + next + '" data-k="' + r.key + '"><td><b>' + label + '</b></td><td class="r num">' + r.bills +
         '</td><td class="r num">' + money(r.total) + '</td><td class="r num">' + money(r.cash) + '</td><td class="r num">' + money(r.qr) + '</td><td class="r num">' + money(r.transfer) +
         '</td><td class="r num">' + (r.returned ? '<span class="warn-text">−' + money(r.returned) + '</span>' : '<span class="muted">–</span>') +
@@ -2482,7 +2491,7 @@ function returnModal(rc) {
     (billDisc > 0 ? '<div class="muted" style="font-size:13px">บิลนี้มีส่วนลดท้ายบิล ฿' + money(billDisc) + ' — เงินคืนหักส่วนลดตามสัดส่วนแล้ว</div>' : '') +
     '<div class="field"><label>คืนเงินเป็น</label><div class="seg-sm" id="rt-m"><button data-m="cash"' + (S.shift ? '' : ' disabled title="ต้องเปิดกะก่อน"') + '>เงินสด (จากลิ้นชัก)</button><button data-m="transfer">โอนคืน</button></div></div>' +
     '<div id="rt-stock" class="rt-stock"></div>' +
-    '<div class="muted" style="font-size:13px">สินค้าปกติกลับเข้าสต็อกทั้งหมด · ถ้ามีชิ้นที่เสีย ไปตัดที่หน้าสต็อก › ตัดของเสีย ทีหลังได้ ลูกค้าไม่ต้องรอ</div>' +
+    '<div class="muted" style="font-size:13px">ของเสียไปตัดที่ สต็อก › ตัดของเสีย ทีหลังได้</div>' +
     '<div class="field"><label for="rt-why">เหตุผล</label><input id="rt-why" maxlength="100" autocomplete="off" placeholder="เช่น ลูกค้าซื้อเกิน">' +
     '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">' + RETURN_REASONS.map(function (r) {
       return '<button type="button" class="chip" data-why="' + r + '" style="height:32px;font-size:13px;padding:0 12px">' + r + '</button>';
@@ -2660,7 +2669,7 @@ function renderLabels() {
     '<div class="row" style="gap:14px;flex-wrap:wrap">' + opts + '</div>' +
     '<div class="muted" style="font-size:13px" id="lab-info"></div><div class="lab-preview" id="lab-prev"></div>' +
     '<button class="btn primary lg" data-act="labPrint" id="lab-print">พิมพ์</button>' +
-    '<div class="muted" style="font-size:12px">ตอนพิมพ์: ตั้งขนาดกระดาษให้ตรง · ระยะขอบ "ไม่มี" · สเกล 100% (ไม่ย่อให้พอดี)</div></section></div>';
+    '<div class="muted" style="font-size:12px">ตอนพิมพ์ตั้งระยะขอบ "ไม่มี" และสเกล 100%</div></section></div>';
 }
 
 /** Promotions a sign can be printed for: on now or starting later. */
@@ -3030,7 +3039,7 @@ function promoHint() {
 /* ---------------- Slides manager (Settings, owner) ---------------- */
 function slidesCard() {
   return '<div class="card pad col" style="gap:10px"><h2>สไลด์จอลูกค้า</h2>' +
-    '<div class="muted" style="font-size:13px">วนแสดงตอนไม่มีลูกค้า · โปรที่กำลังใช้ทำเป็นสไลด์ให้เอง · อัปรูปโปสเตอร์เพิ่มได้ (ย่อขนาดให้อัตโนมัติ)</div>' +
+    '<div class="muted" style="font-size:13px">แสดงตอนไม่มีลูกค้า · โปรที่เปิดอยู่ขึ้นเป็นสไลด์ด้วย</div>' +
     '<div class="row" style="flex-wrap:wrap;gap:8px"><label class="btn primary" for="sl-file" style="cursor:pointer">+ อัปโหลดรูป</label>' +
     '<input id="sl-file" type="file" accept="image/*" data-change="slideFile" style="position:absolute;left:-9999px"></div>' +
     '<div id="slidelist" class="slide-list">' + skelList(3) + '</div></div>';
@@ -3172,7 +3181,7 @@ function productPhotoModal(original) {
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="col" style="gap:4px"><small class="muted">รูปเดิม</small><img src="' + original + '" alt="รูปเดิม" style="' + box + '"></div>' +
       '<div class="col" style="gap:4px"><small class="muted">ลบพื้นหลัง</small><div id="pp-out" style="' + box + ';display:flex;align-items:center;justify-content:center;padding:8px;text-align:center" class="muted">กำลังลบพื้นหลัง…</div></div></div>' +
       '<label class="row" style="gap:8px;font-size:13px">ความแรง <input id="pp-tol" type="range" min="20" max="140" value="60" class="grow"></label>' +
-      '<div class="muted" style="font-size:12px">ได้ผลดีเมื่อถ่ายบนพื้นสีเรียบ (กระดาษขาว / ผนังสีเดียว) · ถ้าลบเกินเข้าไปในสินค้า ลดความแรง · ถ้ายังเหลือพื้น เพิ่มความแรง</div></div>' +
+      '<div class="muted" style="font-size:12px">ลบเกินเข้าไปในสินค้า → ลดความแรง · ยังเหลือพื้น → เพิ่มความแรง</div></div>' +
       '<footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn" data-x="orig">ใช้รูปเดิม</button><button class="btn primary" data-x="ok" disabled>ใช้รูปที่ลบพื้นหลัง</button></footer>');
     var run = function () {
       var out = $('#pp-out', m), ok = $('[data-x=ok]', m);
@@ -3214,7 +3223,7 @@ function renderPromos() {
   return '<div class="page" style="flex-direction:column;gap:12px"><section class="card pad col" style="gap:10px">' +
     '<div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">โปรโมชั่น</h2><span class="grow"></span>' +
     '<button class="btn" data-act="promoClose">‹ กลับหน้าสินค้า</button><button class="btn primary" data-act="promoNew">+ สร้างโปรโมชั่น</button></div>' +
-    '<div class="muted" style="font-size:13px">ระบบคิดให้เองตอนสแกน · ใช้กับสินค้าที่ขายเป็นชิ้น (แพ็ค/ลังมีราคาของตัวเองอยู่แล้ว) · สินค้าลดราคาใกล้หมดอายุไม่ร่วมโปร · 1 ชิ้นเข้าได้โปรเดียว (เซ็ต → หลายชิ้น → แถม → ลดชิ้นเดียว)</div></section>' +
+    '<div class="muted" style="font-size:13px">ของใกล้หมดอายุที่ลดราคาแล้วไม่ร่วมโปร · 1 ชิ้นเข้าได้โปรเดียว</div></section>' +
     '<div id="promo-rows" class="promo-list">' + skelList(4) + '</div></div>';
 }
 
@@ -3627,7 +3636,7 @@ function drawEditor() {
   var owner = S.user.role === 'owner';
   if (!S.ed) {
     box.innerHTML = '<div class="ed-empty"><div style="font-size:16px;color:var(--ink);font-weight:600">เลือกสินค้าทางซ้ายเพื่อดู / แก้ไข</div>' +
-      (owner ? '<div>หรือกด <b>+ เพิ่มสินค้า</b> · สแกนบาร์โค้ดสินค้าในช่องค้นหาเพื่อหาเร็ว</div>' : '<div>แก้ไขสินค้าได้เฉพาะเจ้าของร้าน</div>') + '</div>';
+      (owner ? '<div>กด <b>+ เพิ่มสินค้า</b> เพื่อเริ่ม</div>' : '<div>แก้ไขสินค้าได้เฉพาะเจ้าของร้าน</div>') + '</div>';
     return;
   }
   var p = S.ed.p, codes = S.ed.codes, isNew = !p.sku, isRecipe = p.type === 'recipe';
@@ -3671,7 +3680,7 @@ function drawEditor() {
     f('unit', 'หน่วยนับ', 'list="e-unitlist"') + '<datalist id="e-unitlist">' + unitNames().map(function (u) { return '<option value="' + esc(u) + '">'; }).join('') + '</datalist></div>' +
     '<div class="grid3">' +
     (isRecipe ? '<div class="field"><label>ทุน / หน่วย</label><input value="' + money(rcost) + '" disabled title="คำนวณจากส่วนประกอบ"></div>'
-      : '<div class="field"><label>ทุน / ชิ้น (FIFO)</label><div class="row" style="gap:4px"><input value="' + (isNew ? 'จากการรับสินค้า' : money(p.cost)) + '" disabled title="ทุนของล็อตที่จะขายถัดไป" class="grow">' +
+      : '<div class="field"><label>ทุน / ชิ้น</label><div class="row" style="gap:4px"><input value="' + (isNew ? 'จากการรับสินค้า' : money(p.cost)) + '" disabled title="ทุนของล็อตที่จะขายถัดไป" class="grow">' +
         (isNew ? '' : '<button type="button" class="btn sm" data-act="showLots" data-sku="' + esc(p.sku) + '" style="height:40px;padding:0 8px">ล็อต</button>') + '</div></div>') +
     (p.forSale === false && !isRecipe ? '<div class="field"><label>ราคาขาย</label><input value="ไม่ขาย" disabled></div>'
       : f('price', isRecipe ? 'ราคาขาย / หน่วย' : 'ราคาขาย / ชิ้น', 'type="number" step="0.25" inputmode="decimal"')) + f('plu', 'PLU (เลข 1–5 หลัก)', 'inputmode="numeric" maxlength="5" placeholder="เช่น ' + nextPlu() + '" title="รหัสสั้นสำหรับพิมพ์ในช่องสแกน ใช้กับของไม่มีบาร์โค้ด · ตัวเลข 1–5 หลัก ห้ามซ้ำ"') + '</div>' +
@@ -3682,7 +3691,7 @@ function drawEditor() {
       '<div class="add-scan"><label class="sr" for="e-scan">สแกนบาร์โค้ดหน่วยใหม่</label><input id="e-scan" inputmode="numeric" autocomplete="off" placeholder="+ สแกน / พิมพ์บาร์โค้ด' +
       (codes.length ? 'หน่วยถัดไป (แพ็ค / ลัง)' : 'ของชิ้น') + ' แล้วกด Enter">' +
       '<button type="button" class="btn sm" data-ed="internal" style="height:38px" title="สร้างบาร์โค้ดภายใน (ขึ้นต้น 20)">โค้ดภายใน</button></div>' +
-      '<div class="hintbox">' + (hint.length ? hint.join(' · ') + ' · ' : 'รับของ: สแกนบาร์โค้ดลัง = เพิ่มสต็อกตามจำนวนชิ้นในลัง · ') + 'สต็อกเก็บเป็นชิ้นเสมอ · ราคาขายเว้นว่าง = ราคาชิ้น × จำนวน</div>'
+      (hint.length ? '<div class="hintbox">' + hint.join(' · ') + '</div>' : '')
       : '<div class="hintbox">' + (p.forSale === false ? 'วัตถุดิบ — ใช้เป็นส่วนประกอบของสูตรผสม ไม่ขึ้นที่หน้าขาย' : 'ขายด้วย PLU (พิมพ์ในช่องสแกน) หรือปุ่มขายด่วน') + '</div>') +
     (isRecipe ? '' : '<label class="checkrow"><input type="checkbox" data-ef="forSaleOff" ' + (p.forSale === false ? 'checked' : '') + '> วัตถุดิบ / ของใช้ในร้าน — ไม่ขายหน้าร้าน (เช่น ฝา หลอด ถุง)</label>') +
     (isRecipe ? '' : '<label class="checkrow"><input type="checkbox" data-ef="trackExpiry" ' + (p.trackExpiry ? 'checked' : '') + '> ติดตามวันหมดอายุ — ต้องใส่วันหมดอายุตอนรับสินค้า แล้วเตือนในหน้า "หมดอายุ"</label>') +
@@ -3691,7 +3700,7 @@ function drawEditor() {
       '<div class="row" style="align-items:flex-end"><span class="key" style="width:120px;height:' + (p.image ? '170' : '104') + 'px;flex:0 0 120px;cursor:default"><span class="ic' + (p.image && S.imgUrl && S.imgUrl[p.image] ? ' has-img' : '') + '"' + pimgAttr(p) + ' style="background:' + c[0] + ';color:' + c[1] + '">' + picHtml(p) + '</span>' +
       '<span class="nm" style="font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + esc(p.name || 'ชื่อสินค้า') + '</span><span class="pr" style="font-size:13px">' + (p.openPrice ? 'ราคาเปิด' : '฿' + money(p.price)) + '</span></span>' +
       '<div class="col grow" style="gap:6px;font-size:13px"><div>อยู่ในแท็บ <b>' + esc(p.category || 'อื่นๆ') + '</b>' + (p.subcategory ? ' · แถว <b>' + esc(p.subcategory) + '</b>' : '') + '</div>' +
-      '<small class="muted" style="font-size:11px;line-height:1.4">หน้าขายแบ่งแท็บตามหมวด และแถวตามหมวดย่อยให้เอง · ย้ายตำแหน่ง: กดปุ่มค้างแล้วลาก</small></div></div>' +
+      '<small class="muted" style="font-size:11px;line-height:1.4">กดปุ่มค้างแล้วลากเพื่อย้าย</small></div></div>' +
       '<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:14px">รูปสินค้า</b>' +
         (owner ? '<label class="btn sm" for="e-img" style="cursor:pointer">' + (p.image ? 'เปลี่ยนรูป' : '+ อัปโหลดรูป') + '</label><input id="e-img" type="file" accept="image/*" data-change="prodImg" style="position:absolute;left:-9999px">' +
           (p.image ? '<button type="button" class="btn sm ghost" data-act="prodImgDel">ลบรูป</button>' : '') : '') +
@@ -3844,7 +3853,7 @@ function edClick(el) {
 }
 
 function deleteProduct(p) {
-  confirm2('ลบ "' + p.name + '"?', 'ถ้าสินค้านี้เคยขาย รับเข้า หรืออยู่ในสูตร/โปรโมชั่น ระบบจะ "ปิดใช้งาน" แทน (หายจากหน้าขาย แต่บิลและรายงานเก่ายังถูกต้อง) · ถ้ายังไม่เคยใช้เลย จะลบทิ้งพร้อมบาร์โค้ดและรูป', 'ลบสินค้า', true).then(function (ok) {
+  confirm2('ลบ "' + p.name + '"?', 'ถ้าเคยขายหรือรับเข้าแล้ว จะซ่อนจากหน้าขายแทน บิลและรายงานเก่ายังอยู่', 'ลบสินค้า', true).then(function (ok) {
     if (!ok) return;
     return api('deleteProduct', S.token, p.sku).then(function (r) {
       toast(r.deleted ? 'ลบ "' + p.name + '" แล้ว' : 'ปิดใช้งานแทน — ' + r.reason);
@@ -3906,7 +3915,7 @@ function downloadCsvTemplate() {
 
 function importCsv() {
   var m = openModal('<header><h1>นำเข้าสินค้าจาก CSV</h1></header><div class="body">' +
-    '<div class="muted" style="font-size:13px">สินค้าเดียวกันหลายบาร์โค้ดใส่หลายแถว SKU เดียวกัน · openingStock ใช้เฉพาะสินค้าใหม่ · <a href="#" data-x="tpl">ดาวน์โหลดไฟล์ตัวอย่าง</a></div>' +
+    '<div class="muted" style="font-size:13px">หลายบาร์โค้ดใส่หลายแถว SKU เดียวกัน · <a href="#" data-x="tpl">ดาวน์โหลดไฟล์ตัวอย่าง</a></div>' +
     '<input type="file" id="csvfile" accept=".csv,text/csv" style="height:auto;padding:8px">' +
     '<label for="csvtext">หรือวางข้อความ CSV</label><textarea id="csvtext" rows="8" placeholder="sku,name,category,..."></textarea><div id="csvres"></div></div>' +
     '<footer><button class="btn" data-x="cancel">ปิด</button><button class="btn primary" data-x="go">นำเข้า</button></footer>', { wide: true });
@@ -4031,7 +4040,7 @@ function drawRcLines() {
       '<div class="r num" data-calc="piece">' + rcPieceHtml(c) + '</div>' +
       '<div><input data-rc="total" data-i="' + i + '" value="' + (c.total ? c.total.toFixed(2) : '') + '" type="number" min="0" step="0.01" inputmode="decimal" aria-label="ยอดรวม ' + esc(p.name) + '" style="height:36px;width:100%;text-align:right"></div>' +
       '<button class="x" data-act="rcDel" data-i="' + i + '" aria-label="เอา ' + esc(p.name) + ' ออก">×</button></div>';
-  }).join('') : '<div class="empty">สแกนบาร์โค้ดที่ชิ้น แพ็ค หรือลัง — ระบบเลือกหน่วยให้เอง<br>สแกนซ้ำ = เพิ่มจำนวน · ทุนแต่ละรอบเก็บเป็นล็อตแยก (FIFO)</div>';
+  }).join('') : '<div class="empty">สแกนบาร์โค้ดชิ้น แพ็ค หรือลัง<br>สแกนซ้ำ = เพิ่มจำนวน</div>';
   drawRcSummary();
 }
 
@@ -4171,7 +4180,7 @@ function showLots(sku) {
     var left = rows.reduce(function (a, l) { return a + l.qtyLeft; }, 0);
     var value = rows.reduce(function (a, l) { return a + l.qtyLeft * l.unitCost; }, 0);
     var m = openModal('<header><h1>ล็อตคงเหลือ: ' + esc(p ? p.name : sku) + '</h1></header><div class="body">' +
-      '<div class="muted" style="font-size:14px">ขายออกจากล็อตบนสุดก่อน (FIFO) · รวม ' + left + ' ชิ้น · มูลค่าทุน ฿' + money(value) + '</div>' +
+      '<div class="muted" style="font-size:14px">ขายล็อตเก่าก่อน · รวม ' + left + ' ชิ้น · มูลค่าทุน ฿' + money(value) + '</div>' +
       '<table class="table"><thead><tr><th>รับเมื่อ</th><th>เลขที่</th><th class="r">รับ</th><th class="r">เหลือ</th><th class="r">ทุน/ชิ้น</th><th>หมดอายุ</th></tr></thead><tbody>' +
       (rows.map(function (l, i) {
         return '<tr' + (i === 0 ? ' class="sel"' : '') + '><td>' + dateTime(l.receivedAt) + '</td><td class="num">' + esc(l.receiptNo) + '<div class="muted" style="font-size:12px">' + esc(l.note) + '</div></td>' +
@@ -4256,7 +4265,7 @@ function drawExpiry() {
       var ex = d.todo.filter(function (r) { return r.todo === 'expired'; }), nr = d.todo.filter(function (r) { return r.todo === 'near'; });
       box.innerHTML = (ex.length ? '<div class="exp-sec warn">หมดอายุ · เก็บออกจากชั้น</div>' + ex.map(row).join('') : '') +
         (nr.length ? '<div class="exp-sec amber">ใกล้หมดอายุ · ลดราคา</div>' + nr.map(row).join('') : '') +
-        (d.todo.length ? '' : '<div class="empty">ไม่มีล็อตที่ต้องจัดการ 🎉<br><span style="font-size:13px">ล็อตจะขึ้นที่นี่ตามวันหมดอายุที่ใส่ตอนรับสินค้า</span></div>').replace(' 🎉', '');
+        (d.todo.length ? '' : '<div class="empty">ไม่มีล็อตที่ต้องจัดการ<br><span style="font-size:13px">ล็อตขึ้นตามวันหมดอายุที่ใส่ตอนรับสินค้า</span></div>');
     }
   }
   drawExpAction();
@@ -4269,7 +4278,7 @@ function drawExpAction() {
   var sel = S.expSel;
   var r = sel && S.exp ? S.exp.todo.concat(S.exp.done).filter(function (x) { return x.lotId === sel.lotId; })[0] : null;
   if (!r) {
-    box.innerHTML = '<h2>จัดการล็อต</h2><div class="muted" style="font-size:14px">เลือก "ลดราคา", "ตัดเสีย" หรือ "ไม่เหลือแล้ว" จากรายการ แล้วนับของล็อตนั้นที่เหลือบนชั้นจริง</div>';
+    box.innerHTML = '<h2>จัดการล็อต</h2><div class="muted" style="font-size:14px">เลือกล็อตจากรายการ</div>';
     return;
   }
   var a = sel.action, pct = sel.pct || S.exp.markdownPct;
@@ -4366,8 +4375,8 @@ function drawStockKpis() {
   };
   var sub = function (t) { return '<div class="muted" style="font-size:12px;margin-top:2px">' + t + '</div>'; };
   var loss = round2((S.ov.lossMonth || 0) + (S.ov.expiryMonth || 0));
-  box.innerHTML = k('มูลค่าสต็อก (ทุน FIFO)', '฿' + money(S.ov.stockValue)).replace(/<\/div>$/, sub(stockRows.length + ' รายการ') + '</div>') +
-    k('ใกล้หมด', low, low > 0).replace(/<\/div>$/, sub('ขั้นต่ำคิดจากยอดขาย × รอบรับของของแต่ละสินค้า') + '</div>') +
+  box.innerHTML = k('มูลค่าสต็อก (ทุน)', '฿' + money(S.ov.stockValue)).replace(/<\/div>$/, sub(stockRows.length + ' รายการ') + '</div>') +
+    k('ใกล้หมด', low, low > 0) +
     k('ของเสียเดือนนี้', '฿' + money(loss)).replace(/<\/div>$/, sub('เสียหาย/สูญหาย ฿' + money(S.ov.lossMonth || 0) + ' · หมดอายุ ฿' + money(S.ov.expiryMonth || 0)) + '</div>') +
     k('เบิกใช้ในร้านเดือนนี้', '฿' + money(S.ov.useMonth || 0)).replace(/<\/div>$/, sub('ค่าใช้จ่าย · เบิกจากหน้าขาย') + '</div>');
 }
@@ -4395,20 +4404,20 @@ function openingBar() {
       '<button class="btn sm primary" data-act="opFinish">ตั้งยอดเปิดร้านเสร็จสิ้น</button>' : '</span>') + '</div>';
 }
 function renderOpening() {
-  return '<div class="page"><div class="card pad op-intro"><h2>กำลังตั้งยอดเปิดร้าน</h2><p class="muted">เจ้าของกำลังนับสต็อกและตั้งยอดเงินเปิดร้าน — ระหว่างนี้ขายและรับของไม่ได้ทุกเครื่อง<br>เสร็จแล้วโปรแกรมจะกลับมาใช้งานได้เอง (หรือกด "ซิงก์" ด้านบน)</p></div></div>';
+  return '<div class="page"><div class="card pad op-intro"><h2>กำลังตั้งยอดเปิดร้าน</h2><p class="muted">ระหว่างนี้ขายและรับของไม่ได้ เจ้าของตั้งยอดเสร็จแล้วจะใช้งานได้เอง</p></div></div>';
 }
 /** Settings card: switch the mode on (once). */
 function openingSettingsCard() {
   if (!(S.user && S.user.role === 'owner')) return '';
   if (!openingOk()) return '<div class="card pad col op-card" style="gap:6px"><b>ตั้งยอดเปิดร้าน</b><span class="muted" style="font-size:13px">ทำไปแล้ว (ทำได้ครั้งเดียว)</span></div>';
-  if (openingLocked()) return '<div class="card pad col op-card" style="gap:8px"><b>ตั้งยอดเปิดร้าน — กำลังทำอยู่</b><span class="muted" style="font-size:13px">นับสต็อกที่ สต็อก › ตรวจนับ และตั้งยอดเงินที่ บัญชี › ตั้งยอดเริ่มต้น แล้วกด "ตั้งยอดเปิดร้านเสร็จสิ้น" ที่แถบด้านบน</span></div>';
+  if (openingLocked()) return '<div class="card pad col op-card" style="gap:8px"><b>ตั้งยอดเปิดร้าน — กำลังทำอยู่</b><span class="muted" style="font-size:13px">นับสต็อกและตั้งยอดเงิน แล้วกด "ตั้งยอดเปิดร้านเสร็จสิ้น" ที่แถบด้านบน</span></div>';
   return '<div class="card pad col op-card" style="gap:8px"><b>ตั้งยอดเปิดร้าน</b>' +
-    '<ol class="op-steps"><li>กด <b>เปิดโหมดตั้งยอดเปิดร้าน</b> — ทุกเครื่องจะใช้ได้แค่ ตั้งค่า · สินค้า · สต็อก (ตรวจนับ) · บัญชี จนกว่าจะเสร็จ (ขาย/รับของไม่ได้)</li>' +
-    '<li><b>สต็อก › ตรวจนับ</b>: นับของในร้าน ใส่จำนวนและทุนต่อชิ้น แล้วบันทึก (ทยอยทีละชั้นได้) · สินค้าที่ยังไม่มี เพิ่มที่หน้าสินค้าได้</li>' +
+    '<ol class="op-steps"><li>กด <b>เปิดโหมดตั้งยอดเปิดร้าน</b> — ขายและรับของไม่ได้จนกว่าจะเสร็จ</li>' +
+    '<li><b>สต็อก › ตรวจนับ</b>: ใส่จำนวนและทุนต่อชิ้น ทยอยบันทึกทีละชั้นได้</li>' +
     '<li><b>บัญชี › ตั้งยอดเริ่มต้น</b>: เงินในธนาคาร เงินสดสำรอง · <b>บัญชี › ค้างจ่าย</b>: ของที่ยังติดเงินร้านส่ง (ติ๊ก "เป็นค่าสินค้า")</li>' +
-    '<li>กด <b>ตั้งยอดเปิดร้านเสร็จสิ้น</b> ที่แถบด้านบน — ใช้งานได้ตามปกติ</li></ol>' +
-    '<span class="muted" style="font-size:13px">ทำได้ครั้งเดียว · แนะนำทำตอนร้านปิด · ยอดสต็อกนี้ไม่นับเป็นกำไรหรือขาดทุน</span>' +
-    (!(S.settings || {}).liveSince ? '<div class="hintbox warn">ยังไม่ได้กด "เริ่มใช้งานจริง" — ตอนกด ระบบจะล้างข้อมูลทดสอบ · กดเริ่มใช้งานจริงก่อน (แท็บสำรองข้อมูล) แล้วค่อยตั้งยอด</div>' : '') +
+    '<li>กด <b>ตั้งยอดเปิดร้านเสร็จสิ้น</b> ที่แถบด้านบน</li></ol>' +
+    '<span class="muted" style="font-size:13px">ทำได้ครั้งเดียว · ยอดนี้ไม่นับเป็นกำไรหรือขาดทุน</span>' +
+    (!(S.settings || {}).liveSince ? '<div class="hintbox warn">กด "เริ่มใช้งานจริง" ก่อน (ล้างข้อมูลทดสอบ) แล้วค่อยตั้งยอด</div>' : '') +
     '<div class="row" style="gap:8px"><button class="btn primary" data-act="opStart">เปิดโหมดตั้งยอดเปิดร้าน</button></div></div>';
 }
 
@@ -4511,7 +4520,7 @@ function cntSummary() {
 
 function drawCountTab(box) {
   var d = cntDraft(), op = cntOpening();
-  var mode = op ? '<div class="hintbox">โหมดตั้งยอดเปิดร้าน: นับของที่อยู่ในร้านใส่ช่อง <b>มีอยู่จริง</b> พร้อม <b>ทุนต่อชิ้น</b> แล้วกดบันทึก · ทยอยบันทึกทีละชั้น/ทีละหมวดได้ · สต็อกจะเท่ากับที่นับ เป็น "สต็อกเปิดร้าน" ไม่นับเป็นกำไรหรือขาดทุน · สินค้าที่ไม่ได้นับคงยอดเดิม</div>' : '';
+  var mode = op ? '<div class="hintbox">ใส่ <b>มีอยู่จริง</b> และ <b>ทุนต่อชิ้น</b> แล้วบันทึก · ทยอยทีละชั้นได้ · ตัวที่ไม่ได้นับคงยอดเดิม</div>' : '';
   box.innerHTML = mode + stockCats() + '<div class="row stk-tools"><label for="cscan" style="white-space:nowrap">สแกนนับ</label>' +
     '<input id="cscan" class="grow" autocomplete="off" placeholder="สแกนบาร์โค้ด = +1 (สแกนแพ็ค = +12) หรือพิมพ์จำนวนในช่องนับได้">' + camBtn('cscan') +
     '<label class="sr" for="cnote">หมายเหตุ</label><input id="cnote" data-cnt-note value="' + esc(d.note) + '" placeholder="หมายเหตุ เช่น นับสิ้นเดือน" style="width:200px"></div>' +
@@ -4737,7 +4746,7 @@ function renderShift() {
   if (!S.isCounter) return '<div class="page"><div class="card pad" style="max-width:560px">เปิด/ปิดกะได้เฉพาะเครื่องหน้าร้านที่ลงทะเบียนแล้ว</div></div>';
   var open = !S.shift, p = open ? 'o' : 'c';
   var count = '<section class="card pad shift-count"><div class="shift-head"><h2>' + (open ? 'เปิดกะ · นับเงินทอน' : 'ปิดกะ · นับเงินในลิ้นชัก') +
-    '</h2><span class="muted">นับตามลำดับ 1 → 10 · กด + / − ทีละใบ หรือพิมพ์ที่แป้น · แตะแถวไหนก็ได้เพื่อแก้</span></div>' + denomTable(p) +
+    '</h2><span class="muted">กด + / − หรือพิมพ์จำนวนใบ</span></div>' + denomTable(p) +
     (open ? '' : '<div class="shift-sum" id="shiftsum"><h2>สรุปจากระบบ</h2>' + skelList(5) + '</div>') + '</section>';
   var side = '<aside class="card pad shift-pad"><div class="shift-total"><div class="st-top"><span>' + (open ? 'เงินทอนตั้งต้น' : 'นับได้จริง') + '</span><small id="' + p + '-prog">นับแล้ว 0 / 11 ชนิด</small></div>' +
     '<b id="' + p + '-total" class="num">฿0.00</b>' + (open ? '' : '<div class="st-cmp"><span id="c-exp"></span><b id="c-diff"></b></div>') +
@@ -5041,7 +5050,7 @@ function receivePayModal(d, total, free) {
       moneyStrip([['ยอดรวมตามราคาทุน', '฿' + money(total)]]) + (free ? '<div class="muted">มี ' + free + ' รายการทุน 0 (ของแถม)</div>' : '') +
       '<b>จ่ายเงินอย่างไร</b>' + radioList('rcpay', opts, opts[0] ? opts[0].v : '') +
       '<div class="field hidden" id="rc-due"><label for="rc-dued">ครบกำหนดจ่าย</label><input id="rc-dued" type="date"></div>' +
-      '<div class="muted" style="font-size:13px">สต็อกเพิ่มทันที · เงินที่จ่ายกลายเป็นมูลค่าสต็อก ไม่นับเป็นรายจ่ายร้าน</div>' +
+      '<div class="muted" style="font-size:13px">ไม่นับเป็นรายจ่ายร้าน (เงินกลายเป็นมูลค่าสต็อก)</div>' +
       '</div><footer><button class="btn" data-x="no">กลับไปแก้</button><button class="btn primary" data-x="ok">ยืนยันรับเข้า</button></footer>');
     var sync = function () { $('#rc-due', m).classList.toggle('hidden', radioVal(m, 'rcpay') !== 'credit'); };
     m.addEventListener('change', sync); sync();
@@ -5282,7 +5291,7 @@ function drawAccOverview(d) {
     (!A.start ? '<div class="banner" style="border-radius:10px">ยังไม่ได้ตั้งยอดเริ่มต้น (เงินในธนาคาร / เงินสดสำรอง) · <a href="#" data-act="accSetup">ตั้งตอนนี้</a></div>' : '') +
     '<div class="acc-grid"><div class="col" style="gap:16px;min-width:0">' +
     '<div class="acc-kpis">' + kpiCard('ยอดขาย', m0(f.netSales), f.bills + ' บิล · ' + m0(f.netSales / days) + '/วัน') +
-    kpiCard('ต้นทุนสินค้าที่ขาย', m0(f.cogs), accPct(f.cogs, f.netSales) + ' · ทุนจริงจากล็อตที่รับเข้า') +
+    kpiCard('ต้นทุนสินค้าที่ขาย', m0(f.cogs), accPct(f.cogs, f.netSales)) +
     kpiCard('กำไรขั้นต้น', m0(f.gross), accPct(f.gross, f.netSales) + ' ของยอดขาย') +
     kpiCard('รายจ่ายร้าน + ของเสีย', m0(loss), 'รวมของขาดจากตรวจนับ', 'warn') +
     kpiCard('กำไรสุทธิ', m0(f.net), 'ไม่รวมเงินถอนใช้ส่วนตัว', f.net >= 0 ? 'good' : 'warn') + '</div>' +
@@ -5333,7 +5342,7 @@ function drawAccPL(d) {
   return '<div class="acc-grid pl"><div class="card pad pl-card" id="pl-print"><div class="acc-h"><b style="font-size:18px">งบกำไรขาดทุน · ' + accRange()[2] + '</b><span class="muted">% = สัดส่วนต่อยอดขาย</span></div>' +
     L('ยอดขาย', f.sales, 0, '', true) + (f.refunds ? L('หัก คืนสินค้า', -f.refunds, 1, 'warn-text') : '') +
     L('เงินสด', f.cash, 1) + L('QR พร้อมเพย์', f.qr, 1) + L('โอน', f.transfer, 1) + (f.credit ? L('ค้างจ่าย (เชื่อ)', f.credit, 1) : '') +
-    L('หัก ต้นทุนสินค้าที่ขาย (FIFO)', -f.cogs, 0, 'warn-text', true) +
+    L('หัก ต้นทุนสินค้าที่ขาย', -f.cogs, 0, 'warn-text', true) +
     L('กำไรขั้นต้น', f.gross, 0, 'brand-text', true) +
     (f.waste ? L('หัก ของเสีย / หมดอายุ', -f.waste, 1, 'warn-text') : '') + (f.storeUse ? L('หัก เบิกใช้ในร้าน', -f.storeUse, 1, 'warn-text') : '') +
     (f.shrink ? L('หัก ของขาดจากตรวจนับ', -f.shrink, 1, 'warn-text') : '') +
@@ -5362,7 +5371,7 @@ function drawAccExpenses(d) {
     var byFrom = {};
     d.purchases.forEach(function (x) { var k = x.status.indexOf('ค้าง') === 0 ? 'ค้างจ่ายซัพฯ' : x.from; byFrom[k] = (byFrom[k] || 0) + x.total; });
     return '<div class="acc-grid"><div class="card pad" style="min-width:0">' + toggle +
-      '<div class="muted" style="font-size:13px;margin:10px 0">มาจากหน้ารับสินค้าอัตโนมัติ · <b>ไม่นับเป็นรายจ่ายร้าน</b> เพราะเงินกลายเป็นสต็อก — จะเป็นต้นทุนเมื่อขายออกไป</div>' +
+      '<div class="muted" style="font-size:13px;margin:10px 0"><b>ไม่นับเป็นรายจ่ายร้าน</b> — เป็นต้นทุนเมื่อขายออก</div>' +
       '<table class="table acc-table"><thead><tr><th>วันที่</th><th>เลขที่</th><th>ซัพพลายเออร์</th><th class="r">สินค้า</th><th>จ่ายจาก</th><th>สถานะ</th><th class="r">บาท</th></tr></thead><tbody>' +
       (d.purchases.map(function (x) {
         return '<tr><td>' + dateOnly(x.date) + '</td><td class="num brand-text">' + esc(x.receiptNo) + '</td><td>' + esc(x.supplier || '–') + '</td><td class="r">' + x.items + '</td><td>' + esc(x.from || '') + '</td>' +
@@ -5380,7 +5389,7 @@ function drawAccExpenses(d) {
     }).join('') || '<tr><td colspan="6" class="muted">ยังไม่มีรายจ่ายในช่วงนี้ · กด "+ บันทึกรายจ่าย"</td></tr>') +
     '</tbody><tfoot><tr><td colspan="5"><b>รวมรายจ่าย</b></td><td class="r num"><b>' + money(total) + '</b></td></tr></tfoot></table></div>' +
     '<aside class="col" style="gap:16px"><div class="card pad"><b class="acc-t">แยกตามหมวด</b>' + catBars(by, cats, total) + '</div>' +
-    '<div class="card pad"><b>มาจากเงินออกในลิ้นชักอัตโนมัติ</b><div class="muted" style="font-size:13px;margin-top:6px;line-height:1.6">ทุกครั้งที่กด "เงินออก" ตอนขาย ระบบนำมาลงรายจ่ายให้เอง ตามเหตุผลที่เลือก · แตะรายการเพื่อแก้หมวด</div></div></aside></div>';
+    '<div class="card pad"><b>เงินออกจากลิ้นชัก</b><div class="muted" style="font-size:13px;margin-top:6px;line-height:1.6">แตะรายการเพื่อแก้หมวด</div></div></aside></div>';
 }
 
 function drawAccCustomers(d) {
@@ -5427,10 +5436,10 @@ function drawAccPayables(d) {
         '<td class="r num"><b>' + money(p.left) + '</b></td><td class="r"><button class="btn sm" data-act="accPayPay" data-id="' + esc(p.payableId) + '">จ่ายแล้ว</button></td></tr>';
     }).join('') || '<tr><td colspan="6" class="muted">ไม่มีรายการค้างจ่าย</td></tr>') +
     '</tbody><tfoot><tr><td colspan="4"><b>รวมค้างจ่าย</b></td><td class="r num"><b>' + money(total) + '</b></td><td></td></tr></tfoot></table>' +
-    '<div class="muted" style="font-size:13px;margin-top:10px">เพิ่มได้ 3 ทาง: ปุ่ม "+ เพิ่มรายการค้างจ่าย" · เลือก "ค้างจ่าย" ตอนบันทึกรายจ่าย · เลือก "ค้างจ่าย (เครดิต)" ตอนรับสินค้า</div></div>' +
+    '<div class="muted" style="font-size:13px;margin-top:10px">เพิ่มจากปุ่มด้านบน ตอนบันทึกรายจ่าย หรือตอนรับสินค้า</div></div>' +
     '<aside class="col" style="gap:16px"><div class="card pad"><b class="acc-t">ต้องจ่ายเร็ว ๆ นี้</b>' + rowLine('เกินกำหนดแล้ว', money(sum(over)), 'warn-text') + rowLine('ภายใน 7 วัน', money(sum(soon)), 'amber') +
     rowLine('หลังจากนั้น / ไม่กำหนด', money(total - sum(over) - sum(soon))) + '</div>' +
-    '<div class="card pad"><b>กด "จ่ายแล้ว"</b><div class="muted" style="font-size:13px;margin-top:6px;line-height:1.6">เลือกจ่ายจากกระเป๋าไหน ระบบหักเงินจากกระเป๋านั้น · จ่ายบางส่วนได้ ยอดที่เหลือค้างต่อ</div></div></aside></div>';
+    '<div class="card pad"><b>จ่ายบางส่วนได้</b><div class="muted" style="font-size:13px;margin-top:6px;line-height:1.6">ยอดที่เหลือค้างต่อ</div></div></aside></div>';
 }
 
 function drawAccWallets(d) {
@@ -5475,7 +5484,7 @@ function drawAccTax(pair) {
     kpiCard('ยอดขายปีนี้เทียบเกณฑ์ VAT', (s.vat.ytd / s.vat.limit * 100).toFixed(1) + '%', '1,800,000 ต่อปี', 'amberbg') + '</div>' +
     '<div class="card pad"><div class="acc-h"><b>เลือกวิธีหักค่าใช้จ่าย</b><span class="muted" style="font-size:13px">ระบบคำนวณให้ทั้ง 2 แบบ</span></div><div class="tax-opts">' +
     cmp('flat', 'หักเหมา 60%', t.flat) + cmp('actual', 'หักตามจริง', t.actual) + '</div>' +
-    '<div class="muted" style="font-size:13px;margin-top:12px;line-height:1.6">หักตามจริงต้องเก็บใบเสร็จรับสินค้าและบิลรายจ่ายให้ครบ · ยอดนี้ยังไม่หักลดหย่อนส่วนตัว · ตัวเลขเพื่อช่วยเตรียมยื่น ควรตรวจกับสรรพากรหรือสำนักงานบัญชี</div></div>' +
+    '<div class="muted" style="font-size:13px;margin-top:12px;line-height:1.6">ตัวเลขช่วยเตรียมยื่น ยังไม่หักลดหย่อนส่วนตัว · หักตามจริงต้องมีใบเสร็จครบ · ควรตรวจกับสำนักงานบัญชี</div></div>' +
     '<div class="card pad"><div class="acc-h"><b>เฝ้าดูเกณฑ์ VAT 1.8 ล้าน</b></div><div class="muted" style="font-size:14px">ขายเฉลี่ย ' + m0(s.vat.perDay) + ' บาท/วัน ≈ ' + (s.vat.perDay * 365 / 1e6).toFixed(2) + ' ล้าน/ปี · ถ้ายอดสะสมในปีเกิน 1.8 ล้าน ต้องจด VAT ภายใน 30 วัน</div>' +
     '<div class="track big"><i style="width:' + Math.min(100, s.vat.ytd / s.vat.limit * 100) + '%;background:#C9A227"></i></div></div></div>' +
     '<aside class="col" style="gap:16px"><div class="card pad"><b class="acc-t">เอกสารสำหรับยื่น / ส่งนักบัญชี</b>' +
@@ -5511,7 +5520,7 @@ function expenseModal(ex, done) {
       '<div class="row hidden" id="ex-credit" style="gap:8px"><label class="sr" for="ex-party">ค้างจ่ายใคร</label><input id="ex-party" placeholder="ค้างจ่ายใคร" class="grow"><label class="sr" for="ex-due">ครบกำหนด</label><input id="ex-due" type="date"></div>') +
     '<div class="row" style="gap:8px"><div class="field grow"><label for="ex-note">รายละเอียด</label><input id="ex-note" value="' + esc(ex ? ex.note : '') + '" placeholder="เช่น ค่าไฟ ต.ค."></div>' +
     '<div class="field"><label for="ex-date">วันที่</label><input id="ex-date" type="date" value="' + (ex ? ex.date : today()) + '"></div></div></div>' +
-    '<div class="col" style="gap:12px"><label class="bill-drop" for="ex-file"><span id="ex-prev">ถ่ายรูป / แนบบิล<br><small>ไม่บังคับ · ย่อรูปให้อัตโนมัติ</small></span></label>' +
+    '<div class="col" style="gap:12px"><label class="bill-drop" for="ex-file"><span id="ex-prev">ถ่ายรูป / แนบบิล<br><small>ไม่บังคับ</small></span></label>' +
     '<input id="ex-file" type="file" accept="image/*" capture="environment" class="sr">' +
     '<label class="row" style="gap:8px;font-size:14px"><input type="checkbox" id="ex-rec"' + (ex && ex.recurring ? ' checked' : '') + '> รายจ่ายประจำทุกเดือน</label></div>' +
     '</form><footer>' + (edit && ex.source === 'manual' ? '<button class="btn danger" data-x="del">ยกเลิกรายการ</button><span class="grow"></span>' : '') +
@@ -5606,7 +5615,7 @@ function walletTxModal(kind, done) {
     (from ? '<span class="lbl">' + (kind === 'DRAW' ? 'ถอนจาก' : 'จาก') + '</span>' + radioList('txfrom', fromOpts, (fromOpts[0] || {}).v) : '') +
     (to ? '<span class="lbl">' + (kind === 'TRANSFER' ? 'ไปที่' : 'กระเป๋า') + '</span>' + radioList('txto', ws, (ws[ws.length - 1] || {}).v) : '') +
     '<div class="field"><label for="tx-note">หมายเหตุ</label><input id="tx-note"></div>' +
-    (kind === 'DRAW' ? '<div class="muted" style="font-size:13px">ถอนใช้ส่วนตัวไม่นับเป็นรายจ่ายร้าน · ใช้ได้โดยไม่กระทบร้านเท่ากับกำไรสุทธิ</div>' : '') +
+    (kind === 'DRAW' ? '<div class="muted" style="font-size:13px">ไม่นับเป็นรายจ่ายร้าน</div>' : '') +
     '</form><footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">บันทึก</button></footer>');
   $('[data-x=no]', m).onclick = function () { closeModal(); };
   var save = function () {
@@ -5623,7 +5632,7 @@ function accSetupModal(done) {
     var rows = d.wallets.map(function (w) { return { walletId: w.walletId, name: w.name, type: w.type, opening: w.opening, receivesQr: w.receivesQr }; });
     var m = openModal('<header><h1>ตั้งยอดเริ่มต้น / กระเป๋าเงิน</h1></header><div class="body col" style="gap:12px">' +
       '<div class="field"><label for="su-start">วันเริ่มใช้บัญชี</label><input id="su-start" type="date" value="' + (d.start || today()) + '"></div>' +
-      '<div class="muted" style="font-size:13px">ใส่ยอดเงินที่มีอยู่จริงในแต่ละกระเป๋า ณ วันเริ่ม · เงินทอนในลิ้นชักถามตอนเปิดกะ · สต็อกคิดจากล็อตที่รับเข้าให้เอง</div>' +
+      '<div class="muted" style="font-size:13px">ใส่ยอดเงินที่มีอยู่จริง ณ วันเริ่ม · เงินทอนในลิ้นชักใส่ตอนเปิดกะ</div>' +
       '<div id="su-rows" class="col" style="gap:8px"></div><button type="button" class="btn" id="su-add" style="align-self:flex-start">+ เพิ่มกระเป๋า</button></div>' +
       '<footer><button class="btn" data-x="no">ยกเลิก</button><button class="btn primary" data-x="ok">บันทึก</button></footer>', { wide: true });
     var draw = function () {
@@ -5903,13 +5912,13 @@ function netSavedList(saved) {
     return '<span class="' + (d.allowed ? 'brand-text' : 'muted') + '">' + (d.allowed ? 'อนุญาต' : 'ไม่อนุญาต') + '</span>';
   };
   var on = function (d) { return d.pending ? d.pending === 'allow' : !!d.allowed; };
-  return '<div class="card pad col net-remote" style="gap:10px;max-width:760px"><b style="font-size:17px">Whitelist — เพิ่มด้วย MAC address</b>' +
+  return '<div class="card pad col net-remote" style="gap:10px;max-width:760px"><b style="font-size:17px">เพิ่มเครื่องด้วย MAC</b>' +
     '<div class="muted" style="font-size:13px;line-height:1.6">' + (S.isCounter
-      ? 'ตัวช่วยอินเทอร์เน็ตยังไม่พร้อม — เพิ่มไว้ก่อนได้ พอพร้อมแล้วโปรแกรมจะส่งเข้าเราเตอร์ให้เอง'
-      : 'สั่งจากเครื่องนี้ได้เลย · เครื่องหน้าร้านจะส่งเข้าเราเตอร์ให้เองภายในไม่กี่นาที (ต้องเปิดโปรแกรมทิ้งไว้ที่เครื่องหน้าร้าน)') + '</div>' +
+      ? 'ตัวช่วยอินเทอร์เน็ตยังไม่พร้อม — เพิ่มไว้ก่อนได้ พร้อมแล้วจะส่งเข้าเราเตอร์'
+      : 'เครื่องหน้าร้านจะส่งเข้าเราเตอร์ภายในไม่กี่นาที (ต้องเปิดโปรแกรมไว้)') + '</div>' +
     '<form class="row" data-form="netQueueAdd" style="gap:8px;flex-wrap:wrap"><label class="sr" for="nq-mac">MAC address</label><input id="nq-mac" class="mono" placeholder="MAC เช่น A4:83:E7:22:91:BC" autocomplete="off" style="flex:1 1 210px">' +
-    '<label class="sr" for="nq-name">ชื่อเครื่อง</label><input id="nq-name" placeholder="ชื่อเครื่อง เช่น มือถือแบงค์" style="flex:1 1 180px"><button class="btn primary">+ เพิ่ม Whitelist</button></form>' +
-    '<div class="muted" style="font-size:12px">ดู MAC ได้ที่ มือถือ: ตั้งค่า › Wi-Fi › แตะชื่อ WiFi ร้าน (ปิด "MAC แบบสุ่ม / ที่อยู่ส่วนตัว" ก่อน) · คอม: พิมพ์ getmac ใน cmd</div>' +
+    '<label class="sr" for="nq-name">ชื่อเครื่อง</label><input id="nq-name" placeholder="ชื่อเครื่อง เช่น มือถือแบงค์" style="flex:1 1 180px"><button class="btn primary">+ อนุญาต</button></form>' +
+    '<div class="muted" style="font-size:12px">ดู MAC — มือถือ: ตั้งค่า › Wi-Fi › ชื่อ WiFi ร้าน (ปิด MAC แบบสุ่มก่อน) · คอม: พิมพ์ getmac ใน cmd</div>' +
     (saved.length ? '<div class="net-qlist">' + saved.map(function (d) {
       var lockOn = d.locked && on(d);
       return '<div class="net-q"><div><b>' + esc(d.name || d.mac) + '</b>' + (d.locked ? ' <span class="muted" title="เครื่องสำคัญ">🔒</span>' : '') + '<div class="mono muted" style="font-size:12px">' + esc(d.mac) + '</div></div>' +
@@ -5928,15 +5937,15 @@ function drawNetOffline(saved, e) {
   }
   box.innerHTML = '<div class="card pad col" style="gap:10px;max-width:720px"><h2>อินเทอร์เน็ตร้าน</h2>' +
     '<div class="banner warn" style="border-radius:10px">' + esc(e.message) + '</div>' +
-    '<div class="muted" style="line-height:1.7">หน้านี้สั่งเราเตอร์ผ่าน "ตัวช่วยอินเทอร์เน็ต" ที่ติดตั้งมากับ EarthMart บนเครื่องหน้าร้าน<br>' +
-    '• ใช้ได้เมื่ออยู่ที่เครื่องหน้าร้าน ที่เปิดด้วยไอคอน <b>EarthMart Counter</b><br>• ถ้ายังไม่มี: ดาวน์โหลดชุดติดตั้งล่าสุด (ตั้งค่า › การเชื่อมต่อ / ติดตั้ง) แล้วรัน Install-EarthMart.bat อีกครั้ง</div>' +
+    '<div class="muted" style="line-height:1.7">เปิดหน้านี้จากไอคอน <b>EarthMart Counter</b> บนเครื่องหน้าร้าน<br>' +
+    'ถ้ายังไม่มีไอคอน ให้รัน Install-EarthMart.bat จากชุดติดตั้งล่าสุด (ตั้งค่า › การเชื่อมต่อ / ติดตั้ง)</div>' +
     '<button class="btn" data-act="netReload" style="align-self:flex-start">ลองใหม่</button></div>' + netSavedList(saved);
 }
 
 function drawNetSetup(saved) {
   var box = netBox(); if (!box) return;
   box.innerHTML = '<div class="card pad col" style="gap:12px;max-width:560px"><h2>ตั้งค่าการเชื่อมเราเตอร์</h2><div class="muted">ทำครั้งเดียวบนเครื่องหน้าร้าน · ใช้รหัส admin ของเราเตอร์ AIS (หน้า 192.168.1.1)</div>' +
-    netSetupFields() + '<div class="muted" style="font-size:13px;line-height:1.6">รหัสผ่านเก็บในเครื่องหน้าร้านนี้เท่านั้น (ไม่ส่งขึ้น Google / GitHub)</div>' +
+    netSetupFields() + '<div class="muted" style="font-size:13px;line-height:1.6">รหัสผ่านเก็บในเครื่องนี้เท่านั้น</div>' +
     '<button class="btn primary" data-act="netPair">เชื่อมเราเตอร์</button></div>' + netSavedList(saved || []);
   netCapBind(box);
 }
@@ -5976,7 +5985,7 @@ function netCapBind(scope, lazy) {
 function drawNetLogin(saved) {
   var box = netBox(); if (!box) return;
   box.innerHTML = '<div class="card pad col" style="gap:12px;max-width:520px"><h2>ล็อกอินเราเตอร์</h2>' +
-    '<div class="muted" style="line-height:1.6">เราเตอร์ AIS ให้พิมพ์ตัวอักษรในภาพทุกครั้งที่ล็อกอิน · ใช้รหัสผ่านที่บันทึกไว้ (เปลี่ยนได้ที่ "ตั้งค่าการเชื่อม") · ล็อกอินแล้วโปรแกรมจะค้างการเชื่อมไว้ให้ ไม่ต้องพิมพ์บ่อย<br>หลุดเมื่อ: ปิดคอม หรือมีคนเปิดหน้า 192.168.1.1 ในเบราว์เซอร์</div>' +
+    '<div class="muted" style="line-height:1.6">พิมพ์ตัวอักษรในภาพเพื่อล็อกอินเราเตอร์<br>ต้องล็อกอินใหม่เมื่อปิดคอม หรือมีคนเปิดหน้า 192.168.1.1</div>' +
     netCapHtml() + '<div class="row" style="gap:8px"><button class="btn primary" data-act="netLogin">ล็อกอิน</button><button class="btn" data-act="netSetup">ตั้งค่าการเชื่อม</button></div></div>' + netSavedList(saved || []);
   netCapBind(box);
   var c = $('#net-code', box);
@@ -6040,7 +6049,7 @@ function drawNet() {
   var lock = '<svg aria-label="กันปิดสิทธิ์" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
   box.innerHTML = '<div class="net-grid"><div class="col" style="gap:14px;min-width:0">' +
     '<div class="card pad net-master"><button type="button" class="switch big' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '" aria-label="เปิดระบบ Whitelist" data-act="netMode"></button>' +
-    '<div class="grow"><b style="font-size:18px">เปิดระบบ Whitelist</b><div class="muted" style="font-size:13px">ใช้เน็ตร้านได้เฉพาะเครื่องที่อนุญาต · ปิดสวิตช์ = ทุกเครื่องใช้ได้ปกติ</div>' +
+    '<div class="grow"><b style="font-size:18px">เปิดระบบ Whitelist</b><div class="muted" style="font-size:13px">ใช้เน็ตร้านได้เฉพาะเครื่องที่อนุญาต</div>' +
     '<div style="font-size:13px;margin-top:2px">ที่ว่างในเราเตอร์ (8 เครื่องต่อ WiFi 1 ชื่อ): ' + netUseLine() + '</div>' +
     (st.known === false ? '<div class="warn-text" style="font-size:13px">อ่านโหมดตัวกรองจากเราเตอร์ไม่ได้ — ระบบจะไม่เปลี่ยนอะไรในเราเตอร์จนกว่าจะแก้</div>' : '') +
     (st.enabled && st.policy === 'black' ? '<div class="warn-text" style="font-size:13px">เราเตอร์ตั้งเป็น Blacklist อยู่ (ตั้งจากหน้า 192.168.1.1) — เปิดสวิตช์เพื่อเปลี่ยนเป็น Whitelist</div>' : '') + '</div>' +
@@ -6061,8 +6070,8 @@ function drawNet() {
     '<aside class="col" style="gap:14px"><div class="card pad"><div class="row" style="gap:8px"><i class="net-dot on"></i><b>เชื่อมเราเตอร์แล้ว</b></div><div style="font-size:14px;line-height:1.7;margin-top:6px"><span class="muted">รุ่น</span> ' + esc((S.netPing || {}).profile || '') +
     '<br><span class="muted">ที่อยู่</span> ' + esc((S.netPing || {}).host || '') + '<br><span class="muted">อัปเดตล่าสุด</span> ' + esc(st.at || '') + ' (ทุก 1 นาที)</div>' +
     '<div class="row" style="gap:8px;margin-top:10px"><button class="btn sm" data-act="netReload">รีเฟรช</button><button class="btn sm" data-act="netSetup">ตั้งค่าการเชื่อม</button></div></div>' +
-    '<div class="card pad net-tip"><b>กันล็อกตัวเอง</b><br>' + lock + ' เครื่องหน้าร้านนี้และเครื่องที่ติ๊ก "เครื่องสำคัญ" ปิดสิทธิ์ไม่ได้ · ถ้าตั้งผิด ยังเข้า 192.168.1.1 → Basic Setup → Security Configuration → Wi-Fi MAC Address Filtering แล้วเอาติ๊ก Enable ออกได้เสมอ</div>' +
-    '<div class="card pad net-tip"><b>มือถือที่สุ่ม MAC</b><br>iPhone / Android รุ่นใหม่เปลี่ยน MAC ต่อ WiFi · ปิด "ที่อยู่ส่วนตัว / MAC แบบสุ่ม" สำหรับ WiFi ร้านครั้งเดียว ไม่งั้นจะขึ้นเป็นเครื่องใหม่บ่อย</div></aside></div>';
+    '<div class="card pad net-tip"><b>กันล็อกตัวเอง</b><br>' + lock + ' เครื่องหน้าร้านและเครื่องสำคัญปิดสิทธิ์ไม่ได้ · ถ้าเน็ตหาย: 192.168.1.1 → Basic Setup → Security Configuration → Wi-Fi MAC Address Filtering → เอาติ๊ก Enable ออก</div>' +
+    '<div class="card pad net-tip"><b>มือถือที่สุ่ม MAC</b><br>ปิด "ที่อยู่ส่วนตัว / MAC แบบสุ่ม" สำหรับ WiFi ร้าน ไม่งั้นจะขึ้นเป็นเครื่องใหม่บ่อย</div></aside></div>';
 }
 
 function netBusy(on, text) {
@@ -6308,7 +6317,14 @@ var REP_TABS = [['overview', 'ภาพรวม'], ['products', 'สินค�
 var ACTION_TH = { STOCK_OPENING: 'ตั้งยอดเปิดร้าน', STOCK_OPENING_CLOSE: 'ข้ามตั้งยอดเปิดร้าน', STOCK_OPENING_START: 'เปิดโหมดตั้งยอดเปิดร้าน', STOCK_OPENING_DONE: 'ตั้งยอดเปิดร้านเสร็จสิ้น', KEY_LAYOUT: 'จัดตำแหน่งปุ่มหน้าขาย', PRODUCT_DELETE: 'ลบสินค้า', PRODUCT_ARCHIVE: 'ปิดใช้งานสินค้า', GO_LIVE: 'เริ่มใช้งานจริง (ล้างข้อมูลทดสอบ)', VOID: 'ยกเลิกบิล', DISCOUNT: 'ส่วนลด', OPEN_PRICE: 'ราคาเปิด', CASH_IN: 'เงินเข้า', CASH_OUT: 'เงินออก',
   STOCK_ADJUST: 'ปรับสต็อก', PRICE_CHANGE: 'แก้ราคา', APPROVE_FAIL: 'PIN อนุมัติผิด', NO_SALE: 'เปิดลิ้นชัก', WRITEOFF: 'ตัดของเสีย',
   STOCK_COUNT: 'ตรวจนับ', MARKDOWN: 'ลดราคาใกล้หมดอายุ', EXPIRY_CLOSE: 'ปิดล็อตหมดอายุ', STORE_USE: 'เบิกใช้ในร้าน', RETURN: 'คืนสินค้า',
-  BELOW_COST: 'ขายต่ำกว่าทุน', LOW_MARGIN: 'กำไรต่ำ', OVERSELL: 'ขายเกินสต็อก', OFFLINE_CHECK: 'ตรวจรายการออฟไลน์' };
+  BELOW_COST: 'ขายต่ำกว่าทุน', LOW_MARGIN: 'กำไรต่ำ', OVERSELL: 'ขายเกินสต็อก', OFFLINE_CHECK: 'ตรวจรายการออฟไลน์',
+  LOGIN: 'เข้าระบบ', SHIFT_OPEN: 'เปิดกะ', SHIFT_CLOSE: 'ปิดกะ', RECEIVE: 'รับสินค้า', CUST_PAY: 'ลูกค้าจ่ายหนี้', CUSTOMER: 'ลูกค้าเครดิต',
+  EXPENSE: 'บันทึกรายจ่าย', EXPENSE_VOID: 'ลบรายจ่าย', PAYABLE: 'ค้างจ่าย', PAYABLE_PAY: 'จ่ายหนี้ร้าน', LEDGER_CLEAR: 'กระทบยอดธนาคาร',
+  WALLET_TRANSFER: 'ย้ายเงิน', WALLET_DRAW: 'ถอนใช้ส่วนตัว', WALLET_INVEST: 'ลงทุนเพิ่ม', WALLET_ADJUST: 'ปรับยอดเงิน', ACC_SETUP: 'ตั้งยอดบัญชี',
+  NET_DEVICE: 'อินเทอร์เน็ตร้าน', NET_DEVICE_DEL: 'ลบเครื่องจากอินเทอร์เน็ตร้าน', DEVICE_REGISTER: 'ลงทะเบียนเครื่อง', DEVICE_UNREGISTER: 'ยกเลิกเครื่อง',
+  PRODUCT_ADD: 'เพิ่มสินค้า', PRODUCT_IMPORT: 'นำเข้าสินค้า', PRODUCT_IMAGE: 'รูปสินค้า', PROMO_SAVE: 'บันทึกโปร', PROMO_ON: 'เปิดโปร', PROMO_OFF: 'ปิดโปร',
+  MARKDOWN_SALE: 'ขายของลดราคา', SLIDE_ADD: 'เพิ่มสไลด์', SLIDE_DELETE: 'ลบสไลด์', SETTINGS: 'แก้ตั้งค่า', BACKUP: 'สำรองข้อมูล',
+  USER_ADD: 'เพิ่มผู้ใช้', USER_PIN_RESET: 'เปลี่ยน PIN', USER_ENABLE: 'เปิดผู้ใช้', USER_DISABLE: 'ปิดผู้ใช้' };
 
 function repState() {
   if (!S.rep) S.rep = { f: { from: today(), to: today(), slowDays: 30 }, tab: 'overview', preset: 'today', sort: 'revenue',
@@ -6745,7 +6761,7 @@ function drawReport() {
     };
     html = head + table([['หมวด / หมวดย่อย'], ['สินค้า', 1], ['ยอดขาย', 1], ['สัดส่วน'], ['ต้นทุน', 1], ['กำไร', 1], ['%', 1]], d.categories.map(function (c) {
       return catRow(c) + (c.subs || []).map(function (x) { return catRow(x, true, c.key); }).join('');
-    })) + '<div class="muted" style="font-size:13px">แตะหมวดหรือหมวดย่อยเพื่อดูสินค้าในนั้น · เลือกหมวดในตัวกรองแล้ว กราฟหน้าภาพรวมจะแยกตามหมวดย่อย</div>';
+    })) + '<div class="muted" style="font-size:13px">แตะหมวดเพื่อดูสินค้า</div>';
   } else if (r.tab === 'staff') {
     html = head + table([['พนักงาน'], ['บิล', 1], ['ยอดสุทธิ', 1], ['เฉลี่ย/บิล', 1], ['ส่วนลด', 1], ['ยกเลิก', 1], ['คืนสินค้า', 1]], d.staff.map(function (x) {
       return '<tr><td><b>' + esc(x.name) + '</b></td><td class="r num">' + x.bills + '</td><td class="r num"><b>' + money(x.net) + '</b></td><td class="r num">' + (x.bills ? money(x.net / x.bills) : '–') +
@@ -6767,9 +6783,9 @@ function drawReport() {
       table([['สินค้า'], ['หมวด'], ['คงเหลือ', 1], ['มูลค่าทุน', 1], ['ขายล่าสุด', 1]], d.slow.map(function (x) {
         return '<tr><td>' + esc(x.name) + (x.forSale ? '' : ' <span class="tag gray">วัตถุดิบ</span>') + '</td><td class="muted">' + esc(x.category) + '</td><td class="r num">' + x.onHand + ' ' + esc(x.unit) +
           '</td><td class="r num"><b>' + money(x.value) + '</b></td><td class="r">' + (x.days === null ? '<span class="tag warn">ไม่เคยขาย</span>' : x.days + ' วันก่อน') + '</td></tr>';
-      })) + '<div class="muted" style="font-size:13px">สินค้าที่ยังมีของแต่ไม่ได้ขายเลยตามจำนวนวันที่เลือก (นับถึงวันนี้ ไม่ขึ้นกับช่วงเวลาด้านซ้าย) — วัตถุดิบนับวันที่ถูกใช้ในสูตรล่าสุด</div>';
+      })) + '<div class="muted" style="font-size:13px">มีของแต่ไม่ได้ขายเลยตามจำนวนวันที่เลือก (นับถึงวันนี้)</div>';
   } else if (r.tab === 'stock') {
-    html = '<div class="kpis">' + kpi('มูลค่าสต็อกรวม (ทุน FIFO)', '฿' + money(d.stock.total), 'ณ ตอนนี้ · ไม่ขึ้นกับช่วงเวลา', 'brand-text') + '</div>' +
+    html = '<div class="kpis">' + kpi('มูลค่าสต็อกรวม (ทุน)', '฿' + money(d.stock.total), 'ณ ตอนนี้ · ไม่ขึ้นกับช่วงเวลา', 'brand-text') + '</div>' +
       table([['หมวด'], ['รายการ', 1], ['ชิ้น', 1], ['มูลค่าทุน', 1], ['สัดส่วน']], d.stock.categories.map(function (c) {
         return '<tr><td><b>' + esc(c.category) + '</b></td><td class="r num">' + c.items + '</td><td class="r num">' + c.pieces + '</td><td class="r num"><b>' + money(c.value) +
           '</b></td><td style="min-width:160px"><div class="sharebar"><span style="width:' + c.share + '%"></span></div><span class="muted" style="font-size:12px">' + c.share + '%</span></td></tr>';
@@ -6811,10 +6827,10 @@ function renderSettings() {
     f('billPrefix', 'คำนำหน้าเลขบิล', 'เว้นว่างได้') +
     '<div class="field"><label for="s-autoPrint">พิมพ์ใบเสร็จอัตโนมัติหลังรับเงิน</label><select id="s-autoPrint" data-skey="autoPrint">' +
       '<option value="1">พิมพ์ทุกบิล (ยกเลิกได้ในหน้าชำระเงิน)</option><option value="0"' + (st.autoPrint === '0' ? ' selected' : '') + '>ไม่พิมพ์ (ติ๊กพิมพ์เองเฉพาะบิลที่ลูกค้าขอ)</option></select></div>' +
-    '<div class="field"><label for="s-reorderDays">รอบรับของ (ค่าเริ่มต้น) <small class="muted">— ใช้กับสินค้าที่ยังรับของไม่ถึง 2 ครั้ง · พอรับครบ ระบบดูรอบจริงของแต่ละสินค้า/ผู้ขายเอง</small></label><select id="s-reorderDays" data-skey="reorderDays">' +
+    '<div class="field"><label for="s-reorderDays">รอบรับของ (ค่าเริ่มต้น) <small class="muted">— สำหรับสินค้าใหม่</small></label><select id="s-reorderDays" data-skey="reorderDays">' +
       [['3', '3 วัน'], ['5', '5 วัน'], ['7', '7 วัน (สัปดาห์ละครั้ง)'], ['10', '10 วัน'], ['14', '14 วัน (2 สัปดาห์)'], ['30', '30 วัน (เดือนละครั้ง)']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.reorderDays || '7') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
-    '<div class="field"><label for="s-syncMinutes">ซิงก์ข้อมูลอัตโนมัติ <small class="muted">— ดึงสินค้า ราคา สต็อก และส่งบิลค้างเบื้องหลัง ไม่รบกวนการขาย</small></label><select id="s-syncMinutes" data-skey="syncMinutes">' +
+    '<div class="field"><label for="s-syncMinutes">ซิงก์ข้อมูลอัตโนมัติ</label><select id="s-syncMinutes" data-skey="syncMinutes">' +
       [['0', 'ปิด (ซิงก์เมื่อเปิดโปรแกรมเท่านั้น)'], ['1', 'ทุก 1 นาที'], ['3', 'ทุก 3 นาที'], ['5', 'ทุก 5 นาที'], ['10', 'ทุก 10 นาที'], ['15', 'ทุก 15 นาที'], ['30', 'ทุก 30 นาที'], ['60', 'ทุก 1 ชั่วโมง']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.syncMinutes === undefined || st.syncMinutes === '' ? '5' : st.syncMinutes) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
     '<div class="field"><label for="s-autoLockMinutes">ล็อกหน้าจอเมื่อไม่มีใครใช้ (ต้องใส่ PIN ใหม่)</label><select id="s-autoLockMinutes" data-skey="autoLockMinutes">' +
@@ -6827,7 +6843,7 @@ function renderSettings() {
     '<div class="field"><label for="s-slidesAuto">สไลด์จากโปรโมชั่น</label><select id="s-slidesAuto" data-skey="slidesAuto"><option value="1">แสดง</option><option value="0"' + (st.slidesAuto === '0' ? ' selected' : '') + '>ไม่แสดง</option></select></div>' +
     '<div class="field"><label for="s-cdHints">บอกโปรตอนสแกน</label><select id="s-cdHints" data-skey="cdHints"><option value="1">เปิด</option><option value="0"' + (st.cdHints === '0' ? ' selected' : '') + '>ปิด</option></select></div></div>' +
       '<button class="btn primary" type="submit">บันทึก</button></form>' + slidesCard() + '</div>') +
-    sec('look', '<form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>ธีมสี & LINE</h2>' + '<div class="field"><label for="s-theme">โหมดสี (ทั้งร้าน)</label><select id="s-theme" data-skey="theme">' + ['light', 'dark', 'system'].map(function (t) {
+    sec('look', '<form class="card pad col set-card" data-form="settings" style="gap:10px"><h2>ธีมสี / LINE</h2>' + '<div class="field"><label for="s-theme">โหมดสี (ทั้งร้าน)</label><select id="s-theme" data-skey="theme">' + ['light', 'dark', 'system'].map(function (t) {
       return '<option value="' + t + '"' + (st.theme === t ? ' selected' : '') + '>' + { light: 'สว่าง', dark: 'มืด', system: 'ตามเครื่อง' }[t] + '</option>';
     }).join('') + '</select></div>' +
     '<div class="field"><label for="s-palette">สีหลัก</label><select id="s-palette" data-skey="palette">' + pal.map(function (p) {
@@ -6854,17 +6870,17 @@ function renderSettings() {
     '<hr style="border:0;border-top:1px solid var(--line);width:100%"><h2>ไฟล์เปิดในเครื่อง</h2>' +
     (window.EM_LOCAL ? '<div class="muted" style="font-size:13px">เครื่องนี้เปิดจากไฟล์ในคอม · เวอร์ชัน ' + esc(window.EM_BUILD || '') + ' (เวลาไทย)<br>ไฟล์ไม่อัปเดตเอง — มีฟีเจอร์ใหม่ให้ดาวน์โหลดชุดติดตั้งแล้วรัน Install-EarthMart.bat อีกครั้ง</div>' +
       '<a class="btn sm" href="https://earthlk.github.io/EarthMart/EarthMart-Setup.zip" target="_blank" rel="noopener">ดาวน์โหลดชุดติดตั้งล่าสุด</a>'
-      : '<div class="muted" style="font-size:13px">ติดตั้งบนคอมเครื่องอื่น: แตก ZIP แล้วรัน Install-EarthMart.bat → ได้ไอคอนหน้าร้าน (kiosk) / หลังร้าน และเปิดเองตอนเปิดเครื่อง · ยังเชื่อมกับ Google Sheet ของร้าน</div>' +
+      : '<div class="muted" style="font-size:13px">ติดตั้งบนคอมเครื่องอื่น: แตก ZIP แล้วรัน Install-EarthMart.bat</div>' +
       '<div class="row" style="gap:6px;flex-wrap:wrap"><a class="btn sm" href="EarthMart-Setup.zip" download>ชุดติดตั้ง Windows (.zip)</a><a class="btn sm ghost" href="EarthMart-local.html" download="EarthMart.html">เฉพาะไฟล์ .html</a></div>') +'</div>') +
-    sec('backup', '<div class="set-cols"><div class="card pad col set-card" style="gap:10px">' + '<h2>สำรองข้อมูล</h2><div class="muted" style="font-size:13px">Backup อัตโนมัติทุกวันตั้งได้ด้วย installTriggers() (ดูคู่มือ)</div>' +
-      '<button class="btn" data-act="backupNow">Backup ตอนนี้</button>' + '<div id="golive"></div>' + '</div>' +
+    sec('backup', '<div class="set-cols"><div class="card pad col set-card" style="gap:10px">' + '<h2>สำรองข้อมูล</h2>' +
+      '<button class="btn" data-act="backupNow">สำรองตอนนี้</button>' + '<div id="golive"></div>' + '</div>' +
       '<div class="card pad" style="max-height:calc(100vh - 140px);overflow:auto"><h2>บันทึกการทำงาน (ล่าสุด 100)</h2><table class="table"><tbody id="auditrows">' + skelRows(8, 3) + '</tbody></table></div></div>') +
     '</div></div>';
 }
 
 var SET_TABS = [['shop', 'ร้าน / ใบเสร็จ', 'ชื่อร้าน · พร้อมเพย์ · พิมพ์ · ล็อกจอ'], ['customer', 'จอลูกค้า / สไลด์', 'ข้อความต้อนรับ · โปร · รูปสไลด์'],
-  ['look', 'ธีมสี & LINE', 'โหมดสี · สีหลัก'], ['device', 'เครื่องหน้าร้าน', 'ลงทะเบียน · ลิ้นชักเก็บเงิน'], ['users', 'ผู้ใช้ / PIN', 'พนักงาน · สิทธิ์'], ['net', 'อินเทอร์เน็ตร้าน', 'Whitelist · เครื่องที่ใช้เน็ตได้'],
-  ['connect', 'การเชื่อมต่อ / ติดตั้ง', 'ลิงก์ตั้งค่าเครื่อง · ไฟล์ติดตั้ง'], ['backup', 'สำรองข้อมูล & บันทึก', 'Backup · ประวัติการทำงาน']];
+  ['look', 'ธีมสี / LINE', 'โหมดสี · สีหลัก'], ['device', 'เครื่องหน้าร้าน', 'ลงทะเบียน · ลิ้นชักเก็บเงิน'], ['users', 'ผู้ใช้ / PIN', 'พนักงาน · สิทธิ์'], ['net', 'อินเทอร์เน็ตร้าน', 'Whitelist · เครื่องที่ใช้เน็ตได้'],
+  ['connect', 'การเชื่อมต่อ / ติดตั้ง', 'ลิงก์ตั้งค่าเครื่อง · ไฟล์ติดตั้ง'], ['backup', 'สำรองข้อมูล / บันทึก', 'สำรอง · ประวัติการทำงาน']];
 
 function drawerSettings() {
   if (!window.CashDrawer) return '';
@@ -6929,9 +6945,9 @@ function loadGoLive() {
   if (!box) return;
   api('goLivePreview', S.token).then(function (p) {
     S.goLive = p;
-    if (p.liveSince) { box.innerHTML = '<hr style="border:0;border-top:1px solid var(--line)"><div class="muted" style="font-size:13px">เริ่มใช้งานจริงเมื่อ <b>' + esc(p.liveSince) + '</b></div><div style="margin-top:12px">' + openingSettingsCard() + '</div>'; return; }
+    if (p.liveSince) { box.innerHTML = '<hr style="border:0;border-top:1px solid var(--line)"><div class="muted" style="font-size:13px">เริ่มใช้งานจริงเมื่อ <b>' + esc(thDateY(p.liveSince) + ' ' + String(p.liveSince).slice(11, 16)) + '</b></div><div style="margin-top:12px">' + openingSettingsCard() + '</div>'; return; }
     box.innerHTML = '<hr style="border:0;border-top:1px solid var(--line)"><h3 style="margin:4px 0">เริ่มใช้งานจริง</h3>' +
-      '<div class="muted" style="font-size:13px;line-height:1.6">ล้างข้อมูลทดสอบ (บิล กะ สต็อก ล็อต บัญชี) ครั้งเดียวก่อนเปิดร้าน · สำรองทั้งไฟล์ให้ก่อนล้าง · ทำแล้วปุ่มนี้จะหายไป</div>' +
+      '<div class="muted" style="font-size:13px;line-height:1.6">ล้างบิล กะ สต็อก และบัญชีที่ทดลองไว้ ครั้งเดียวก่อนเปิดร้าน (สำรองทั้งไฟล์ให้ก่อน)</div>' +
       '<button class="btn warn" data-act="goLive">เริ่มใช้งานจริง…</button><div style="margin-top:12px">' + openingSettingsCard() + '</div>';
   }).catch(function () {});
 }
@@ -6944,7 +6960,7 @@ function goLiveModal() {
     return '<label class="row" style="gap:8px"><input type="checkbox" name="gl-dev" value="' + esc(d.deviceId) + '"' + (d.deviceId === S.deviceId ? ' checked' : '') + '> ' + esc(d.name) + (d.deviceId === S.deviceId ? ' <span class="tag green">เครื่องนี้</span>' : '') + '</label>';
   }).join('') || '<div class="muted">ไม่มีเครื่องลงทะเบียน</div>';
   var m = openModal('<header><h1>เริ่มใช้งานจริง</h1></header><form class="body col" style="gap:12px">' +
-    '<div class="muted" style="font-size:13px">ล้างข้อมูลทดสอบครั้งเดียว · ระบบสำรองทั้งไฟล์ไว้ใน Drive ก่อนล้าง · ทำแล้วทำซ้ำจากโปรแกรมไม่ได้</div>' +
+    '<div class="muted" style="font-size:13px">สำรองทั้งไฟล์ไว้ใน Drive ก่อนล้าง · ทำซ้ำไม่ได้</div>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px"><div><b>ล้างทิ้ง</b><ul style="margin:6px 0 0 18px;font-size:14px;line-height:1.7">' + hist + '</ul></div>' +
     '<div><label class="row" style="gap:8px"><input type="checkbox" id="gl-cat" checked> <b>ลบสินค้าตัวอย่างด้วย</b></label><ul style="margin:6px 0 0 18px;font-size:14px;line-height:1.7">' + cat + '</ul>' +
     '<div class="muted" style="font-size:12px">ไม่ติ๊ก = เก็บสินค้าไว้ แต่สต็อกทุกตัวเริ่มที่ 0</div></div></div>' +
@@ -7041,7 +7057,7 @@ var ACTIONS = {
   cntCommit: cntCommit,
   opGoCount: function () { S.stockTab = 'count'; go('stock'); },
   opStart: function () {
-    confirm2('เปิดโหมดตั้งยอดเปิดร้าน', 'ระหว่างนี้ทุกเครื่องจะใช้ได้แค่ ตั้งค่า · สินค้า · สต็อก (ตรวจนับ) · บัญชี — ขายและรับของไม่ได้ จนกว่าจะกด "ตั้งยอดเปิดร้านเสร็จสิ้น" · เริ่มเลยไหม?', 'เริ่ม').then(function (ok) {
+    confirm2('เปิดโหมดตั้งยอดเปิดร้าน', 'ขายและรับของไม่ได้ทุกเครื่อง จนกว่าจะกด "ตั้งยอดเปิดร้านเสร็จสิ้น"', 'เริ่ม').then(function (ok) {
       if (!ok) return;
       return api('startOpening', S.token).then(function () { S.settings.openingActive = '1'; saveCache(true); S.cnt = null; store('em_count', null); S.stockTab = 'count'; go('stock'); });
     }).catch(fail);
@@ -7498,6 +7514,41 @@ setInterval(function () {
   if (!mins || (S.cart && S.cart.lines.length) || modalStack.length) return;
   if (Date.now() - S.lastActivity > mins * 60000) logout();
 }, 30000);
+
+/* Native date inputs show the browser's locale format (11/15/2026). Lay a Thai label
+   ("15 พ.ย. 69") over each one; the real input stays in place, so ids, values and
+   change handlers are untouched. */
+function thDateFields() {
+  $all('input[type=date]').forEach(function (el) {
+    var w = el.parentNode;
+    if (!w || !w.classList) return;
+    if (!w.classList.contains('datef')) {
+      w = document.createElement('span');
+      w.className = 'datef';
+      if (el.style.width) w.style.width = el.style.width;
+      el.parentNode.insertBefore(w, el);
+      w.appendChild(el);
+      var t = document.createElement('span');
+      t.className = 'datef-t';
+      t.setAttribute('aria-hidden', 'true');
+      w.appendChild(t);
+    }
+    var lab = el.value ? thDateY(el.value) : '—';
+    var tx = w.querySelector('.datef-t');
+    if (tx && tx.textContent !== lab) tx.textContent = lab;
+  });
+}
+var dateTick = 0;
+if (window.MutationObserver) new MutationObserver(function () {
+  if (dateTick) return;
+  dateTick = requestAnimationFrame(function () { dateTick = 0; thDateFields(); });
+}).observe(document.body, { childList: true, subtree: true });
+['input', 'change'].forEach(function (ev) {
+  document.addEventListener(ev, function (e) { if (e.target.type === 'date') thDateFields(); }, true);
+});
+document.addEventListener('click', function (e) {
+  if (e.target.type === 'date' && e.target.showPicker) { try { e.target.showPicker(); } catch (er) { /* not allowed here */ } }
+});
 
 /* Expose a few pure helpers for testing. */
 if (window.CustomerDisplay) CustomerDisplay.pos.onStatus = function (on) { var d = $('#cdbtn .dot'); if (d) d.classList.toggle('on', on); };

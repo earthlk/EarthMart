@@ -986,3 +986,11 @@ a{color:var(--brand-text)}
 .banner.op-bar span{flex:1;min-width:240px}
 .op-on .stk-side{display:none}
 .op-card{max-width:720px}
+
+/* Thai label over native date inputs (see thDateFields) */
+.datef{position:relative;display:inline-block;min-width:0}
+.field>.datef,.grid3 .datef{display:block}
+.datef>input[type=date]{width:100%;color:transparent}
+.datef>input[type=date]::-webkit-datetime-edit{color:transparent}
+.datef-t{position:absolute;left:11px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--ink);white-space:nowrap;font-size:inherit}
+.datef>input[type=date]:disabled+.datef-t{color:var(--muted)}
