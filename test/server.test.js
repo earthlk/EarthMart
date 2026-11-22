@@ -1055,6 +1055,21 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   ok(!c('deleteProduct', TC, P['พิมพ์ผิด']).ok, 'cashier cannot delete products');
   ok(m('deleteProduct', T, P['พิมพ์ผิด']).deleted, 'unused product deleted');
   ok(!m('listProducts', T).some(p => p.name === 'พิมพ์ผิด') && !m('bootstrap', T).barcodes.some(b => b.barcode === '8850000000017'), 'its row and barcode are gone');
+  {
+    // rows are removed, not left blank — and an old blank gap gets cleaned up on the next delete
+    m('saveProduct', T, { name: 'ก', price: 1, type: 'nobarcode' });
+    m('saveProduct', T, { name: 'ข', price: 1, type: 'nobarcode' });
+    const ps = h.__ss.getSheetByName('Products');
+    const blankRows = () => ps.data.slice(1, ps.getLastRow()).filter(r => !(r || []).some(v => v !== '' && v !== undefined)).length;
+    eq(blankRows(), 0, 'deleting a product leaves no blank row in Products');
+    const bs = h.__ss.getSheetByName('Barcodes');
+    eq(bs.data.slice(1, bs.getLastRow()).filter(r => !(r || []).some(v => v !== '' && v !== undefined)).length, 0, 'or in Barcodes');
+    ps.data.splice(2, 0, ps.data[1].map(() => ''));   // a gap left by an older version
+    ok(blankRows() === 1, 'gap set up');
+    m('deleteProduct', T, m('listProducts', T).find(p => p.name === 'ข').sku);
+    eq(blankRows(), 0, 'old gap removed with the next delete');
+    ok(m('listProducts', T).some(p => p.name === 'ก'), 'other products untouched');
+  }
   const r = m('deleteProduct', T, P['โค้ก']);
   ok(r.archived && /รับเข้า/.test(r.reason), 'product with history is switched off instead');
   eq(m('listProducts', T).find(p => p.name === 'โค้ก').active, false, 'still there, inactive');

@@ -99,7 +99,7 @@ function api_deleteSlide(token, slideId) {
       var r = readAll_('Slides').filter(function (x) { return String(x.slideId) === String(slideId); })[0];
       if (!r) throw new Error('ไม่พบสไลด์');
       try { DriveApp.getFileById(r.fileId).setTrashed(true); } catch (e) { /* already gone */ }
-      sheet_('Slides').getRange(r._row, 1, 1, SCHEMA.Slides.length).setValues([SCHEMA.Slides.map(function () { return ''; })]);
+      deleteRows_('Slides', [r._row]);
       log_(sess, 'SLIDE_DELETE', r.slideId, r.title, '');
       return slidesForClient_();
     });

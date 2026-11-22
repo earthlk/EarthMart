@@ -434,12 +434,10 @@ function api_deleteProduct(token, sku) {
         log_(s, 'PRODUCT_ARCHIVE', sku, p.name + ' · ' + used, '');
         return { archived: true, reason: used };
       }
-      var blank = function (name, rows) {
-        rows.forEach(function (r) { sheet_(name).getRange(r._row, 1, 1, SCHEMA[name].length).setValues([SCHEMA[name].map(function () { return ''; })]); });
-      };
-      blank('Barcodes', readAll_('Barcodes').filter(function (b) { return String(b.sku) === sku; }));
-      blank('Recipes', readAll_('Recipes').filter(function (r) { return String(r.sku) === sku; }));
-      blank('Products', [p]);
+      var rowsOf = function (list) { return list.map(function (r) { return r._row; }); };
+      deleteRows_('Barcodes', rowsOf(readAll_('Barcodes').filter(function (b) { return String(b.sku) === sku; })));
+      deleteRows_('Recipes', rowsOf(readAll_('Recipes').filter(function (r) { return String(r.sku) === sku; })));
+      deleteRows_('Products', [p._row]);
       if (p.image) { try { DriveApp.getFileById(String(p.image)).setTrashed(true); } catch (e) { /* already gone */ } }
       log_(s, 'PRODUCT_DELETE', sku, p.name, '');
       return { deleted: true };
@@ -447,6 +445,35 @@ function api_deleteProduct(token, sku) {
   });
 }
 
+
+/**
+ * Remove whole sheet rows (1-based), plus any blank rows that older versions left between data
+ * rows when they only cleared a deleted product. Bottom-up, one call per run of adjacent rows.
+ */
+function deleteRows_(name, rows) {
+  var sh = sheet_(name);
+  var last = sh.getLastRow();
+  if (last < 2) return 0;
+  var drop = {};
+  (rows || []).forEach(function (r) { drop[r] = true; });
+  sh.getRange(2, 1, last - 1, SCHEMA[name].length).getValues().forEach(function (v, i) {
+    if (v.join('') === '') drop[i + 2] = true;
+  });
+  var list = Object.keys(drop).map(Number).filter(function (n) { return n >= 2 && n <= last; }).sort(function (a, b) { return b - a; });
+  var i = 0;
+  while (i < list.length) {
+    var end = list[i], start = end;
+    while (i + 1 < list.length && list[i + 1] === start - 1) { i++; start = list[i]; }
+    var n = end - start + 1;
+    if (sh.getMaxRows() - n < 2) {
+      // Sheets refuses to delete every row under the frozen header: keep one, emptied
+      sh.getRange(start, 1, n, sh.getMaxColumns()).clearContent();
+      if (n > 1) sh.deleteRows(start + 1, n - 1);
+    } else sh.deleteRows(start, n);
+    i++;
+  }
+  return list.length;
+}
 
 /**
  * Sale-screen layout from drag and drop: rows (subcategories) of one tab (= category), in screen order.
