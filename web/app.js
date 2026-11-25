@@ -21,26 +21,112 @@ var KEY_COLORS = {
   green:  ['#E3F1E8', '#1F5A3A'], gray:  ['#EEF0EE', '#4B524E'], purple:['#EDE9FE', '#6D28D9']
 };
 
-/** Quick-key icons (24×24, stroke). Stored in Products.icon by key; old 2-letter text icons still work. */
+/** Quick-key icons (24×24, stroke): key → [Thai name, svg, search words]. Stored in Products.icon by key; old 2-letter text icons still work. */
 var ICONS = {
-  ice: ['น้ำแข็งแก้ว', '<path d="M6 4h12l-1.5 16a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z"/><rect x="8.6" y="8.5" width="3.4" height="3.4" rx=".6"/><rect x="12.4" y="11.6" width="3.4" height="3.4" rx=".6"/>'],
-  water: ['น้ำ+น้ำแข็ง', '<path d="M6 4h12l-1.5 16a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z"/><path d="M7 9.5c1.6 1 3.2 1 5 0s3.4-1 5 0"/><rect x="10.3" y="12.5" width="3.4" height="3.4" rx=".6"/>'],
-  iced: ['เครื่องดื่มเย็น', '<path d="M7.3 9h9.4l-1 10.9a1.4 1.4 0 0 1-1.4 1.3H9.7a1.4 1.4 0 0 1-1.4-1.3z" fill="currentColor" stroke="none" opacity=".6"/><path d="M6 4h12l-1.5 16a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z"/><path d="M14 13V1.8l3-.8"/>'],
-  cup: ['แก้วเปล่า', '<path d="M6 4h12l-1.5 16a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z"/><path d="M6.4 8h11.2"/>'],
-  hot: ['เครื่องดื่มร้อน', '<path d="M5 9h11v6a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z"/><path d="M16 11h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M8.5 3.5c-.8 1 .8 1.8 0 3M12 3.5c-.8 1 .8 1.8 0 3"/>'],
-  bottle: ['ขวด', '<path d="M10 2h4v3l1.5 2.5V20a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2V7.5L10 5z"/><path d="M8.5 11h7M8.5 16h7"/>'],
-  can: ['กระป๋อง', '<rect x="7" y="4" width="10" height="17" rx="2"/><path d="M8 3h8M7 8h10M7 17h10"/>'],
-  energy: ['เครื่องดื่มชูกำลัง', '<path d="M10 2h4v3l1.5 2.5V20a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2V7.5L10 5z"/><path d="M12.6 10l-2 3.2h2.2l-1.4 3.4"/>'],
-  noodle: ['บะหมี่/โจ๊ก', '<path d="M4 11h16a8 8 0 0 1-16 0z"/><path d="M8 11V4M11 11V3M14 11V4"/><path d="M9 21h6"/>'],
-  snack: ['ขนมซอง', '<path d="M6 3h12l-1 3 1 3-1 3 1 3-1 3 1 3H6l1-3-1-3 1-3-1-3 1-3z"/><circle cx="12" cy="12" r="2.5"/>'],
-  bread: ['ขนมปัง', '<path d="M5 10a4 4 0 0 1 2-7h10a4 4 0 0 1 2 7v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M9 12v4M12 11v5M15 12v4"/>'],
-  food: ['อาหาร', '<path d="M3 13h18"/><path d="M5 13a7 7 0 0 1 14 0"/><path d="M12 6V4"/><path d="M4 17h16l-1 3H5z"/>'],
-  pill: ['ยา', '<rect x="3" y="8" width="18" height="8" rx="4" transform="rotate(-35 12 12)"/><path d="M9.4 8.3l5.2 7.4"/>'],
-  lighter: ['ไฟแช็ก', '<rect x="7" y="10" width="10" height="12" rx="2"/><path d="M9 10V7h4v3"/><path d="M15 6.5c0-1.6 1.5-2.3 1.5-4 1 1 2 2.3 2 3.7a1.75 1.75 0 0 1-3.5.3z"/>'],
-  tissue: ['ทิชชู่', '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M9 10c0-3 1.5-5 3-6 1.5 1 3 3 3 6"/><path d="M8 15h8"/>'],
-  cable: ['สายชาร์จ', '<path d="M9 2v5M15 2v5"/><rect x="7" y="7" width="10" height="6" rx="2"/><path d="M12 13v3a4 4 0 0 1-4 4H6"/>'],
-  box: ['ทั่วไป', '<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/>']
+  ice: ['น้ำแข็งแก้ว', '<path d="M6 4h12l-1.5 16a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z"/><rect x="8.6" y="8.5" width="3.4" height="3.4" rx=".6"/><rect x="12.4" y="11.6" width="3.4" height="3.4" rx=".6"/>', 'น้ำแข็ง ice'],
+  water: ['น้ำ+น้ำแข็ง', '<path d="M6 4h12l-1.5 16a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z"/><path d="M7 9.5c1.6 1 3.2 1 5 0s3.4-1 5 0"/><rect x="10.3" y="12.5" width="3.4" height="3.4" rx=".6"/>', 'น้ำเปล่า น้ำแข็ง water'],
+  iced: ['เครื่องดื่มเย็น', '<path d="M7.3 9h9.4l-1 10.9a1.4 1.4 0 0 1-1.4 1.3H9.7a1.4 1.4 0 0 1-1.4-1.3z" fill="currentColor" stroke="none" opacity=".6"/><path d="M6 4h12l-1.5 16a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z"/><path d="M14 13V1.8l3-.8"/>', 'เย็น ชาเย็น กาแฟเย็น iced'],
+  cup: ['แก้วเปล่า', '<path d="M6 4h12l-1.5 16a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z"/><path d="M6.4 8h11.2"/>', 'แก้ว cup'],
+  hot: ['เครื่องดื่มร้อน', '<path d="M5 9h11v6a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z"/><path d="M16 11h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M8.5 3.5c-.8 1 .8 1.8 0 3M12 3.5c-.8 1 .8 1.8 0 3"/>', 'ร้อน กาแฟ ชา โกโก้ hot coffee'],
+  bottle: ['ขวด', '<path d="M10 2h4v3l1.5 2.5V20a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2V7.5L10 5z"/><path d="M8.5 11h7M8.5 16h7"/>', 'ขวด bottle'],
+  can: ['กระป๋อง', '<rect x="7" y="4" width="10" height="17" rx="2"/><path d="M8 3h8M7 8h10M7 17h10"/>', 'กระป๋อง can'],
+  energy: ['เครื่องดื่มชูกำลัง', '<path d="M10 2h4v3l1.5 2.5V20a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2V7.5L10 5z"/><path d="M12.6 10l-2 3.2h2.2l-1.4 3.4"/>', 'ชูกำลัง กระทิงแดง เอ็ม150 คาราบาว energy'],
+  noodle: ['บะหมี่/โจ๊ก', '<path d="M4 11h16a8 8 0 0 1-16 0z"/><path d="M8 11V4M11 11V3M14 11V4"/><path d="M9 21h6"/>', 'บะหมี่ โจ๊ก มาม่า noodle'],
+  snack: ['ขนมซอง', '<path d="M6 3h12l-1 3 1 3-1 3 1 3-1 3 1 3H6l1-3-1-3 1-3-1-3 1-3z"/><circle cx="12" cy="12" r="2.5"/>', 'ขนม ขนมซอง snack'],
+  bread: ['ขนมปัง', '<path d="M5 10a4 4 0 0 1 2-7h10a4 4 0 0 1 2 7v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M9 12v4M12 11v5M15 12v4"/>', 'ขนมปัง bread'],
+  food: ['อาหาร', '<path d="M3 13h18"/><path d="M5 13a7 7 0 0 1 14 0"/><path d="M12 6V4"/><path d="M4 17h16l-1 3H5z"/>', 'อาหาร ข้าว food'],
+  pill: ['ยา', '<rect x="3" y="8" width="18" height="8" rx="4" transform="rotate(-35 12 12)"/><path d="M9.4 8.3l5.2 7.4"/>', 'ยา ยาแก้ปวด พารา pill medicine'],
+  lighter: ['ไฟแช็ก', '<rect x="7" y="10" width="10" height="12" rx="2"/><path d="M9 10V7h4v3"/><path d="M15 6.5c0-1.6 1.5-2.3 1.5-4 1 1 2 2.3 2 3.7a1.75 1.75 0 0 1-3.5.3z"/>', 'ไฟแช็ก lighter'],
+  tissue: ['ทิชชู่', '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M9 10c0-3 1.5-5 3-6 1.5 1 3 3 3 6"/><path d="M8 15h8"/>', 'ทิชชู่ กระดาษ tissue'],
+  cable: ['สายชาร์จ', '<path d="M9 2v5M15 2v5"/><rect x="7" y="7" width="10" height="6" rx="2"/><path d="M12 13v3a4 4 0 0 1-4 4H6"/>', 'สายชาร์จ ที่ชาร์จ cable charger'],
+  soda: ['น้ำอัดลมขวด', '<path d="M10 2h4v2.5c0 1 2.5 2 2.5 5V20a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2V9.5c0-3 2.5-4 2.5-5z"/><path d="M7.5 12h9v5h-9z"/>', 'โค้ก เป๊ปซี่ แฟนต้า สไปรท์ soda cola coke pepsi'],
+  water2: ['น้ำดื่มขวด', '<path d="M10 2h4v2h-4z"/><path d="M9 4h6l1 3v13a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V7z"/><path d="M8 11c1.3.8 2.7.8 4 0s2.7-.8 4 0"/>', 'น้ำเปล่า น้ำดื่ม คริสตัล สิงห์ เนสท์เล่ water'],
+  milk: ['นมกล่อง', '<path d="M8 2h8v3l2 3v14H6V8l2-3z"/><path d="M6 8h12"/><path d="M14 2v3"/><path d="M9 13h6v5H9z"/>', 'นม นมจืด นมกล่อง ไวตามิ้ลค์ นมถั่วเหลือง โฟร์โมสต์ milk'],
+  juice: ['น้ำผลไม้', '<path d="M6 6h12v15a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1z"/><path d="M6 6l2-3h8l2 3"/><path d="M15 3V1"/><circle cx="12" cy="14" r="3"/>', 'น้ำผลไม้ น้ำส้ม มาลี ทิปโก้ juice orange'],
+  yakult: ['นมเปรี้ยว', '<path d="M9 3h6v2.5c1.5 1 1.5 2.5 1 4l-.5 1.5 1 2V20a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2v-7l1-2-.5-1.5c-.5-1.5-.5-3 1-4z"/><path d="M8 15h8"/>', 'ยาคูลท์ นมเปรี้ยว บีทาเก้น yakult'],
+  coffee_can: ['กาแฟกระป๋อง', '<rect x="7" y="4" width="10" height="17" rx="2"/><path d="M8 3h8"/><path d="M10 13c0-2 4-2 4 0s-4 2-4 0z"/><path d="M12 11v4"/>', 'กาแฟกระป๋อง เบอร์ดี้ เนสกาแฟ coffee can'],
+  sport: ['เกลือแร่', '<path d="M10 2h4v2l2 2v14a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V6l2-2z"/><path d="M8 10h8M8 16h8"/><path d="M11 13h2"/>', 'เกลือแร่ สปอนเซอร์ เกเตอเรด 100พลัส sport drink'],
+  tea: ['ชา', '<path d="M5 9h11v5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z"/><path d="M16 10.5h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M4 21h14"/><path d="M10 9V4l3 2"/>', 'ชา ชาเขียว อิชิตัน โออิชิ tea'],
+  beer: ['เบียร์', '<path d="M6 7h10v13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z"/><path d="M16 10h2a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2"/><path d="M6 7a2.5 2.5 0 0 1 3-3 3 3 0 0 1 5 0 2.5 2.5 0 0 1 2 3"/><path d="M9 11v7M13 11v7"/>', 'เบียร์ สิงห์ ช้าง ลีโอ แอลกอฮอล์ beer'],
+  liquor: ['เหล้า', '<path d="M10 2h4v4c2 1 3 2.5 3 5v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-9c0-2.5 1-4 3-5z"/><path d="M7 13h10v4H7z"/>', 'เหล้า สุรา หงส์ทอง รีเจนซี่ liquor whisky'],
+  straw: ['หลอด', '<path d="M7 9h10l-1.2 12a1 1 0 0 1-1 .9H9.2a1 1 0 0 1-1-.9z"/><path d="M6 9h12"/><path d="M13 9l2-7h3"/>', 'หลอด หลอดดูด straw'],
+  cupnoodle: ['บะหมี่ถ้วย', '<path d="M4 8h16l-2 13H6z"/><path d="M3 8h18"/><path d="M5 13h14"/><path d="M9 8l2-6M13 8l2-6"/>', 'บะหมี่ถ้วย มาม่าคัพ ยำยำ cup noodle'],
+  noodlepack: ['บะหมี่ซอง', '<path d="M5 4h14v16H5z"/><path d="M5 4l1-2h12l1 2M5 20l1 2h12l1-2"/><path d="M8 12c1-1.5 2-1.5 3 0s2 1.5 3 0 2-1.5 3 0M8 15c1-1.5 2-1.5 3 0s2 1.5 3 0 2-1.5 3 0"/>', 'บะหมี่ซอง มาม่า ไวไว ยำยำ instant noodle'],
+  egg: ['ไข่', '<path d="M12 3c3.5 0 6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 2.5-10 6-10z"/>', 'ไข่ ไข่ไก่ ไข่ต้ม egg'],
+  rice: ['ข้าว', '<path d="M3 12h18a9 9 0 0 1-18 0z"/><path d="M7 12c0-3 2-5 5-5s5 2 5 5"/><path d="M10 9h.01M13 8.5h.01M12 11h.01M9 11h.01M15 10.5h.01"/>', 'ข้าว ข้าวสวย ข้าวกล่อง ข้าวสาร rice'],
+  canfish: ['ปลากระป๋อง', '<ellipse cx="12" cy="7" rx="8" ry="3"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M8 13.5c2-2 5-2 7 0-2 2-5 2-7 0zM15 13.5l2-1.5v3z"/>', 'ปลากระป๋อง ซาร์ดีน ทูน่า โรซ่า สามแม่ครัว canned fish tuna'],
+  sausage: ['ไส้กรอก', '<path d="M5.5 18.5a3 3 0 0 1 0-4.2l8.8-8.8a3 3 0 0 1 4.2 4.2l-8.8 8.8a3 3 0 0 1-4.2 0z"/><path d="M5.5 18.5 3 21M18.5 5.5 21 3"/><path d="M10 12l2 2M13 9l2 2"/>', 'ไส้กรอก ลูกชิ้น ฮอทดอก sausage hotdog'],
+  bun: ['ซาลาเปา', '<path d="M3 16c0-5 4-9 9-9s9 4 9 9z"/><path d="M3 16h18v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 7c-1 1-1 2.5 0 3.5M9 9l1.5 2M15 9l-1.5 2"/>', 'ซาลาเปา ขนมจีบ ติ่มซำ bun dimsum'],
+  sandwich: ['แซนด์วิช', '<path d="M3 18 12 5l9 13z"/><path d="M5.5 14.5h13M7.5 11.5h9"/>', 'แซนด์วิช ขนมปัง sandwich'],
+  frozen: ['อาหารแช่แข็ง', '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M12 9v7M9 10.5l6 4M15 10.5l-6 4"/><path d="M7 6V4h10v2"/>', 'อาหารแช่แข็ง อาหารกล่อง ไมโครเวฟ cp frozen'],
+  sauce: ['ซอส / เครื่องปรุง', '<path d="M10 2h4v3l2 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l2-3z"/><path d="M8 12h8"/><path d="M11 15h2"/>', 'ซอส น้ำปลา ซีอิ๊ว เครื่องปรุง sauce'],
+  oil: ['น้ำมันพืช', '<path d="M9 2h4v3"/><path d="M8 5h6l3 4v11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V9z"/><path d="M12 11c1.5 2 2 3 2 4a2 2 0 0 1-4 0c0-1 .5-2 2-4z"/>', 'น้ำมันพืช น้ำมันปาล์ม องุ่น cooking oil'],
+  sugar: ['น้ำตาล', '<path d="M6 4h12v16H6z"/><path d="M6 4l1-2h10l1 2"/><rect x="9" y="10" width="3" height="3"/><rect x="12" y="13" width="3" height="3"/>', 'น้ำตาล น้ำตาลทราย sugar'],
+  chips: ['มันฝรั่ง', '<path d="M6 3h12l-1 3v12l1 3H6l1-3V6z"/><path d="M9.5 11.5c1-1.5 4-1.5 5 0-1 1.5-4 1.5-5 0z"/>', 'มันฝรั่ง เลย์ ปาปริก้า ข้าวเกรียบ chips lays'],
+  nuts: ['ถั่ว', '<path d="M9 3a4 4 0 0 1 4 4c0 1.5-1 2-1 3.5s1 2 1 3.5a4 4 0 0 1-8 0c0-1.5 1-2 1-3.5S5 8.5 5 7a4 4 0 0 1 4-4z"/><path d="M16 9a3 3 0 0 1 3 3c0 1-.6 1.5-.6 2.5S19 16 19 17a3 3 0 0 1-6 0"/>', 'ถั่ว ถั่วลิสง เมล็ดทานตะวัน โก๋แก่ nuts peanut'],
+  candy: ['ลูกอม', '<circle cx="12" cy="12" r="4.5"/><path d="M7.8 10.2 3 7v10l4.8-3.2M16.2 10.2 21 7v10l-4.8-3.2"/>', 'ลูกอม ทอฟฟี่ ฮอลล์ candy'],
+  lollipop: ['อมยิ้ม', '<circle cx="12" cy="9" r="6"/><path d="M12 15v7"/><path d="M12 9a2.5 2.5 0 1 1 2.5 2.5"/>', 'อมยิ้ม ลูกอม ชูปาจุ๊ปส์ lollipop'],
+  gum: ['หมากฝรั่ง', '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 7v10M17 7v10"/><path d="M10 12h4"/>', 'หมากฝรั่ง ลูกอม ริกลีย์ คลอเร็ท gum'],
+  choco: ['ช็อกโกแลต', '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M5 9h14M5 15h14M12 3v18"/>', 'ช็อกโกแลต คิทแคท ดาร์กช็อก chocolate'],
+  biscuit: ['บิสกิต / คุกกี้', '<circle cx="12" cy="12" r="9"/><path d="M9 8h.01M14 7.5h.01M8 13h.01M12.5 12h.01M16 14h.01M11 16.5h.01"/>', 'บิสกิต คุกกี้ ขนมปังกรอบ แครกเกอร์ biscuit cookie'],
+  wafer: ['เวเฟอร์', '<path d="M3 8h18v8H3z"/><path d="M3 12h18M7 8v8M11 8v8M15 8v8M19 8v8"/>', 'เวเฟอร์ ปาร์ตี้ โอวัลติน wafer'],
+  cake: ['เค้ก / ขนมหวาน', '<path d="M4 12h16v8H4z"/><path d="M4 15c2 1.5 4 1.5 6 0s4-1.5 6 0 4 1.5 4 0"/><path d="M12 12V8M12 5.5a1 1 0 0 0 0 .01"/><path d="M8 12V9M16 12V9"/>', 'เค้ก ขนมหวาน ทาร์ต cake dessert'],
+  icecream: ['ไอศกรีม', '<path d="M8 11l4 11 4-11"/><path d="M7 11a5 5 0 1 1 10 0z"/>', 'ไอศกรีม ไอติม โคน วอลล์ ice cream'],
+  popsicle: ['ไอติมแท่ง', '<path d="M7 9a5 5 0 0 1 10 0v7a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1z"/><path d="M11 17h2v5h-2z"/><path d="M10 9v5M14 9v5"/>', 'ไอติมแท่ง ไอศกรีมแท่ง ไอติมหลอด popsicle'],
+  fruit: ['ผลไม้', '<path d="M12 7c-4-2-8 1-8 6 0 4 3 8 5 8 1 0 2-.5 3-.5s2 .5 3 .5c2 0 5-4 5-8 0-5-4-8-8-6z"/><path d="M12 7c0-2 1-4 3-5"/>', 'ผลไม้ แอปเปิ้ล ส้ม fruit apple'],
+  banana: ['กล้วย', '<path d="M5 6c-1 6 3 13 12 13 1.5 0 3-1 3-2-7 0-11-5-12-11z"/><path d="M5 6 6 3l2 3"/>', 'กล้วย กล้วยหอม banana'],
+  soap: ['สบู่', '<rect x="3" y="9" width="18" height="11" rx="4"/><path d="M8 6.5a1.5 1.5 0 1 0 0-.01M13 5a2 2 0 1 0 0-.01M17.5 6a1 1 0 1 0 0-.01"/>', 'สบู่ สบู่ก้อน ลักส์ นกแก้ว โพรเทคส์ soap'],
+  shampoo: ['แชมพู / ครีมอาบน้ำ', '<path d="M8 8h8l1 3v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-9z"/><path d="M10 8V5h4v3"/><path d="M12 5V3h4"/><path d="M9.5 14h5"/>', 'แชมพู ครีมนวด ครีมอาบน้ำ สบู่เหลว ซันซิล shampoo'],
+  toothpaste: ['ยาสีฟัน', '<path d="M4 9h11l5 2v2l-5 2H4z"/><path d="M4 9v6"/><path d="M8 9v6"/>', 'ยาสีฟัน คอลเกต ดาร์ลี่ ใกล้ชิด toothpaste'],
+  toothbrush: ['แปรงสีฟัน', '<path d="M4 20 15 9"/><path d="M15 9l3-3"/><path d="M14 4l6 6"/><path d="M15.5 5.5l-1 1M17 7l-1 1M18.5 8.5l-1 1"/>', 'แปรงสีฟัน toothbrush'],
+  powder: ['แป้ง', '<path d="M8 5h8v-2H8z"/><path d="M7 5h10l1 3v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8z"/><path d="M10 3V1M14 3V1M12 3V1"/><circle cx="12" cy="14" r="2.5"/>', 'แป้ง แป้งเด็ก เบบี้มายด์ แป้งเย็น ศรีจันทร์ powder'],
+  lotion: ['โลชั่น / ครีม', '<path d="M8 10h8v10a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2z"/><path d="M10 10V7h4v3"/><path d="M12 7V4h-3"/><path d="M8 15h8"/>', 'โลชั่น ครีม วาสลีน ครีมกันแดด lotion cream'],
+  razor: ['มีดโกน', '<path d="M5 4h14v4H5z"/><path d="M5 6h14"/><path d="M11 8h2v13h-2z"/>', 'มีดโกน ใบมีด ยิลเลตต์ razor'],
+  pad: ['ผ้าอนามัย', '<path d="M8 3c2.5 0 4 1.5 4 3 0-1.5 1.5-3 4-3 2 0 3 2 3 5v8c0 3-1 5-3 5-2.5 0-4-1.5-4-3 0 1.5-1.5 3-4 3-2 0-3-2-3-5V8c0-3 1-5 3-5z"/>', 'ผ้าอนามัย โซฟี ลอริเอะ แผ่นอนามัย sanitary pad'],
+  diaper: ['ผ้าอ้อม', '<path d="M3 6h18v4a9 9 0 0 1-18 0z"/><path d="M8 10a4 4 0 0 0 8 0"/><path d="M3 6v-1M21 6v-1"/>', 'ผ้าอ้อม แพมเพิส มามี่โพโค diaper'],
+  mask: ['หน้ากากอนามัย', '<path d="M5 8c3-1.5 11-1.5 14 0v6c-3 3-11 3-14 0z"/><path d="M5 9H3a2 2 0 0 0 2 5M19 9h2a2 2 0 0 1-2 5"/><path d="M8 11h8M8 14h8"/>', 'หน้ากากอนามัย แมส mask'],
+  bandage: ['พลาสเตอร์', '<rect x="2" y="8" width="20" height="8" rx="4" transform="rotate(-35 12 12)"/><path d="M10 10h.01M14 10h.01M10 14h.01M14 14h.01"/>', 'พลาสเตอร์ ปิดแผล ทำแผล bandage plaster'],
+  medbottle: ['ยาน้ำ / ยาดม', '<path d="M8 3h8v3H8z"/><path d="M7 6h10v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2z"/><path d="M12 11v6M9 14h6"/>', 'ยาน้ำ ยาดม ยาหม่อง ยาแก้ไอ medicine'],
+  detergent: ['ผงซักฟอก', '<path d="M5 6h14v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><path d="M5 6l2-4h10l2 4"/><circle cx="12" cy="14" r="4"/><path d="M10 13.5c1-1 3-1 4 0"/>', 'ผงซักฟอก น้ำยาซักผ้า บรีส โอโม เปา detergent'],
+  softener: ['น้ำยาปรับผ้านุ่ม', '<path d="M9 2h5v3"/><path d="M8 5h8l1 4v11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V9z"/><path d="M17 9h1.5a1.5 1.5 0 0 1 0 6H17"/><path d="M10 14c.8-1.3 2.2-1.3 3 0"/>', 'น้ำยาปรับผ้านุ่ม ดาวน์นี่ คอมฟอร์ท ไฮยีน softener'],
+  dishsoap: ['น้ำยาล้างจาน', '<path d="M9 7h6l1 3v10a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V10z"/><path d="M11 7V4h2v3"/><path d="M13 4l3-1"/><path d="M10 14h4"/>', 'น้ำยาล้างจาน ซันไลต์ น้ำยาทำความสะอาด dish soap'],
+  spray: ['สเปรย์ / กันยุง', '<path d="M8 8h7v13a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1z"/><path d="M9 8V5h5v3"/><path d="M14 5h2"/><path d="M18 3h.01M20 5h.01M18 7h.01M21 2h.01"/>', 'สเปรย์ กันยุง ไบกอน อาท สเปรย์ฉีดยุง spray mosquito'],
+  coil: ['ยาจุดกันยุง', '<path d="M12 12a1 1 0 0 1 1 1 2 2 0 0 1-2 2 3 3 0 0 1-3-3 4 4 0 0 1 4-4 5 5 0 0 1 5 5 6 6 0 0 1-6 6 7 7 0 0 1-7-7 8 8 0 0 1 8-8"/>', 'ยาจุดกันยุง ยากันยุง ขดยุง mosquito coil'],
+  tissueroll: ['กระดาษชำระม้วน', '<ellipse cx="9" cy="8" rx="5" ry="5"/><circle cx="9" cy="8" r="1.5"/><path d="M9 13h11V3H9"/><path d="M14 13v8h6v-8"/>', 'กระดาษชำระ ทิชชู่ม้วน สก๊อต toilet paper'],
+  wipes: ['ผ้าเปียก', '<rect x="3" y="7" width="18" height="12" rx="3"/><path d="M8 7c0-2 2-3 4-3s4 1 4 3"/><path d="M9 11h6v3H9z"/>', 'ผ้าเปียก ทิชชู่เปียก wet wipes'],
+  bag: ['ถุง', '<path d="M5 8h14l-1 13H6z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>', 'ถุง ถุงพลาสติก ถุงผ้า bag'],
+  trashbag: ['ถุงขยะ', '<path d="M6 9h12l-1 12H7z"/><path d="M9 9c0-2 1-3 3-6 2 3 3 4 3 6"/><path d="M10 13v5M14 13v5"/>', 'ถุงขยะ ถุงดำ trash bag'],
+  battery: ['ถ่าน / แบตเตอรี่', '<rect x="7" y="4" width="10" height="17" rx="2"/><path d="M10 2h4v2h-4z"/><path d="M12 9v4M10 11h4"/><path d="M10 17h4"/>', 'ถ่าน แบตเตอรี่ ถ่านไฟฉาย พานาโซนิค battery'],
+  bulb: ['หลอดไฟ', '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/>', 'หลอดไฟ ไฟฉาย หลอด led bulb'],
+  candle: ['เทียน / ธูป', '<path d="M8 10h8v11H8z"/><path d="M12 10V7"/><path d="M12 7c-1.5-1-1.5-2.5 0-4 1.5 1.5 1.5 3 0 4z"/>', 'เทียน ธูป ไหว้พระ candle incense'],
+  umbrella: ['ร่ม / เสื้อกันฝน', '<path d="M3 12a9 9 0 0 1 18 0z"/><path d="M12 12v7a2 2 0 0 1-4 0"/><path d="M12 3v-1"/>', 'ร่ม เสื้อกันฝน umbrella raincoat'],
+  pen: ['ปากกา / เครื่องเขียน', '<path d="M15 4l5 5-11 11H4v-5z"/><path d="M13 6l5 5"/>', 'ปากกา ดินสอ เครื่องเขียน สมุด pen'],
+  cigarette: ['บุหรี่', '<path d="M2 15h16v4H2z"/><path d="M14 15v4"/><path d="M20 15v4M22 15v4"/><path d="M18 11c0-2 2-2 2-4M21 11c0-2-1-3 0-5"/>', 'บุหรี่ ยาสูบ cigarette'],
+  oilcan: ['น้ำมันเครื่อง', '<path d="M4 9h10l5 4v8H4z"/><path d="M8 9V6h4v3"/><path d="M19 13l2-2"/><path d="M8 15h7"/>', 'น้ำมันเครื่อง ออโตลูป หล่อลื่น ปตท motor oil'],
+  fuel: ['น้ำมัน / ปั๊ม', '<path d="M4 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16"/><path d="M3 21h13"/><path d="M6 7h7v4H6z"/><path d="M15 9l3 2v7a1.5 1.5 0 0 0 3 0V8l-3-3"/>', 'น้ำมัน ปั๊ม แก๊ส gas fuel petrol'],
+  carcare: ['ดูแลรถ', '<path d="M5 13l2-5h10l2 5"/><path d="M3 13h18v5H3z"/><path d="M6 18v2M18 18v2"/><path d="M7 15.5h.01M17 15.5h.01"/>', 'รถ ล้างรถ น้ำยาเช็ดรถ แชมพูล้างรถ car'],
+  topup: ['บัตรเติมเงิน', '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/><path d="M12 7v6M9 10h6"/>', 'บัตรเติมเงิน เติมเงิน ซิม true ais dtac top up sim'],
+  ticket: ['ลอตเตอรี่ / บัตร', '<path d="M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4z"/><path d="M14 7v10" stroke-dasharray="2 2"/>', 'ลอตเตอรี่ สลาก บัตร ตั๋ว lottery ticket'],
+  pet: ['อาหารสัตว์', '<circle cx="7" cy="9" r="1.8"/><circle cx="12" cy="6.5" r="1.8"/><circle cx="17" cy="9" r="1.8"/><path d="M12 12c-3 0-5.5 3-5.5 5.5 0 2 1.5 3 3 3 1 0 1.5-.5 2.5-.5s1.5.5 2.5.5c1.5 0 3-1 3-3 0-2.5-2.5-5.5-5.5-5.5z"/>', 'อาหารสัตว์ อาหารแมว อาหารหมา วิสกัส เพดดิกรี pet food'],
+  gift: ['ของฝาก / ของขวัญ', '<path d="M4 10h16v11H4z"/><path d="M3 7h18v3H3z"/><path d="M12 7v14"/><path d="M12 7c-2-3-5-3-5-1s3 1 5 1c2 0 5 1 5-1s-3-2-5 1z"/>', 'ของฝาก ของขวัญ gift'],
+  ice_bag: ['น้ำแข็งถุง', '<path d="M7 6h10l1 15H6z"/><path d="M8 6c1-2 7-2 8 0"/><rect x="9" y="11" width="3" height="3" rx=".5"/><rect x="12.5" y="14" width="3" height="3" rx=".5"/>', 'น้ำแข็ง น้ำแข็งถุง น้ำแข็งหลอด ice'],
+  box: ['ทั่วไป', '<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/>', 'ทั่วไป กล่อง box']
 };
+
+/** Icon search: Thai name, search words or key, every word must hit. */
+function iconMatch(k, q) {
+  q = String(q || '').trim().toLowerCase();
+  if (!q) return true;
+  var hay = (k + ' ' + ICONS[k][0] + ' ' + (ICONS[k][2] || '')).toLowerCase();
+  return q.split(/\s+/).every(function (w) { return hay.indexOf(w) >= 0; });
+}
+function filterIcons(q) {
+  if (S.ed) S.ed.iconQ = q;
+  var any = false;
+  $all('.icons [data-ed=icon]').forEach(function (b) { var ok = iconMatch(b.getAttribute('data-v'), q); b.hidden = !ok; any = any || ok; });
+  var none = $('.icon-none');
+  if (none) { none.hidden = any; none.textContent = 'ไม่พบไอคอน "' + q + '" — ลองคำอื่น หรือเลือก "ทั่วไป"'; }
+}
 
 function iconSvg(key) {
   var ic = ICONS[key];
@@ -1208,11 +1294,11 @@ window.addEventListener('resize', function () {
 
 var M_TABS = [['home', 'หน้าหลัก', 'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z'], ['bills', 'บิล', 'M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6M9 15h4'],
   ['stock', 'สต็อก', 'M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10'], ['products', 'สินค้า', 'M4 4h7l9 9-7 7-9-9zM8 8h.01'],
-  ['reports', 'รายงาน', 'M4 20V10M10 20V4M16 20v-7M22 20H2', 'owner']];
-var M_TITLE = { home: '', bills: 'บิล', stock: 'สต็อก', opening: 'ตั้งยอดเปิดร้าน', receive: 'สต็อก', expiry: 'สต็อก', products: 'สินค้า', reports: 'รายงาน', settings: 'ตั้งค่า' };
+  ['reports', 'รายงาน', 'M4 20V10M10 20V4M16 20v-7M22 20H2', 'owner']];   // รายงาน tab holds ยอดขาย + บัญชี
+var M_TITLE = { home: '', bills: 'บิล', stock: 'สต็อก', opening: 'ตั้งยอดเปิดร้าน', receive: 'สต็อก', expiry: 'สต็อก', products: 'สินค้า', reports: 'รายงาน', acct: 'บัญชี', settings: 'ตั้งค่า' };
 
 function mobileFrame(inner) {
-  var at = S.view === 'receive' || S.view === 'expiry' ? 'stock' : S.view;
+  var at = S.view === 'receive' || S.view === 'expiry' ? 'stock' : S.view === 'acct' ? 'reports' : S.view;
   var tabs = M_TABS.filter(function (t) { return openingLocked() ? S.user && S.user.role === 'owner' && OPENING_VIEWS.indexOf(t[0]) >= 0 : !t[3] || (S.user && S.user.role === t[3]); }).map(function (t) {
     return '<button data-act="go" data-v="' + t[0] + '" class="' + (at === t[0] ? 'on' : '') + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + t[2] + '"/></svg>' + t[1] +
       (t[0] === 'stock' && S.expiryTodo ? '<span class="badge">' + S.expiryTodo + '</span>' : '') + '</button>';
@@ -1223,6 +1309,11 @@ function mobileFrame(inner) {
     seg = '<div class="mseg">' + [['list', 'คงเหลือ'], ['count', 'ตรวจนับ'], ['receive', 'รับสินค้า'], ['expiry', 'หมดอายุ']].map(function (x) {
       return '<button data-act="mStock" data-t="' + x[0] + '" class="' + (cur === x[0] ? 'on' : '') + '">' + x[1] +
         (x[0] === 'expiry' && S.expiryTodo ? ' <span class="badge">' + S.expiryTodo + '</span>' : '') + '</button>';
+    }).join('') + '</div>';
+  }
+  if (at === 'reports' && S.user && S.user.role === 'owner' && !openingLocked()) {
+    seg = '<div class="mseg">' + [['reports', 'ยอดขาย'], ['acct', 'บัญชี']].map(function (x) {
+      return '<button data-act="go" data-v="' + x[0] + '" class="' + (S.view === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
     }).join('') + '</div>';
   }
   var title = M_TITLE[S.view] !== undefined ? M_TITLE[S.view] : '';
@@ -1251,7 +1342,7 @@ function renderHome() {
     tile('mStock', 'data-t="receive"', 'รับสินค้าเข้า', 'เพิ่มล็อตใหม่') +
     tile('mStock', 'data-t="list"', 'ของใกล้หมด', low ? low + ' รายการ' : 'ไม่มี', low > 0) +
     tile('go', 'data-v="bills"', 'ดูบิล', 'ค้นหาเลขบิล') +
-    (owner ? tile('mPromo', '', 'โปรโมชั่น', (S.promos || []).length ? S.promos.length + ' รายการที่เปิดอยู่' : 'ยังไม่มี') + tile('mExpense', '', 'บันทึกรายจ่าย', 'ถ่ายรูปบิลได้') + tile('mBulk', '', 'แก้ราคาหลายรายการ', '± % หรือบาท') + tile('go', 'data-v="settings"', 'ตั้งค่า', 'ร้าน · ผู้ใช้ · ธีม') : '') +
+    (owner ? tile('mPromo', '', 'โปรโมชั่น', (S.promos || []).length ? S.promos.length + ' รายการที่เปิดอยู่' : 'ยังไม่มี') + tile('mExpense', '', 'บันทึกรายจ่าย', 'ถ่ายรูปบิลได้') + tile('go', 'data-v="acct"', 'บัญชี', 'กำไร · รายจ่าย · ค้างจ่าย') + tile('mBulk', '', 'แก้ราคาหลายรายการ', '± % หรือบาท') + tile('go', 'data-v="settings"', 'ตั้งค่า', 'ร้าน · ผู้ใช้ · ธีม') : '') +
     '</div><h3 class="mh">ใช้ได้เฉพาะเครื่องหน้าร้าน</h3><div class="card mlocks">' +
     lock('ขาย / รับเงิน') + lock('เปิด / ปิดกะ') + lock('ยกเลิกบิล / คืนสินค้า') + lock('เงินเข้า-ออกลิ้นชัก') + '</div></div>';
 }
@@ -3531,7 +3622,7 @@ function renderProducts() {
     (owner ? '<button class="btn sm" data-act="promoOpen" style="height:40px">โปรโมชั่น' + ((S.promos || []).length ? ' (' + S.promos.length + ')' : '') + '</button>' +
       '<button class="btn sm" data-act="bulkOpen" style="height:40px">แก้ราคาหลายรายการ</button><button class="btn sm" data-act="importCsv" style="height:40px">นำเข้า CSV</button>' +
       '<button class="btn sm primary" data-act="selProduct" data-sku="" style="height:40px">+ เพิ่มสินค้า</button>' : '') +
-    '</div><div class="prod-grid head"><div>สินค้า / SKU</div><div>EAN (ชิ้น) / PLU</div><div>หน่วยที่มีบาร์โค้ด</div>' +
+    '</div><div class="prod-grid head"><div>สินค้า / SKU</div><div>EAN (ชิ้น) / PLU</div><div>แพ็ค / ลัง</div>' +
     '<div class="r">ทุน</div><div class="r">ขาย</div><div class="r">คงเหลือ</div></div><div class="prod-rows" id="prows"></div></section>' +
     '<aside class="card prod-ed" id="ped"></aside></div></div>';
 }
@@ -3550,6 +3641,8 @@ function canMake(comps) {
   })));
 }
 
+/** A unit code of 1–5 digits is a PLU typed at the till (e.g. a pack = PLU 205); longer ones are EAN barcodes. */
+function isPluCode(c) { return /^\d{1,5}$/.test(String(c || '')); }
 function codesOf(sku) { return S.barcodes.filter(function (b) { return b.sku === sku; }).sort(function (a, b) { return a.multiplier - b.multiplier; }); }
 
 /** Units already used in the shop (products and barcode units), most common first, plus the usual ones. */
@@ -3564,6 +3657,9 @@ function unitNames() {
 function nextPlu() {
   var used = {}, max = 100;
   S.products.forEach(function (p) { if (p.plu && p.active) { used[p.plu] = 1; if (/^\d+$/.test(p.plu)) max = Math.max(max, Number(p.plu)); } });
+  S.barcodes.forEach(function (b) { if (isPluCode(b.barcode)) { used[b.barcode] = 1; max = Math.max(max, Number(b.barcode)); } });
+  if (S.ed) { if (isPluCode(S.ed.p.plu)) { used[S.ed.p.plu] = 1; max = Math.max(max, Number(S.ed.p.plu)); }
+    S.ed.codes.forEach(function (c) { if (isPluCode(c.barcode)) { used[c.barcode] = 1; max = Math.max(max, Number(c.barcode)); } }); }
   var n = max + 1;
   while (used[String(n)] && n < 99999) n++;
   return n > 99999 ? '' : String(n);
@@ -3592,14 +3688,15 @@ function renderProductRows() {
   }).sort(function (a, b) { return (a.active === b.active ? 0 : a.active ? -1 : 1) || a.category.localeCompare(b.category, 'th') || String(a.subcategory || '').localeCompare(String(b.subcategory || ''), 'th') || a.name.localeCompare(b.name, 'th'); });
   box.innerHTML = rows.length ? rows.map(function (p) {
     var codes = codesOf(p.sku);
-    var piece = codes.filter(function (b) { return b.multiplier === 1; })[0];
-    var ean = piece ? '<span class="num">' + esc(piece.barcode) + '</span>' : (p.plu ? '<span class="muted">— PLU ' + esc(p.plu) + '</span>' :
+    var piece = codes.filter(function (b) { return b.multiplier === 1 && !isPluCode(b.barcode); })[0];
+    var ean = piece ? '<span class="num">' + esc(piece.barcode) + '</span>' + (p.plu ? '<span class="muted"> · PLU ' + esc(p.plu) + '</span>' : '') : (p.plu ? '<span class="muted">— PLU ' + esc(p.plu) + '</span>' :
       '<span class="muted">' + (p.forSale === false ? '— (ไม่ขายเป็นชิ้น)' : '—') + '</span>');
     var isRecipe = p.type === 'recipe';
     // tags only for what differs from a plain piece product: packs/cases, internal codes, not on the sale screen…
     var tags = codes.map(function (b) {
       var internal = /^2\d{12}$/.test(b.barcode);
       if (internal) return '<span class="tag amber">โค้ดภายใน</span>';
+      if (isPluCode(b.barcode)) return '<span class="tag blue">' + esc(b.unitName) + (b.multiplier > 1 ? ' ' + b.multiplier : '') + ' · PLU ' + esc(b.barcode) + '</span>';
       return b.multiplier > 1 ? '<span class="tag blue">' + esc(b.unitName) + ' ' + b.multiplier + '</span>' : '';
     }).join('') + (isRecipe ? '<span class="tag green" title="' + esc(recipeText(p.sku)) + '">สูตรผสม</span>' : '') +
       (p.forSale === false ? '<span class="tag gray">วัตถุดิบ</span>' : '') + (p.openPrice ? '<span class="tag amber">ราคาเปิด</span>' : '') +
@@ -3669,20 +3766,22 @@ function drawEditor() {
   var unitRows = codes.map(function (c, i) {
     var auto = c.multiplier ? money(piecePrice * Number(c.multiplier)) : '';
     return '<div class="u"><input data-ec="unitName" data-i="' + i + '" value="' + esc(c.unitName) + '" aria-label="ชื่อหน่วย" style="font-weight:600">' +
-      '<input data-ec="barcode" data-i="' + i + '" value="' + esc(c.barcode) + '" inputmode="numeric" aria-label="บาร์โค้ด" class="num">' +
+      '<span class="ucode"><input data-ec="barcode" data-i="' + i + '" value="' + esc(c.barcode) + '" inputmode="numeric" aria-label="' + (isPluCode(c.barcode) ? 'PLU' : 'บาร์โค้ด') + '" class="num">' +
+        (isPluCode(c.barcode) ? '<i>PLU</i>' : '') + '</span>' +
       '<input data-ec="multiplier" data-i="' + i + '" value="' + esc(c.multiplier) + '" type="number" min="1" aria-label="จำนวนชิ้นต่อหน่วย" style="text-align:right">' +
       '<input data-ec="price" data-i="' + i + '" value="' + (c.price === null || c.price === undefined ? '' : esc(c.price)) + '" type="number" step="0.25" placeholder="' + auto + '" aria-label="ราคาขายหน่วยนี้" style="text-align:right">' +
       '<button class="x" data-ed="delcode" data-i="' + i + '" aria-label="ลบหน่วย ' + esc(c.unitName) + '">×</button></div>';
   }).join('');
   var hint = codes.filter(function (c) { return Number(c.multiplier) > 1; }).map(function (c) {
     var pr = c.price !== null && c.price !== undefined && c.price !== '' ? Number(c.price) : piecePrice * Number(c.multiplier);
-    return 'สแกน' + esc(c.unitName || 'หน่วย') + ' = ' + c.multiplier + ' ชิ้น ราคา ฿' + money(pr);
+    return (isPluCode(c.barcode) ? 'พิมพ์ PLU ' + esc(c.barcode) : 'สแกน' + esc(c.unitName || 'หน่วย')) + ' = ' + esc(c.unitName || 'หน่วย') + ' ' + c.multiplier + ' ชิ้น ราคา ฿' + money(pr);
   });
   var colors = Object.keys(KEY_COLORS).map(function (k) {
     return '<button type="button" data-ed="color" data-v="' + k + '" class="' + (p.color === k ? 'on' : '') + '" style="background:' + KEY_COLORS[k][0] + ';box-shadow:inset 0 0 0 6px ' + KEY_COLORS[k][0] + ',inset 0 0 0 14px ' + KEY_COLORS[k][1] + '" aria-label="สี ' + k + '"></button>';
   }).join('');
+  var icq = S.ed.iconQ || '';
   var icons = Object.keys(ICONS).map(function (k) {
-    return '<button type="button" data-ed="icon" data-v="' + k + '" class="' + (p.icon === k ? 'on' : '') + '" title="' + ICONS[k][0] + '" aria-label="ไอคอน ' + ICONS[k][0] + '">' + iconSvg(k) + '</button>';
+    return '<button type="button" data-ed="icon" data-v="' + k + '" class="' + (p.icon === k ? 'on' : '') + '"' + (iconMatch(k, icq) ? '' : ' hidden') + ' title="' + ICONS[k][0] + '" aria-label="ไอคอน ' + ICONS[k][0] + '">' + iconSvg(k) + '<small>' + ICONS[k][0] + '</small></button>';
   }).join('');
   var c = KEY_COLORS[p.color] || KEY_COLORS.gray;
 
@@ -3704,13 +3803,17 @@ function drawEditor() {
       : f('price', isRecipe ? 'ราคาขาย / หน่วย' : 'ราคาขาย / ชิ้น', 'type="number" step="0.25" inputmode="decimal"')) + f('plu', 'PLU (เลข 1–5 หลัก)', 'inputmode="numeric" maxlength="5" placeholder="เช่น ' + nextPlu() + '" title="รหัสสั้นสำหรับพิมพ์ในช่องสแกน ใช้กับของไม่มีบาร์โค้ด · ตัวเลข 1–5 หลัก ห้ามซ้ำ"') + '</div>' +
     (isRecipe ? '' : minStockField(p, isNew)) +
     (isRecipe ? recipeSection(rcost) : p.type !== 'nobarcode' ?
-      '<div class="sec-title"><b>บาร์โค้ด (EAN) แต่ละหน่วย</b><span class="muted" style="font-size:12px">สแกนหน่วยไหนก็ได้</span></div>' +
-      (codes.length ? '<div class="units"><div class="u head"><span>หน่วย</span><span>EAN</span><span class="r">= ชิ้น</span><span class="r">ราคาขาย</span><span></span></div>' + unitRows + '</div>' : '') +
-      '<div class="add-scan"><label class="sr" for="e-scan">สแกนบาร์โค้ดหน่วยใหม่</label><input id="e-scan" inputmode="numeric" autocomplete="off" placeholder="+ สแกน / พิมพ์บาร์โค้ด' +
-      (codes.length ? 'หน่วยถัดไป (แพ็ค / ลัง)' : 'ของชิ้น') + ' แล้วกด Enter">' +
+      '<div class="sec-title"><b>บาร์โค้ด (EAN) / PLU แต่ละหน่วย</b><span class="muted" style="font-size:12px">สแกนหรือพิมพ์หน่วยไหนก็ได้</span></div>' +
+      (codes.length ? '<div class="units"><div class="u head"><span>หน่วย</span><span>EAN / PLU</span><span class="r">= ชิ้น</span><span class="r">ราคาขาย</span><span></span></div>' + unitRows + '</div>' : '') +
+      '<div class="add-scan"><label class="sr" for="e-scan">สแกนบาร์โค้ด หรือพิมพ์ PLU ของหน่วยใหม่</label><input id="e-scan" inputmode="numeric" autocomplete="off" placeholder="+ สแกนบาร์โค้ด' +
+      (codes.length ? 'หน่วยถัดไป (แพ็ค / ลัง)' : 'ของชิ้น') + ' หรือพิมพ์ PLU 1–5 หลัก แล้วกด Enter">' +
       '<button type="button" class="btn sm" data-ed="internal" style="height:38px" title="สร้างบาร์โค้ดภายใน (ขึ้นต้น 20)">โค้ดภายใน</button></div>' +
       (hint.length ? '<div class="hintbox">' + hint.join(' · ') + '</div>' : '')
-      : '<div class="hintbox">' + (p.forSale === false ? 'วัตถุดิบ — ใช้เป็นส่วนประกอบของสูตรผสม ไม่ขึ้นที่หน้าขาย' : 'ขายด้วย PLU (พิมพ์ในช่องสแกน) หรือปุ่มขายด่วน') + '</div>') +
+      : p.forSale === false ? '<div class="hintbox">วัตถุดิบ — ใช้เป็นส่วนประกอบของสูตรผสม ไม่ขึ้นที่หน้าขาย</div>' :
+      '<div class="sec-title"><b>PLU แพ็ค / ลัง</b><span class="muted" style="font-size:12px">ชิ้นใช้ PLU ด้านบน</span></div>' +
+      (codes.length ? '<div class="units"><div class="u head"><span>หน่วย</span><span>PLU</span><span class="r">= ชิ้น</span><span class="r">ราคาขาย</span><span></span></div>' + unitRows + '</div>' : '') +
+      '<div class="add-scan"><label class="sr" for="e-scan">PLU ของแพ็ค / ลัง</label><input id="e-scan" inputmode="numeric" autocomplete="off" placeholder="+ พิมพ์ PLU ของแพ็ค / ลัง (เช่น ' + nextPlu() + ') แล้วกด Enter"></div>' +
+      '<div class="hintbox">' + (hint.length ? hint.join(' · ') : 'ขายด้วย PLU (พิมพ์ในช่องสแกน) หรือปุ่มขายด่วน') + '</div>') +
     (isRecipe ? '' : '<label class="checkrow"><input type="checkbox" data-ef="forSaleOff" ' + (p.forSale === false ? 'checked' : '') + '> วัตถุดิบ / ของใช้ในร้าน — ไม่ขายหน้าร้าน (เช่น ฝา หลอด ถุง)</label>') +
     (isRecipe ? '' : '<label class="checkrow"><input type="checkbox" data-ef="trackExpiry" ' + (p.trackExpiry ? 'checked' : '') + '> ติดตามวันหมดอายุ — ต้องใส่วันหมดอายุตอนรับสินค้า แล้วเตือนในหน้า "หมดอายุ"</label>') +
     (p.forSale === false && !isRecipe ? '' : '<div class="sec-title"><b>ปุ่มขายด่วน</b><label class="checkrow"><input type="checkbox" data-ef="quickKey" ' + (p.quickKey ? 'checked' : '') + '> แสดงบนหน้าขาย</label></div>' +
@@ -3723,7 +3826,9 @@ function drawEditor() {
         (owner ? '<label class="btn sm" for="e-img" style="cursor:pointer">' + (p.image ? 'เปลี่ยนรูป' : '+ อัปโหลดรูป') + '</label><input id="e-img" type="file" accept="image/*" data-change="prodImg" style="position:absolute;left:-9999px">' +
           (p.image ? '<button type="button" class="btn sm ghost" data-act="prodImgDel">ลบรูป</button>' : '') : '') +
         '<span class="muted" style="font-size:12px">' + (p.image ? 'ปุ่มขายด่วนใช้รูปนี้แทนไอคอน' : 'ไม่มีรูป = ใช้ไอคอนด้านล่าง') + '</span></div>' +
-      '<div class="icons">' + icons + '</div><div class="swatches">' + colors + '</div>' : '') +
+      '<div class="icon-pick"><div class="icon-q"><label class="sr" for="e-icq">ค้นหาไอคอน</label><input id="e-icq" type="search" autocomplete="off" value="' + esc(icq) + '" placeholder="ค้นหาไอคอน ' + Object.keys(ICONS).length + ' แบบ เช่น นม, สบู่, ถ่าน">' +
+        (p.icon && ICONS[p.icon] ? '<span class="muted">ใช้อยู่: <b>' + esc(ICONS[p.icon][0]) + '</b></span>' : '') + '</div>' +
+        '<div class="icons">' + icons + '</div><div class="muted icon-none"' + (Object.keys(ICONS).some(function (k) { return iconMatch(k, icq); }) ? ' hidden' : '') + '>ไม่พบไอคอน "' + esc(icq) + '" — ลองคำอื่น หรือเลือก "ทั่วไป"</div></div><div class="swatches">' + colors + '</div>' : '') +
     '<label class="checkrow"><input type="checkbox" data-ef="openPrice" ' + (p.openPrice ? 'checked' : '') + '> ราคาเปิด (ใส่ราคาตอนขาย เช่น ของทอด ของฝากขาย)</label>') +
     (isNew ? '' : '<label class="checkrow"><input type="checkbox" data-ef="active" ' + (p.active ? 'checked' : '') + '> ใช้งาน (เอาออก = ซ่อนจากหน้าขาย ประวัติยังอยู่)</label>') +
     '</fieldset>' +
@@ -3841,11 +3946,17 @@ function markDirty() {
 function edAddCode(code) {
   code = String(code || '').trim();
   if (!code) return;
-  if (!/^\d{6,14}$/.test(code)) return toast('บาร์โค้ดต้องเป็นตัวเลข 6–14 หลัก', true);
-  if (S.ed.codes.some(function (c) { return c.barcode === code; })) return toast('บาร์โค้ดนี้อยู่ในรายการแล้ว', true);
+  var plu = isPluCode(code), what = plu ? 'PLU ' + code : 'บาร์โค้ดนี้';
+  if (!plu && !/^\d{6,14}$/.test(code)) return toast('ใส่บาร์โค้ด 6–14 หลัก หรือ PLU 1–5 หลัก (ตัวเลขเท่านั้น)', true);
+  if (!plu && S.ed.p.type === 'nobarcode') return toast('สินค้าไม่มีบาร์โค้ดใส่ได้เฉพาะ PLU 1–5 หลัก — ถ้ามีบาร์โค้ด เลือก "มีบาร์โค้ด" ด้านบน', true);
+  if (S.ed.codes.some(function (c) { return c.barcode === code; })) return toast(what + ' อยู่ในรายการแล้ว', true);
+  if (plu && String(S.ed.p.plu || '').trim() === code) return toast('PLU ' + code + ' เป็น PLU ของชิ้นอยู่แล้ว — แพ็คต้องใช้เลขอื่น', true);
   var other = S.barcodes.filter(function (b) { return b.barcode === code && b.sku !== S.ed.p.sku; })[0];
-  if (other) return toast('บาร์โค้ดนี้เป็นของ ' + (S.idx.bySku[other.sku] || {}).name + ' แล้ว', true);
-  var g = guessUnit(S.ed.codes);
+  if (other) return toast(what + ' เป็นของ ' + (S.idx.bySku[other.sku] || {}).name + ' แล้ว', true);
+  var pluP = plu && S.products.filter(function (x) { return x.active && String(x.plu) === code && x.sku !== S.ed.p.sku; })[0];
+  if (pluP) return toast('PLU ' + code + ' เป็นของ ' + pluP.name + ' แล้ว', true);
+  // the piece already has its own PLU field, so a typed PLU starts at the pack
+  var g = guessUnit(plu ? S.ed.codes.concat([{ unitName: 'ชิ้น', multiplier: 1 }]) : S.ed.codes);
   S.ed.codes.push({ barcode: code, unitName: g.unitName, multiplier: g.multiplier, price: null });
   S.ed.dirty = true;
   drawEditor();
@@ -3891,11 +4002,12 @@ function saveEditor() {
     var badQ = S.ed.comps.filter(function (c) { return !(Number(c.qty) > 0); })[0];
     if (badQ) { toast('ใส่จำนวนของ ' + (S.idx.bySku[badQ.sku] || {}).name, true); return; }
   }
-  var codes = p.type !== 'barcode' ? [] : S.ed.codes.filter(function (c) { return String(c.barcode).trim(); });
+  var codes = p.type === 'recipe' ? [] : S.ed.codes.filter(function (c) { return String(c.barcode).trim() && (p.type === 'barcode' || isPluCode(String(c.barcode).trim())); });
+  if (String(p.plu || '').trim() && codes.some(function (c) { return String(c.barcode).trim() === String(p.plu).trim(); })) { toast('PLU ' + p.plu + ' ใช้ซ้ำทั้งชิ้นและแพ็ค — ตั้งเลขให้ต่างกัน', true); return; }
   for (var i = 0; i < codes.length; i++) {
     var m = Number(codes[i].multiplier);
     if (!(m >= 1) || Math.round(m) !== m) { toast('ใส่จำนวนชิ้นของหน่วย "' + (codes[i].unitName || codes[i].barcode) + '"', true); var inp = $('[data-ec=multiplier][data-i="' + S.ed.codes.indexOf(codes[i]) + '"]'); if (inp) inp.focus(); return; }
-    if (!String(codes[i].unitName).trim()) { toast('ใส่ชื่อหน่วยของบาร์โค้ด ' + codes[i].barcode, true); return; }
+    if (!String(codes[i].unitName).trim()) { toast('ใส่ชื่อหน่วยของ' + (isPluCode(codes[i].barcode) ? ' PLU ' : 'บาร์โค้ด ') + codes[i].barcode, true); return; }
   }
   var ed = S.ed;
   var payload = Object.assign({}, p, { forSale: p.forSale !== false, trackExpiry: !!p.trackExpiry, price: p.forSale === false ? 0 : Number(p.price) || 0, cost: Number(p.cost) || 0, minManual: p.minManual === '' || p.minManual === null || p.minManual === undefined ? '' : Number(p.minManual), quickKeyOrder: Number(p.quickKeyOrder) || 0 });
@@ -7393,6 +7505,7 @@ document.addEventListener('input', function (e) {
     if (!/^\d*\.?\d*$/.test(t.value)) t.value = t.value.replace(/[^\d.]/g, '');
     denomRefresh(t.getAttribute('data-p'));
   }
+  if (t.id === 'e-icq') { filterIcons(t.value); return; }
   if (t.hasAttribute('data-ef') || t.hasAttribute('data-ec') || t.hasAttribute('data-ecc') || t.id === 'e-comp') edInput(t);
   if (t.hasAttribute('data-rc') || t.hasAttribute('data-rch')) rcInput(t);
   if (t.hasAttribute('data-bulk') && S.bulk) {

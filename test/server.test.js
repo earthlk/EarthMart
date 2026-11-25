@@ -1122,6 +1122,17 @@ mustFail(/ลอง|รอ/, 'login', ownerId, '1234', DEV);
   eq(m('report', T, { from: day, to: day, category: 'เครื่องดื่ม', subcategory: 'ชูกำลัง' }).summary.net, 30, 'subcategory filter');
   const tr = m('report', T, { from: day, to: day, category: 'เครื่องดื่ม' }).trend;
   eq(tr.cats.map(c => c.category).sort(), ['ชูกำลัง', 'โคล่า'], 'chart splits a chosen category by subcategory');
+  // PLU per unit, like EAN: piece PLU on the product, pack/case PLUs as unit codes of 1–5 digits
+  const pk = m('saveProduct', T, Object.assign({}, P()['คาราบาว'], { plu: '204' }), [{ barcode: '205', unitName: 'แพ็ค', multiplier: 10, price: 140 }, { barcode: '8850000012345', unitName: 'ลัง', multiplier: 50 }]);
+  eq(m('listProducts', T).find(p => p.sku === pk.sku).plu, '204', 'piece PLU kept');
+  const codesK = m('bootstrap', T).barcodes.filter(b => b.sku === pk.sku);
+  eq(codesK.map(b => b.barcode), ['205'], 'no-barcode product keeps PLU units only, drops EANs');
+  ok(/ซ้ำกับ PLU ของชิ้น/.test(c('saveProduct', T, Object.assign({}, P()['คาราบาว'], { plu: '204' }), [{ barcode: '204', unitName: 'แพ็ค', multiplier: 10 }]).error), 'pack PLU cannot equal piece PLU');
+  ok(/เป็นของ/.test(c('saveProduct', T, Object.assign({}, P()['M-150']), [{ barcode: '7', unitName: 'แพ็ค', multiplier: 10 }]).error), 'pack PLU cannot take another product\'s piece PLU');
+  ok(/ใช้กับสินค้า/.test(c('saveProduct', T, Object.assign({}, P()['M-150']), [{ barcode: '205', unitName: 'แพ็ค', multiplier: 10 }]).error), 'pack PLU cannot take another product\'s pack PLU');
+  ok(/ใช้เป็น PLU/.test(c('saveProduct', T, Object.assign({}, P()['M-150'], { plu: '205' }), []).error), 'piece PLU cannot take another product\'s pack PLU');
+  const sale = m('commitSale', T, { saleUid: 'K2', payMethod: 'cash', received: 200, lines: [{ barcode: '205', sku: pk.sku, qty: 1 }] });
+  eq(sale.total, 140, 'sold by pack PLU at the pack price');
 }
 
 console.log('server tests passed:', pass);

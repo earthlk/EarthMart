@@ -128,6 +128,8 @@ function saveProduct_(sess, input, barcodes, components) {
   if (plu) {
     var dupPlu = all.filter(function (p) { return String(p.plu) === plu && String(p.sku) !== sku && bool_(p.active); })[0];
     if (dupPlu) throw new Error('PLU ' + plu + ' ซ้ำกับ ' + dupPlu.name);
+    var dupUnit = readAll_('Barcodes').filter(function (b) { return String(b.barcode) === plu && String(b.sku) !== sku; })[0];
+    if (dupUnit) throw new Error('PLU ' + plu + ' ใช้เป็น PLU ' + (dupUnit.unitName || 'หน่วย') + ' ของสินค้า ' + dupUnit.sku + ' แล้ว');
   }
 
   // Recipe ("สูตรผสม"): no own stock or barcodes; selling it takes stock from its components.
@@ -158,10 +160,19 @@ function saveProduct_(sess, input, barcodes, components) {
   // Validate barcodes before writing anything.
   var clean = [];
   var seen = {};
+  // A unit's code is an EAN (6–14 digits) or a PLU (1–5 digits) typed at the till, e.g. a pack of 12 = PLU 205.
+  // Products without a barcode keep only PLU units.
   barcodes.forEach(function (b) {
     var code = String(b.barcode || '').trim();
     if (!code) return;
-    if (!/^\d{6,14}$/.test(code)) throw new Error('บาร์โค้ด ' + code + ' ต้องเป็นตัวเลข 6–14 หลัก');
+    var isPlu = /^\d{1,5}$/.test(code);
+    if (!isPlu && !/^\d{6,14}$/.test(code)) throw new Error('บาร์โค้ด ' + code + ' ต้องเป็นตัวเลข 6–14 หลัก (หรือ PLU 1–5 หลัก)');
+    if (type === 'nobarcode' && !isPlu) return;
+    if (isPlu) {
+      if (code === plu) throw new Error('PLU ' + code + ' ซ้ำกับ PLU ของชิ้น — ตั้งเลขอื่นให้หน่วยนี้');
+      var pluOwner = all.filter(function (p) { return String(p.plu) === code && String(p.sku) !== sku && bool_(p.active); })[0];
+      if (pluOwner) throw new Error('PLU ' + code + ' เป็นของ ' + pluOwner.name + ' แล้ว');
+    }
     if (seen[code]) throw new Error('บาร์โค้ด ' + code + ' ซ้ำในสินค้านี้');
     seen[code] = true;
     var mult = Math.round(num_(b.multiplier) || 1);
@@ -172,7 +183,7 @@ function saveProduct_(sess, input, barcodes, components) {
   var otherCodes = readAll_('Barcodes').filter(function (b) { return String(b.sku) !== sku; });
   clean.forEach(function (b) {
     var clash = otherCodes.filter(function (o) { return String(o.barcode) === b.barcode; })[0];
-    if (clash) throw new Error('บาร์โค้ด ' + b.barcode + ' ใช้กับสินค้า ' + clash.sku + ' แล้ว');
+    if (clash) throw new Error((/^\d{1,5}$/.test(b.barcode) ? 'PLU ' : 'บาร์โค้ด ') + b.barcode + ' ใช้กับสินค้า ' + clash.sku + ' แล้ว');
   });
 
   // Blank = let the program work it out from sales; a number = the owner's own minimum.

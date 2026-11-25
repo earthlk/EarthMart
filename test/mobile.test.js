@@ -105,7 +105,24 @@ const server = http.createServer((req, res) => {
   await page.click('.tabbar [data-v=reports]');
   await page.waitForSelector('canvas#c-trend');
   await shot('m9-reports');
+  // Accounting sits under รายงาน as a second segment
+  await page.click('.mseg [data-v=acct]');
+  await page.waitForSelector('.acc-flow');
+  assert.ok(await page.$('.tabbar [data-v=reports].on'), 'รายงาน tab stays lit on บัญชี');
+  const accRight = () => page.evaluate(() => Math.max(...[...document.querySelectorAll('.acc-page *')].filter(e => e.offsetParent && !e.closest('.acc-tabs,.seg-sm,.table')).map(e => Math.round(e.getBoundingClientRect().right))));
+  const accW = await accRight();
+  assert.ok(accW <= 392, 'accounting fits the phone width (' + accW + ')');
+  await shot('m9b-acct');
+  for (const t of ['expenses', 'debts', 'wallets', 'pl', 'tax']) {
+    await page.click('.acc-tabs [data-t=' + t + ']');
+    await page.waitForFunction(() => !document.querySelector('#acc-body .skel'));
+    await page.waitForTimeout(150);
+    const w = await accRight();
+    assert.ok(w <= 392, 'acct ' + t + ' fits the phone width (' + w + ')');
+    await shot('m9c-acct-' + t);
+  }
   await page.click('.tabbar [data-v=home]');
+  assert.ok(await page.$('.mtile[data-v=acct]'), 'บัญชี shortcut on home');
   await page.click('[data-act=go][data-v=settings]');
   await page.waitForSelector('.set-page');
   const cols = await page.evaluate(() => getComputedStyle(document.querySelector('.set-page')).gridTemplateColumns.split(' ').length);

@@ -365,6 +365,41 @@ call('importProducts', T, [
   assert.deepStrictEqual(saved.barcodes.filter(b => b.sku === bread.sku).map(b => [b.unitName, b.multiplier, b.price]).sort(),
     [['ชิ้น', 1, null], ['แพ็ค', 6, 85]], 'barcodes per unit');
 
+  // PLU per unit on a product without a barcode (piece PLU 101 + pack PLU), and icon search
+  await page.click('[data-act=selProduct][data-sku=D0101]');
+  await page.waitForSelector('#e-scan[placeholder*="PLU"]');
+  await page.fill('#e-scan', '8850999111246'); await page.keyboard.press('Enter');
+  await page.waitForSelector('.toast:has-text("เฉพาะ PLU")');
+  await page.fill('#e-scan', '101'); await page.keyboard.press('Enter');
+  await page.waitForSelector('.toast:has-text("PLU ของชิ้น")');
+  await page.fill('#e-scan', '111'); await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-ec=multiplier][data-i="0"]:focus');
+  assert.strictEqual(await page.inputValue('[data-ec=unitName][data-i="0"]'), 'แพ็ค', 'typed PLU starts at the pack');
+  await page.keyboard.type('10');
+  await page.fill('[data-ec=price][data-i="0"]', '45');
+  assert.ok(await page.isVisible('.units .ucode i:has-text("PLU")'), 'PLU marked in the unit row');
+  const allIcons = await page.locator('.icons [data-ed=icon]').count();
+  assert.ok(allIcons >= 80, 'many icons to pick from (' + allIcons + ')');
+  await page.locator('.icon-pick').scrollIntoViewIfNeeded();
+  await page.locator('.icon-pick').screenshot({ path: path.join(SHOTS, '09d-icon-picker.png') });
+  await page.fill('#e-icq', 'สบู่');
+  assert.ok(await page.isVisible('[data-ed=icon][data-v=soap]') && !(await page.isVisible('[data-ed=icon][data-v=bread]')), 'icon search by Thai name');
+  await page.fill('#e-icq', 'battery');
+  assert.strictEqual(await page.locator('.icons [data-ed=icon]:visible').count(), 1, 'icon search by English word');
+  await page.fill('#e-icq', 'น้ำแข็ง');
+  await shot('09c-plu-units-icons');
+  await page.click('[data-ed=icon][data-v=ice_bag]');
+  assert.strictEqual(await page.inputValue('#e-icq'), 'น้ำแข็ง', 'search kept after picking');
+  await page.fill('#e-icq', 'zzzz');
+  await page.waitForSelector('.icon-none:visible');
+  await page.click('[data-ed=save]');
+  await page.waitForSelector('[data-ed=save][disabled]');
+  const iceCodes = call('bootstrap', T);
+  assert.deepStrictEqual(iceCodes.barcodes.filter(b => b.sku === 'D0101').map(b => [b.barcode, b.unitName, b.multiplier, b.price]), [['111', 'แพ็ค', 10, 45]], 'pack PLU saved as a unit code');
+  assert.strictEqual(iceCodes.products.find(p => p.sku === 'D0101').icon, 'ice_bag', 'new icon saved');
+  assert.ok(await page.isVisible('#prows .prod-grid:has-text("น้ำแข็งแก้ว") .tag:has-text("PLU 111")'), 'pack PLU tag in the list');
+  await page.click('[data-ed=cancel]');
+
   // Raw material (not sold) + recipe product built from components
   await page.click('[data-act=selProduct][data-sku=""]');
   await page.fill('#e-name', 'ฝาโดม 95');
