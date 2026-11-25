@@ -99,13 +99,15 @@ const server = http.createServer((req, res) => {
   await page.waitForSelector('.prod:not(.editing)');
 
   // Bills, reports, settings, bulk price from home
-  assert.ok(!(await page.$('.tabbar [data-v=bills]')), 'owner: no บิล tab (it sits under รายงาน)');
+  assert.ok(!(await page.$('.tabbar [data-v=bills]')), 'owner: no บิล tab (it is a home shortcut)');
   await page.click('.tabbar [data-v=reports]');
   await page.waitForSelector('canvas#c-trend');
+  assert.ok(!(await page.$('.mseg')), 'reports: no extra segment row');
   await shot('m9-reports');
-  await page.click('.mseg [data-v=bills]');
+  await page.click('.tabbar [data-v=home]');
+  await page.click('.mtile[data-v=bills]');
   await page.waitForSelector('#bills tr');
-  assert.ok(await page.$('.tabbar [data-v=reports].on'), 'บิล lights the รายงาน tab');
+  assert.ok(await page.$('.tabbar [data-v=home].on'), 'บิล lights the หน้าหลัก tab');
   await shot('m8-bills');
   // Accounting sits under รายงาน as a second segment
   await page.click('.tabbar [data-v=acct]');

@@ -1292,7 +1292,7 @@ window.addEventListener('resize', function () {
   go(m ? 'home' : S.view);
 });
 
-// Owner: บิล sits under รายงาน (ยอดขาย | บิล) so บัญชี gets its own tab and the bar stays at 5. Cashier keeps a บิล tab.
+// Owner: บิล opens from the home shortcuts so บัญชี gets its own tab and the bar stays at 5. Cashier keeps a บิล tab.
 var M_TABS = [['home', 'หน้าหลัก', 'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z'], ['bills', 'บิล', 'M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6M9 15h4', 'cashier'],
   ['stock', 'สต็อก', 'M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10'], ['products', 'สินค้า', 'M4 4h7l9 9-7 7-9-9zM8 8h.01'],
   ['reports', 'รายงาน', 'M4 20V10M10 20V4M16 20v-7M22 20H2', 'owner'], ['acct', 'บัญชี', 'M3 7h15a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM3 7l12-4 2 4M16 14h.01', 'owner']];
@@ -1300,7 +1300,7 @@ var M_TITLE = { home: '', bills: 'บิล', stock: 'สต็อก', opening:
 
 function mobileFrame(inner) {
   var owner = S.user && S.user.role === 'owner';
-  var at = S.view === 'receive' || S.view === 'expiry' ? 'stock' : S.view === 'bills' && owner ? 'reports' : S.view;
+  var at = S.view === 'receive' || S.view === 'expiry' ? 'stock' : S.view === 'bills' && owner ? 'home' : S.view;
   var tabs = M_TABS.filter(function (t) { return openingLocked() ? S.user && S.user.role === 'owner' && OPENING_VIEWS.indexOf(t[0]) >= 0 : !t[3] || (S.user && S.user.role === t[3]); }).map(function (t) {
     return '<button data-act="go" data-v="' + t[0] + '" class="' + (at === t[0] ? 'on' : '') + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + t[2] + '"/></svg>' + t[1] +
       (t[0] === 'stock' && S.expiryTodo ? '<span class="badge">' + S.expiryTodo + '</span>' : '') + '</button>';
@@ -1311,11 +1311,6 @@ function mobileFrame(inner) {
     seg = '<div class="mseg">' + [['list', 'คงเหลือ'], ['count', 'ตรวจนับ'], ['receive', 'รับสินค้า'], ['expiry', 'หมดอายุ']].map(function (x) {
       return '<button data-act="mStock" data-t="' + x[0] + '" class="' + (cur === x[0] ? 'on' : '') + '">' + x[1] +
         (x[0] === 'expiry' && S.expiryTodo ? ' <span class="badge">' + S.expiryTodo + '</span>' : '') + '</button>';
-    }).join('') + '</div>';
-  }
-  if (at === 'reports' && owner && !openingLocked()) {
-    seg = '<div class="mseg">' + [['reports', 'ยอดขาย'], ['bills', 'บิล']].map(function (x) {
-      return '<button data-act="go" data-v="' + x[0] + '" class="' + (S.view === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
     }).join('') + '</div>';
   }
   var title = M_TITLE[S.view] !== undefined ? M_TITLE[S.view] : '';
@@ -1343,7 +1338,7 @@ function renderHome() {
     tile('mStock', 'data-t="count"', 'ตรวจนับสต็อก', 'สแกนด้วยกล้องได้') +
     tile('mStock', 'data-t="receive"', 'รับสินค้าเข้า', 'เพิ่มล็อตใหม่') +
     tile('mStock', 'data-t="list"', 'ของใกล้หมด', low ? low + ' รายการ' : 'ไม่มี', low > 0) +
-    (owner ? '' : tile('go', 'data-v="bills"', 'ดูบิล', 'ค้นหาเลขบิล')) +
+    tile('go', 'data-v="bills"', 'ดูบิล', 'ค้นหาเลขบิล') +
     (owner ? tile('mPromo', '', 'โปรโมชั่น', (S.promos || []).length ? S.promos.length + ' รายการที่เปิดอยู่' : 'ยังไม่มี') + tile('mExpense', '', 'บันทึกรายจ่าย', 'ถ่ายรูปบิลได้') + tile('mBulk', '', 'แก้ราคาหลายรายการ', '± % หรือบาท') + tile('go', 'data-v="settings"', 'ตั้งค่า', 'ร้าน · ผู้ใช้ · ธีม') : '') +
     '</div><h3 class="mh">ใช้ได้เฉพาะเครื่องหน้าร้าน</h3><div class="card mlocks">' +
     lock('ขาย / รับเงิน') + lock('เปิด / ปิดกะ') + lock('ยกเลิกบิล / คืนสินค้า') + lock('เงินเข้า-ออกลิ้นชัก') + '</div></div>';
