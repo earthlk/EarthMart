@@ -37,7 +37,7 @@ function wallets_() {
   var w = readAll_('Wallets').filter(function (x) { return bool_(x.active) || x.active === ''; });
   if (w.length) return w.sort(function (a, b) { return num_(a.sort) - num_(b.sort); });
   appendMany_('Wallets', [
-    { walletId: 'WRESERVE', name: 'เงินสดสำรอง', type: 'reserve', opening: 0, receivesQr: false, active: true, sort: 1, createdAt: now_() },
+    { walletId: 'WRESERVE', name: 'เงินสดร้าน', type: 'reserve', opening: 0, receivesQr: false, active: true, sort: 1, createdAt: now_() },
     { walletId: 'WBANK', name: 'บัญชีธนาคาร', type: 'bank', opening: 0, receivesQr: true, active: true, sort: 2, createdAt: now_() }
   ]);
   return readAll_('Wallets');
@@ -277,7 +277,7 @@ function saveBillImage_(dataUrl, name) {
 /** Pay out of a counter drawer from the back office: a cash move on the open shift (only one open shift allowed). */
 function drawerPay_(s, amount, kind, category, reason, ref) {
   var open = readAll_('Shifts').filter(function (x) { return x.status === 'OPEN'; });
-  if (!open.length) throw new Error('ไม่มีกะที่เปิดอยู่ — เลือกจ่ายจากกระเป๋าอื่น');
+  if (!open.length) throw new Error('ไม่มีกะที่เปิดอยู่ — เลือกวิธีจ่ายอื่น');
   var sh = open.filter(function (x) { return x.deviceId === s.deviceId; })[0] || open[0];
   var mv = { moveId: uid_('CM'), shiftId: sh.shiftId, createdAt: now_(), type: 'OUT', amount: round2_(amount), reason: reason,
              userId: s.userId, kind: kind, category: category || '', ref: ref || '' };
@@ -365,7 +365,7 @@ function expenseRows_(from, to) {
     var d = ymd_(x.date);
     if (d < from || d > to) return;
     out.push({ id: x.expenseId, date: d, createdAt: x.createdAt, category: x.category, amount: num_(x.amount), note: x.note || '',
-               from: x.payFrom === 'credit' ? 'ค้างจ่าย' : x.payFrom === 'drawer' ? 'ลิ้นชัก' : (wname[x.payFrom] || ''),
+               from: x.payFrom === 'credit' ? 'ค้างจ่าย' : x.payFrom === 'drawer' ? 'เงินในลิ้นชัก' : (wname[x.payFrom] || ''),
                payFrom: x.payFrom, fileId: x.fileId || '', recurring: bool_(x.recurring), source: 'manual' });
   });
   readAll_('CashMoves').forEach(function (m) {
@@ -373,7 +373,7 @@ function expenseRows_(from, to) {
     var d = ymd_(m.createdAt);
     if (d < from || d > to) return;
     out.push({ id: m.moveId, date: d, createdAt: m.createdAt, category: m.category || 'อื่น ๆ', amount: num_(m.amount), note: m.reason || '',
-               from: 'ลิ้นชัก', payFrom: 'drawer', fileId: '', recurring: false, source: 'drawer' });
+               from: 'เงินในลิ้นชัก', payFrom: 'drawer', fileId: '', recurring: false, source: 'drawer' });
   });
   return out.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
 }
@@ -392,7 +392,7 @@ function api_expenses(token, f) {
     var purchases = readAll_('Receipts').filter(function (r) { var d = ymd_(r.createdAt); return d >= from && d <= to; }).reverse().map(function (r) {
       var ap = aps[r.payableId];
       return { receiptNo: r.receiptNo, date: ymd_(r.createdAt), supplier: r.supplier || '', items: num_(r.itemsCount), total: num_(r.total),
-               from: r.payFrom === 'credit' ? '' : r.payFrom === 'drawer' ? 'ลิ้นชัก' : (wname[r.payFrom] || (r.payFrom ? r.payFrom : 'ไม่ระบุ')),
+               from: r.payFrom === 'credit' ? '' : r.payFrom === 'drawer' ? 'เงินในลิ้นชัก' : (wname[r.payFrom] || (r.payFrom ? r.payFrom : 'ไม่ระบุ')),
                status: ap ? (ap.status === 'PAID' ? 'จ่ายแล้ว' : 'ค้างจ่าย' + (ap.dueDate ? ' · ครบ ' + ymd_(ap.dueDate) : '')) : (r.payFrom ? 'จ่ายแล้ว' : 'ไม่ระบุ') };
     });
     return { from: from, to: to, cats: expenseCats_(), rows: rows, purchases: purchases };

@@ -1092,7 +1092,66 @@ a{color:var(--brand-text)}
 #app.m .acc-page>*,#app.m .acc-head>*,#app.m .acc-tools>*{min-width:0;max-width:100%}
 #app.m .acc-grid,#app.m .acc-grid.pl,#app.m .acc-grid.debts{grid-template-columns:minmax(0,1fr)}
 #app.m .acc-h{flex-wrap:wrap}
-#app.m .acc-period .acc-step{flex:1 1 100%}
 .units .ucode{position:relative;min-width:0;display:block}
 .units .ucode input{width:100%}
 .units .ucode i{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-style:normal;font-size:10px;font-weight:700;padding:1px 5px;border-radius:5px;background:var(--brand-soft);color:var(--brand-text);pointer-events:none}
+/* Toolbars: desktop keeps the flat row; the phone rules below reflow them */
+.prod-acts,.rep-pre{display:contents}
+.prod-acts .p-add{order:9}
+/* ===== Phone: filters take one line each, data gets the screen ===== */
+#app.m .m-hide{display:none}
+#app.m .chips{flex-wrap:nowrap;flex:none;overflow-x:auto;padding:8px 12px;gap:6px;scrollbar-width:none}
+#app.m .chips::-webkit-scrollbar,#app.m .rep-pre::-webkit-scrollbar,#app.m .prod-acts::-webkit-scrollbar{display:none}
+#app.m .chips>.muted{display:none}
+#app.m .chip{height:32px;padding:0 12px;font-size:13px;flex:none}
+/* headline numbers: one short strip you can swipe, not a 2×2 block */
+#app.m #skpi,#app.m #xkpi,#app.m #bkpi{display:flex;flex:none;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -12px;padding:0 12px}
+#app.m #skpi>*,#app.m #xkpi>*,#app.m #bkpi>*{flex:0 0 auto;min-width:128px;max-width:200px;padding:8px 12px}
+#app.m #skpi .v,#app.m #xkpi .v,#app.m #bkpi .v,#app.m #skpi b,#app.m #xkpi b{font-size:18px}
+#app.m #skpi .muted,#app.m #xkpi .muted,#app.m #bkpi .muted{font-size:12px}
+#app.m #skpi small,#app.m #xkpi small,#app.m #bkpi .muted+.muted{display:none}
+/* stock list: search, camera and "ใกล้หมด" on one row */
+#app.m .stk-tools{flex-wrap:nowrap;padding:8px 12px;gap:6px}
+#app.m .stk-tools input.grow{flex:1 1 auto;min-width:0;height:40px}
+#app.m .stk-tools label.row{font-size:13px;gap:4px}
+#app.m #cnote{width:110px !important;flex:0 0 110px;height:40px}
+/* receive: supplier + document no. side by side, note under them */
+#app.m .rcv-head{grid-template-columns:1fr 1fr;gap:6px;padding:10px 12px}
+#app.m .rcv-head label{display:none}
+#app.m .rcv-head .field:last-child{grid-column:1 / -1}
+#app.m .rcv-head input{height:38px}
+#app.m .rcv .scan{padding:8px 12px}
+/* products: search row, two filters on one row, actions as one swipe row */
+#app.m .prod-tools{gap:6px;padding:10px 12px}
+#app.m .prod-tools #pq{flex:1 1 calc(100% - 60px)}
+#app.m .prod-tools select{flex:1 1 40%;width:auto !important;min-width:0;height:38px}
+#app.m .prod-acts{display:flex;gap:6px;overflow-x:auto;flex:1 1 100%;scrollbar-width:none}
+#app.m .prod-acts .btn{flex:none;height:34px !important}
+#app.m .prod-acts .p-add{order:-1}
+/* bills: crumb + day arrows on one row, search under */
+#app.m .bills-head{gap:6px}
+#app.m .bills-head .grow{display:none}
+#app.m .bills-head .crumb{font-size:15px;flex:1 1 auto}
+#app.m .bills-head .crumb button{padding:4px 6px}
+#app.m .bills-head form{order:3;flex:1 1 100%}
+#app.m .bills-head form input{flex:1;width:auto !important}
+#app.m .bills-head>.row:last-child{flex:none}
+#app.m .bills-head #bday{width:130px !important}
+/* reports: period choices in one swipe row, dates + filter on the next */
+#app.m .rep-head{gap:6px}
+#app.m .rep-pre{display:flex;gap:6px;overflow-x:auto;flex:1 1 100%;scrollbar-width:none;margin:0 -12px;padding:0 12px}
+#app.m .rep-pre>*{flex:none}
+#app.m .rep-gran button{height:32px;padding:0 10px;font-size:13px}
+#app.m .rep-head>.grow{display:none}
+#app.m .rep-dates{margin-left:0 !important;flex:1 1 auto;min-width:0}
+#app.m .rep-dates input{flex:1 1 0;width:auto !important;min-width:0;height:36px !important;font-size:13px}
+#app.m #rf-btn{flex:none;height:36px;padding:0 10px}
+/* accounting: tabs, period and step + action share fewer rows */
+#app.m .acc-tools{flex-direction:row;flex-wrap:wrap;gap:6px}
+#app.m .acc-period{display:contents}
+#app.m .acc-period .seg-sm{flex:1 1 100%;width:auto}
+#app.m .acc-period .seg-sm button{height:32px;font-size:13px}
+#app.m .acc-tools .acc-step{height:38px;flex:1 1 0;min-width:0}
+#app.m .acc-tools>.btn{width:auto;flex:0 0 auto;height:38px;padding:0 12px}
+#app.m .acc-tools>.seg-sm{flex:1 1 100%;overflow-x:auto}
+#app.m #skpi .v+.muted,#app.m #bkpi .v+.muted,#app.m #xkpi .v+.muted{display:none}

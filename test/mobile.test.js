@@ -99,16 +99,17 @@ const server = http.createServer((req, res) => {
   await page.waitForSelector('.prod:not(.editing)');
 
   // Bills, reports, settings, bulk price from home
-  await page.click('.tabbar [data-v=bills]');
-  await page.waitForSelector('#bills');
-  await shot('m8-bills');
+  assert.ok(!(await page.$('.tabbar [data-v=bills]')), 'owner: no บิล tab (it sits under รายงาน)');
   await page.click('.tabbar [data-v=reports]');
   await page.waitForSelector('canvas#c-trend');
   await shot('m9-reports');
+  await page.click('.mseg [data-v=bills]');
+  await page.waitForSelector('#bills tr');
+  assert.ok(await page.$('.tabbar [data-v=reports].on'), 'บิล lights the รายงาน tab');
+  await shot('m8-bills');
   // Accounting sits under รายงาน as a second segment
-  await page.click('.mseg [data-v=acct]');
+  await page.click('.tabbar [data-v=acct]');
   await page.waitForSelector('.acc-flow');
-  assert.ok(await page.$('.tabbar [data-v=reports].on'), 'รายงาน tab stays lit on บัญชี');
   const accRight = () => page.evaluate(() => Math.max(...[...document.querySelectorAll('.acc-page *')].filter(e => e.offsetParent && !e.closest('.acc-tabs,.seg-sm,.table')).map(e => Math.round(e.getBoundingClientRect().right))));
   const accW = await accRight();
   assert.ok(accW <= 392, 'accounting fits the phone width (' + accW + ')');
@@ -122,7 +123,14 @@ const server = http.createServer((req, res) => {
     await shot('m9c-acct-' + t);
   }
   await page.click('.tabbar [data-v=home]');
-  assert.ok(await page.$('.mtile[data-v=acct]'), 'บัญชี shortcut on home');
+  // expense: four ways to pay, drawer first
+  await page.click('[data-act=mExpense]');
+  await page.waitForSelector('.modal input[name=exfrom]');
+  const ways = await page.$$eval('.modal input[name=exfrom]', a => a.map(i => i.parentElement.textContent.trim()));
+  assert.deepStrictEqual(ways, ['เงินในลิ้นชัก', 'บัญชีธนาคาร', 'เงินสดร้าน', 'ค้างจ่าย'], 'expense pay choices: ' + ways.join(', '));
+  assert.ok(await page.isVisible('.modal .lbl:has-text("วิธีจ่าย")'), 'labelled วิธีจ่าย');
+  await shot('m11-expense');
+  await page.click('.modal [data-x=no]');
   await page.click('[data-act=go][data-v=settings]');
   await page.waitForSelector('.set-page');
   const cols = await page.evaluate(() => getComputedStyle(document.querySelector('.set-page')).gridTemplateColumns.split(' ').length);
