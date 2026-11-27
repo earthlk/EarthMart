@@ -487,26 +487,30 @@ function localDeduct(lines) {
   saveCache();
 }
 
-/** Warn (never block) when the bill takes more than the system thinks is on the shelf. */
-function stockWarn(p) {
-  if (!S.cart || !p) return;
-  var need = {};
+/**
+ * Stock the bill takes beyond what the system thinks is on the shelf: sku → pieces on hand.
+ * Never blocks the sale; the cart line carries a small amber tag instead of a toast over the scan box.
+ */
+function stockShort() {
+  var need = {}, out = {};
+  if (!S.cart) return out;
   S.cart.lines.forEach(function (l) {
     var pieces = l.qty * (l.multiplier || 1), comps = S.recipes[l.sku];
     (comps && comps.length ? comps.map(function (c) { return [c.sku, pieces * c.qty]; }) : [[l.sku, pieces]]).forEach(function (x) { need[x[0]] = (need[x[0]] || 0) + x[1]; });
   });
-  var comps = S.recipes[p.sku];
-  var skus = comps && comps.length ? comps.map(function (c) { return c.sku; }) : [p.sku];
-  S.cart.warned = S.cart.warned || {};
-  skus.forEach(function (sku) {
+  Object.keys(need).forEach(function (sku) {
     var x = S.idx.bySku[sku];
-    if (!x || S.cart.warned[sku]) return;
-    var left = Number(x.onHand || 0);
-    if (need[sku] > left) {
-      S.cart.warned[sku] = true;
-      toast('สต็อกในระบบของ ' + x.name + ' ' + (left > 0 ? 'เหลือแค่ ' + left : 'หมดแล้ว') + ' — ขายต่อได้ แจ้งเจ้าของตรวจสต็อก', true);
-    }
+    if (x && x.type !== 'recipe' && need[sku] > Number(x.onHand || 0)) out[sku] = Number(x.onHand || 0);
   });
+  return out;
+}
+function stockTag(l, short) {
+  var comps = S.recipes[l.sku], skus = comps && comps.length ? comps.map(function (c) { return c.sku; }) : [l.sku];
+  var hit = skus.filter(function (k) { return k in short; });
+  if (!hit.length) return '';
+  var left = short[hit[0]];
+  var who = comps && comps.length ? esc((S.idx.bySku[hit[0]] || {}).name || '') + ' ' : '';
+  return '<span class="stock-tag" title="ขายต่อได้ · แจ้งเจ้าของตรวจสต็อก">' + who + (left > 0 ? 'สต็อกเหลือ ' + left : 'สต็อก 0') + '</span>';
 }
 
 function rawCall(c, name, args) {
@@ -648,14 +652,32 @@ function skelCards(n) {
   return o + '</div>';
 }
 
+/**
+ * Toasts sit top-right under the header, away from the scan box and cart on the left (above the tab bar on a phone).
+ * Errors stay a bit longer, are announced to screen readers, and the last 20 are kept: tap an error toast to see them.
+ */
 var toastTimer;
 function toast(msg, isErr) {
   var el = $('#toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
   el.className = 'toast' + (isErr ? ' err' : '');
+  el.setAttribute('role', isErr ? 'alert' : 'status');
   el.textContent = msg;
+  if (isErr) {
+    S.errLog = (S.errLog || []).concat([{ t: new Date(), m: String(msg) }]).slice(-20);
+    el.title = 'แตะเพื่อดูข้อผิดพลาดล่าสุด';
+    el.onclick = function () { el.remove(); errLogModal(); };
+  } else { el.onclick = function () { el.remove(); }; el.removeAttribute('title'); }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(function () { el.remove(); }, isErr ? 4500 : 2500);
+  toastTimer = setTimeout(function () { el.remove(); }, isErr ? 6000 : 2500);
+}
+function errLogModal() {
+  var rows = (S.errLog || []).slice().reverse();
+  var m = openModal('<header><h1>ข้อผิดพลาดล่าสุด</h1><span class="muted">' + rows.length + ' รายการ · ตั้งแต่เปิดโปรแกรม</span></header><div class="body">' +
+    (rows.length ? '<ul class="err-log">' + rows.map(function (r) { return '<li><time class="num">' + timeOf(r.t) + '</time><span>' + esc(r.m) + '</span></li>'; }).join('') + '</ul>'
+      : '<div class="muted">ยังไม่มีข้อผิดพลาด</div>') +
+    '</div><footer><button class="btn primary" data-x="ok">ปิด</button></footer>');
+  $('[data-x=ok]', m).onclick = function () { closeModal(); };
 }
 function fail(e) { if (window.EM_TEST && e && e.stack) console.warn("FAIL", e.stack); toast(e && e.message ? e.message : String(e), true); }
 
@@ -1194,10 +1216,12 @@ function categories() {
 /* Navigation & frame                                                  */
 /* =================================================================== */
 
+// รับสินค้า and หมดอายุ live under สต็อก (a sub-bar on those pages), as on the phone. เงินเข้า/ออก sits in the cart bar and on the กะ page.
 var NAV = [
-  ['sale', 'ขาย'], ['bills', 'บิล'], ['products', 'สินค้า'], ['stock', 'สต็อก'], ['expiry', 'หมดอายุ'], ['receive', 'รับสินค้า'],
+  ['sale', 'ขาย'], ['bills', 'บิล'], ['products', 'สินค้า'], ['stock', 'สต็อก'],
   ['shift', 'กะ'], ['reports', 'รายงาน', 'owner'], ['acct', 'บัญชี', 'owner'], ['settings', 'ตั้งค่า', 'owner']
 ];
+var STOCK_GROUP = [['stock', 'สต็อกคงเหลือ'], ['receive', 'รับสินค้า'], ['expiry', 'หมดอายุ']];
 
 function go(view) {
   view = openingView(view);   // ตั้งยอดเปิดร้าน: only settings, products, stock count and accounting
@@ -1229,9 +1253,16 @@ function frame(inner) {
     if (openingLocked()) return S.user && S.user.role === 'owner' && OPENING_VIEWS.indexOf(n[0]) >= 0;
     return !n[2] || (S.user && S.user.role === n[2]);
   }).map(function (n) {
-    return '<button data-act="go" data-v="' + n[0] + '" class="' + (S.view === n[0] ? 'on' : '') + '">' + n[1] +
-      (n[0] === 'expiry' ? '<span class="badge">' + (S.expiryTodo || '') + '</span>' : '') + '</button>';
+    var on = S.view === n[0] || (n[0] === 'stock' && (S.view === 'receive' || S.view === 'expiry'));
+    return '<button data-act="go" data-v="' + n[0] + '" class="' + (on ? 'on' : '') + '">' + n[1] +
+      (n[0] === 'stock' ? '<span class="badge exp-badge" title="ล็อตหมดอายุที่ต้องจัดการ">' + (S.expiryTodo || '') + '</span>' : '') + '</button>';
   }).join('');
+  var sub = ['stock', 'receive', 'expiry'].indexOf(S.view) >= 0 ? '<nav class="subnav" aria-label="สต็อก">' + STOCK_GROUP.filter(function (g) {
+    return !openingLocked() || OPENING_VIEWS.indexOf(g[0]) >= 0;
+  }).map(function (g) {
+    return '<button data-act="go" data-v="' + g[0] + '" class="' + (S.view === g[0] ? 'on' : '') + '">' + g[1] +
+      (g[0] === 'expiry' ? '<span class="badge">' + (S.expiryTodo || '') + '</span>' : '') + '</button>';
+  }).join('') + '</nav>' : '';
   var shiftTxt = S.shift ? 'กะเปิด ' + timeOf(S.shift.openedAt) : (S.isCounter ? 'ยังไม่เปิดกะ' : 'ไม่ใช่เครื่องหน้าร้าน');
   var role = S.user && S.user.role === 'owner' ? 'เจ้าของ' : 'แคชเชียร์';
   var old = S.status && !(Number(S.status.apiVersion) >= API_NEEDED);
@@ -1242,12 +1273,11 @@ function frame(inner) {
   banner = openingBar() + banner;
   return '<header class="topbar"><span class="brand">' + esc(S.settings.shopName || 'EarthMart') + '</span><nav>' + nav + '</nav>' +
     '<span class="grow"></span><span class="meta">' + shiftTxt + ' · ' + role + ': ' + esc(S.user ? S.user.name : '') + '</span>' +
-    (S.shift && S.isCounter && !openingLocked() ? '<button class="btn" data-act="cashMoveModal">เงินเข้า/ออก</button>' : '') +
     '<button class="netpill hidden" id="netpill" data-act="outbox" title="บิลที่ขายตอนออฟไลน์"></button>' +
     '<button class="syncpill" id="syncpill" data-act="syncNow" title="ซิงก์ข้อมูลเดี๋ยวนี้">' + syncPillHtml() + '</button>' +
     (S.isCounter ? '<button class="btn" data-act="openCustomer" id="cdbtn" title="เปิดจอลูกค้าบนจอที่ 2"><span class="dot' +
       (window.CustomerDisplay && CustomerDisplay.pos.connected() ? ' on' : '') + '"></span>จอลูกค้า</button>' : '') +
-    '<button class="btn" data-act="logout">ออก</button></header>' + banner + inner;
+    '<button class="btn" data-act="logout">ออก</button></header>' + sub + banner + inner;
 }
 
 function render() {
@@ -1274,7 +1304,26 @@ function render() {
   drawNetPill();
   markOfflineNav();
   if (S.view === 'sale') { renderCartOnly(); focusScan(); }   // the bill on hold is always drawn with the page
+  markScrollers();
 }
+
+/* Swipe strips (chips, tabs, KPI strips) fade at the edge that still has more, so it is clear they scroll. */
+var SCROLLERS = '#app.m .chips, #app.m .rep-pre, #app.m .prod-acts, #app.m .acc-tabs, #app.m .set-nav, #app.m #skpi, #app.m #xkpi, #app.m #bkpi, #app.m .acc-tools>.seg-sm, #app.m .acc-period .seg-sm';
+function markScrollers(root) {
+  $all(SCROLLERS).forEach(function (el) {
+    var max = el.scrollWidth - el.clientWidth;
+    el.classList.toggle('more-r', max > 4 && el.scrollLeft < max - 4);
+    el.classList.toggle('more-l', max > 4 && el.scrollLeft > 4);
+  });
+}
+document.addEventListener('scroll', function (e) { var t = e.target; if (t && t.matches && t.matches(SCROLLERS)) markScrollers(); }, true);
+window.addEventListener('resize', function () { markScrollers(); });
+// strips filled in after render (KPIs, chips) get checked once the DOM settles
+(function () {
+  var t = 0;
+  if (window.MutationObserver) new MutationObserver(function () { if (!document.getElementById('app').classList.contains('m')) return; clearTimeout(t); t = setTimeout(markScrollers, 60); })
+    .observe(document.getElementById('app'), { childList: true, subtree: true });
+})();
 
 /* =================================================================== */
 /* Phone layout: bottom tabs, no selling (that stays on the counter)   */
@@ -1300,7 +1349,7 @@ var M_TITLE = { home: '', bills: 'บิล', stock: 'สต็อก', opening:
 
 function mobileFrame(inner) {
   var owner = S.user && S.user.role === 'owner';
-  var at = S.view === 'receive' || S.view === 'expiry' ? 'stock' : S.view === 'bills' && owner ? 'home' : S.view;
+  var at = S.view === 'receive' || S.view === 'expiry' ? 'stock' : S.view;   // non-tab pages (บิล for the owner, ตั้งค่า) light no tab and get a back arrow
   var tabs = M_TABS.filter(function (t) { return openingLocked() ? S.user && S.user.role === 'owner' && OPENING_VIEWS.indexOf(t[0]) >= 0 : !t[3] || (S.user && S.user.role === t[3]); }).map(function (t) {
     return '<button data-act="go" data-v="' + t[0] + '" class="' + (at === t[0] ? 'on' : '') + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + t[2] + '"/></svg>' + t[1] +
       (t[0] === 'stock' && S.expiryTodo ? '<span class="badge">' + S.expiryTodo + '</span>' : '') + '</button>';
@@ -1314,7 +1363,9 @@ function mobileFrame(inner) {
     }).join('') + '</div>';
   }
   var title = M_TITLE[S.view] !== undefined ? M_TITLE[S.view] : '';
-  return '<header class="topbar mtop">' + (title ? '<b class="mtitle">' + title + '</b>' : '<span class="brand">' + esc(S.settings.shopName || 'EarthMart') + '</span>') +
+  var isTab = S.view === 'home' || tabs.indexOf('data-v="' + at + '" class="on"') >= 0;
+  var back = !isTab ? '<button class="mback" data-act="go" data-v="home" aria-label="กลับหน้าหลัก"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>' : '';
+  return '<header class="topbar mtop">' + back + (title ? '<b class="mtitle">' + title + '</b>' : '<span class="brand">' + esc(S.settings.shopName || 'EarthMart') + '</span>') +
     '<span class="grow"></span><button class="netpill hidden" id="netpill" data-act="outbox"></button>' +
     '<button class="mwho" data-act="logout" title="ออกจากระบบ"><span class="avatar">' + esc(initial(S.user ? S.user.name : '')) + '</span>ออก</button></header>' +
     seg + inner + '<nav class="tabbar">' + tabs + '</nav>';
@@ -1443,7 +1494,6 @@ function addItem(p, b, qty) {
     }
     S.suggest = [];
     renderCartOnly();
-    stockWarn(p);
   };
   if (p.openPrice) {
     prompt2('ราคาเปิด: ' + p.name, 'ราคาต่อหน่วย (บาท)', '', { type: 'number', inputmode: 'decimal', step: '0.25', ok: 'ใส่ในบิล' })
@@ -1614,7 +1664,7 @@ function renderSale() {
     '<div class="cart-head"><div>รายการ</div><div style="text-align:center">จำนวน</div><div class="r">รวม</div><div class="r" style="font-size:12px">ลด</div></div>' +
     '<div class="lines" id="lines"></div>' +
     '<div class="cart-actions"><button class="btn" data-act="billDiscount">ส่วนลดท้ายบิล</button><button class="btn" data-act="holdBill">พักบิล</button><button class="btn" data-act="storeUse">เบิกใช้</button>' +
-    '<button class="btn" data-act="noSale">เปิดลิ้นชัก</button><button class="btn warn" data-act="clearCart">ล้างบิล</button></div></section>' +
+    '<button class="btn" data-act="cashMoveModal">เงินเข้า/ออก</button><button class="btn warn" data-act="clearCart">ล้างบิล</button></div></section>' +
     '<section class="sell"><div class="row" style="flex-wrap:wrap">' + chips + '</div><div class="salekeys' + (owner ? ' can-arrange' : '') + '" data-group="' + esc(S.keyGroup || '') + '">' + keys + '</div>' +
     '<div class="card total" id="totalbar"></div></section></div></div>';
 }
@@ -1730,13 +1780,14 @@ function renderCartOnly() {
   if (!box) return;
   cartPromos();
   if (!S.cart.lines.length) box.innerHTML = '<div class="empty">สแกนสินค้าหรือแตะปุ่มด้านขวาเพื่อเริ่มบิล</div>';
-  else box.innerHTML = S.cart.lines.map(function (l, i) {
+  var short = stockShort();
+  if (S.cart.lines.length) box.innerHTML = S.cart.lines.map(function (l, i) {
     var m = l.multiplier === 1 ? mdFor(l.sku, i) : null;
     var mdChip = l.md ? '<button class="mdchip on" data-act="toggleMd" data-i="' + i + '" title="แตะเพื่อยกเลิก">ราคาลด −' + l.md.pct + '% × ' + l.md.qty + ' ✕</button>'
       : m && m.left > 0 ? '<button class="mdchip" data-act="toggleMd" data-i="' + i + '">ใช้ราคาลด −' + m.pct + '% (เหลือ ' + m.left + ')</button>' : '';
     return '<div class="swipe" data-i="' + i + '"><div class="swipe-bg">ลบ</div><div class="line ' + (i === S.cart.sel ? 'sel' : '') + '" data-act="selLine" data-i="' + i + '">' +
       '<div><div class="name">' + esc(l.name) + '</div><div class="sub">' + (S.recipes[l.sku] ? 'สูตร: ' + esc(recipeText(l.sku)) : esc(l.unitName) + (l.multiplier > 1 ? ' (' + l.multiplier + ' ชิ้น)' : '')) +
-      ' · ฿' + money(l.unitPrice) + '</div>' + mdChip + (l.promo ? '<span class="promo-tag">โปร −' + money(l.promo).replace(/\.00$/, '') + '</span>' : '') + '</div>' +
+      ' · ฿' + money(l.unitPrice) + '</div>' + mdChip + (l.promo ? '<span class="promo-tag">โปร −' + money(l.promo).replace(/\.00$/, '') + '</span>' : '') + stockTag(l, short) + '</div>' +
       '<div class="qty"><button data-act="qty" data-i="' + i + '" data-d="-1" aria-label="ลด">−</button><button class="n num" data-act="editQty" data-i="' + i + '" aria-label="พิมพ์จำนวน">' + l.qty +
       '</button><button data-act="qty" data-i="' + i + '" data-d="1" aria-label="เพิ่ม">+</button></div>' +
       '<div class="r num">' + (ldTotal(l) ? '<div class="was">' + money(l.qty * l.unitPrice) + '</div>' : '') + '<b>' + money(l.qty * l.unitPrice - ldTotal(l)) + '</b></div>' +
@@ -3614,7 +3665,7 @@ function renderProducts() {
     '<section class="card prod-list"><div class="prod-tools">' +
     '<label class="sr" for="pq">ค้นหาสินค้า</label><input id="pq" class="grow" placeholder="ค้นหา ชื่อ, EAN, SKU, PLU" value="' + esc(S.prodFilter.q) + '" data-input="prodQ" style="min-width:180px">' + camBtn('pq') +
     '<label class="sr" for="pcat">หมวด</label><select id="pcat" data-change="prodCat" style="width:150px"><option value="">ทุกหมวด</option>' + cats + '</select>' +
-    '<label class="sr" for="psub">หมวดย่อย</label><select id="psub" data-change="prodSub" style="width:150px">' + subOptions(S.prodFilter.cat, S.prodFilter.sub) + '</select>' +
+    '<label class="sr" for="psub">หมวดย่อย</label><select id="psub" data-change="prodSub" style="width:170px">' + subOptions(S.prodFilter.cat, S.prodFilter.sub) + '</select>' +
     '<span class="prod-acts">' +
     '<button class="btn sm" data-act="labOpen" style="height:40px">พิมพ์ป้าย</button>' +
     (owner ? '<button class="btn sm" data-act="promoOpen" style="height:40px">โปรโมชั่น' + ((S.promos || []).length ? ' (' + S.promos.length + ')' : '') + '</button>' +
@@ -3699,7 +3750,7 @@ function renderProductRows() {
     }).join('') + (isRecipe ? '<span class="tag green" title="' + esc(recipeText(p.sku)) + '">สูตรผสม</span>' : '') +
       (p.forSale === false ? '<span class="tag gray">วัตถุดิบ</span>' : '') + (p.openPrice ? '<span class="tag amber">ราคาเปิด</span>' : '') +
       (!p.active ? '<span class="tag gray">ปิดใช้งาน</span>' : '');
-    var low = p.minStock > 0 && p.onHand <= p.minStock;
+    var low = p.onHand < 0 || (p.minStock > 0 && p.onHand <= p.minStock);   // negative stock is the louder problem
     return '<div class="prod-grid' + (S.prodSel === p.sku ? ' on' : '') + '" data-act="selProduct" data-sku="' + esc(p.sku) + '"' + (p.active ? '' : ' style="opacity:.55"') + '>' +
       '<div><div style="font-weight:' + (S.prodSel === p.sku ? 600 : 500) + '">' + esc(p.name) + '</div><div class="sub">' + esc(p.sku) + (p.category ? ' · ' + esc(p.category) : '') + (p.subcategory ? ' › ' + esc(p.subcategory) : '') + '</div></div>' +
       '<div style="font-size:14px">' + ean + '</div><div class="tags">' + tags + '</div>' +
@@ -3830,7 +3881,7 @@ function drawEditor() {
     '<label class="checkrow"><input type="checkbox" data-ef="openPrice" ' + (p.openPrice ? 'checked' : '') + '> ราคาเปิด (ใส่ราคาตอนขาย เช่น ของทอด ของฝากขาย)</label>') +
     (isNew ? '' : '<label class="checkrow"><input type="checkbox" data-ef="active" ' + (p.active ? 'checked' : '') + '> ใช้งาน (เอาออก = ซ่อนจากหน้าขาย ประวัติยังอยู่)</label>') +
     '</fieldset>' +
-    (owner ? '<div class="ed-foot">' + (isNew ? '' : '<button class="btn ghost warn-text" data-ed="delete" title="ลบสินค้า">ลบ</button>') + '<button class="btn" data-ed="cancel">' + (S.ed.dirty ? 'ยกเลิก' : 'ปิด') + '</button><button class="btn primary" data-ed="save"' + (S.ed.dirty || isNew ? '' : ' disabled') + '>บันทึก</button></div>' : '');
+    (owner ? '<div class="ed-foot">' + (isNew ? '' : '<button class="btn warn ed-del" data-ed="delete">ลบสินค้า</button>') + '<button class="btn" data-ed="cancel">' + (S.ed.dirty ? 'ยกเลิก' : 'ปิด') + '</button><button class="btn primary" data-ed="save"' + (S.ed.dirty || isNew ? '' : ' disabled') + '>บันทึก</button></div>' : '');
 }
 
 function recipeSection(rcost) {
@@ -4348,7 +4399,7 @@ function loadExpiry() {
   swr('expiry', function () { return api('expiryList', S.token); }, function (d) {
     S.exp = d;
     S.expiryTodo = d.todo.length;
-    var nb = $('nav [data-v=expiry] .badge'); if (nb) nb.textContent = d.todo.length || '';
+    $all('.topbar .exp-badge, .subnav [data-v=expiry] .badge').forEach(function (nb) { nb.textContent = d.todo.length || ''; });
     drawExpiry();
   }).catch(fail);
 }
@@ -4488,7 +4539,7 @@ function loadStock() {
   drawWriteOff();
   swr('stock', function () { return Promise.all([api('stockList', S.token), api('stockOverview', S.token, 7)]); }, function (r) {
     stockRows = r[0]; S.ov = r[1]; S.stockLoaded = true;
-    if (S.ov.expiryTodo !== undefined) { S.expiryTodo = S.ov.expiryTodo; var nb = $('nav [data-v=expiry] .badge'); if (nb) nb.textContent = S.expiryTodo || ''; }
+    if (S.ov.expiryTodo !== undefined) { S.expiryTodo = S.ov.expiryTodo; $all('.topbar .exp-badge, .subnav [data-v=expiry] .badge').forEach(function (nb) { nb.textContent = S.expiryTodo || ''; }); }
     drawStockKpis(); drawStockTab(); drawExpiring();
   }).catch(fail);
 }
@@ -4877,12 +4928,11 @@ function renderShift() {
     '</h2><span class="muted">กด + / − หรือพิมพ์จำนวนใบ</span></div>' + denomTable(p) +
     (open ? '' : '<div class="shift-sum" id="shiftsum"><h2>สรุปจากระบบ</h2>' + skelList(5) + '</div>') + '</section>';
   var side = '<aside class="card pad shift-pad"><div class="shift-total"><div class="st-top"><span>' + (open ? 'เงินทอนตั้งต้น' : 'นับได้จริง') + '</span><small id="' + p + '-prog">นับแล้ว 0 / 11 ชนิด</small></div>' +
-    '<b id="' + p + '-total" class="num">฿0.00</b>' + (open ? '' : '<div class="st-cmp"><span id="c-exp"></span><b id="c-diff"></b></div>') +
+    '<b id="' + p + '-total" class="num">฿0.00</b>' + (open ? '' : '<div class="st-cmp"><span>นับให้ครบ แล้วกดปิดกะ — ระบบจะเทียบยอดให้ตอนนั้น</span></div>') +
     '<div class="st-bar"><i id="' + p + '-bar"></i></div></div>' +
     '<div class="den-cur" id="' + p + '-cur"></div>' + denomPad(p) + '<div class="shift-acts">' +
     (open ? '<button class="btn primary shift-go" type="submit">เปิดกะ · เริ่มขาย</button>'
       : '<div class="row" style="gap:8px"><button class="btn grow" type="button" data-act="cashMoveModal">เงินเข้า / ออก</button><button class="btn grow" type="button" data-act="noSale">เปิดลิ้นชัก</button></div>' +
-        '<div class="field"><label for="cnote">หมายเหตุ</label><input id="cnote" placeholder="เช่น ทอนเกิน"></div>' +
         '<button class="btn primary shift-go" type="button" data-act="closeShift">ปิดกะ' + (S.settings.lineEnabled ? ' · ส่ง LINE' : '') + '</button>') + '</div></aside>';
   return open ? '<form class="page shift-page" data-form="openShift">' + count + side + '</form>' : '<div class="page shift-page">' + count + side + '</div>';
 }
@@ -4943,16 +4993,6 @@ function denomRefresh(prefix) {
   if (curBox) {
     var c = cur || boxes.filter(function (i) { return i.value === ''; })[0];
     curBox.innerHTML = c ? (cur ? 'กำลังนับ: ' : 'ถัดไป: ') + '<b>' + esc(c.getAttribute('data-name')) + '</b>' : '<b>นับครบแล้ว</b> · ตรวจยอดแล้วกดปุ่มด้านล่าง';
-  }
-  if (prefix === 'c' && S.shiftSum) {
-    set('c-exp', 'ระบบคาดว่ามี ฿' + money(S.shiftSum.expectedCash));
-    var diff = round2(total - S.shiftSum.expectedCash), el = $('#c-diff');
-    // All notes and coins counted ("other" may stay empty) before showing short / over.
-    var main = boxes.slice(0, DENOMS.length + COINS.length).every(function (i) { return i.value !== ''; });
-    if (el) {
-      el.className = !main ? 'muted' : Math.abs(diff) < 0.005 ? 'ok' : 'bad';
-      el.textContent = !main ? 'ยังนับไม่ครบ' : Math.abs(diff) < 0.005 ? 'พอดี' : diff < 0 ? 'ขาด ' + money(-diff) : 'เกิน ' + money(diff);
-    }
   }
 }
 
@@ -5022,12 +5062,11 @@ function drawShiftSum(s) {
   });
   box.innerHTML = '<div class="ss-head"><h2>สรุปจากระบบ</h2><span class="muted">กะเปิด ' + dateTime(s.openedAt) + (s.openedByName ? ' โดย ' + esc(s.openedByName) : '') +
     ' · ' + (mins >= 60 ? Math.floor(mins / 60) + ' ชม. ' : '') + (mins % 60) + ' นาที</span></div><div class="ss-grid">' +
-    grp('เงินสดในลิ้นชัก', [row('เงินทอนตั้งต้น', money(s.openingCash)), row('+ ขายเงินสด', money(s.cashSales)), row('+ เงินเข้า', money(s.cashIn)),
-      row('− เงินออก', money(s.cashOut), s.cashOut ? 'bad' : ''), row('− คืนเงินลูกค้า', money(s.cashRefunds), s.cashRefunds ? 'bad' : '')], ['ต้องมีในลิ้นชัก', money(s.expectedCash)], true) +
-    grp('ยอดขายกะนี้', [row('เงินสด', money(s.cashSales)), row('QR พร้อมเพย์', money(s.qrSales)), row('โอน', money(s.transferSales)),
-      row('ส่วนลด', money(s.discount)), row('โปรโมชั่น', money(s.promoDiscount || 0))], ['รวมขาย', money(s.totalSales)]) +
-    grp('บิลและรายการ', [row('บิลขาย', s.billCount + ' บิล'), row('เฉลี่ยต่อบิล', s.billCount ? money(s.totalSales / s.billCount) : '–'),
-      row('ยกเลิกบิล', s.voidCount + ' บิล', s.voidCount ? 'bad' : ''), row('คืนสินค้า', s.returnCount + ' ครั้ง' + (s.otherRefunds ? ' · โอนคืน ' + money(s.otherRefunds) : ''))].concat(moves)) +
+    // Blind count: nothing here adds up to the drawer target (opening + cash sales ± moves). It shows after the count is confirmed.
+    '<div class="ss-grp tint ss-blind"><b class="ss-title">เงินสดในลิ้นชัก</b><p>นับตามของจริง แล้วกดปิดกะ<br>ระบบจะบอกยอดที่ควรมีและส่วนต่างให้ตอนนั้น</p></div>' +
+    grp('ยอดขายกะนี้ (ไม่ใช่เงินสด)', [row('QR พร้อมเพย์', money(s.qrSales)), row('โอน', money(s.transferSales)),
+      row('ส่วนลด', money(s.discount)), row('โปรโมชั่น', money(s.promoDiscount || 0))], ['บิลขาย', s.billCount + ' บิล']) +
+    grp('บิลและรายการ', [row('ยกเลิกบิล', s.voidCount + ' บิล', s.voidCount ? 'bad' : ''), row('คืนสินค้า', s.returnCount + ' ครั้ง' + (s.otherRefunds ? ' · โอนคืน ' + money(s.otherRefunds) : ''))].concat(moves)) +
     '</div>';
   denomRefresh('c');
 }
@@ -5081,9 +5120,15 @@ function closeShift() {
   }
   var counted = denomSum('c');
   var nHeld = heldBills().length;
-  depositModal(counted, nHeld).then(function (dp) {
+  var empty = $all('[data-den][data-p="c"]').slice(0, DENOMS.length + COINS.length).filter(function (i) { return i.value === ''; }).length;
+  var note = '';
+  // blind count → incomplete? → reveal expected vs counted (+ note) → split the drawer → close
+  (empty ? confirm2('ยังนับไม่ครบ', 'ยังไม่ได้ใส่จำนวนอีก ' + empty + ' ชนิด — ช่องที่เว้นไว้จะนับเป็น 0', 'ปิดกะต่อ') : Promise.resolve(true))
+    .then(function (ok) { return ok ? shiftRevealModal(counted) : null; })
+    .then(function (n) { if (n === null) return null; note = n; return depositModal(counted, nHeld); })
+    .then(function (dp) {
     if (!dp) return;
-    return api('closeShift', S.token, counted, ($('#cnote') || {}).value || '', dp).then(function (s) {
+    return api('closeShift', S.token, counted, note, dp).then(function (s) {
       S.shift = null; S.prevFloat = dp.floatLeft; saveCache(true);
       var diffTxt = s.diff === 0 ? 'เงินพอดี' : (s.diff < 0 ? 'เงินขาด ฿' + money(-s.diff) : 'เงินเกิน ฿' + money(s.diff));
       var m = openModal('<header><h1>ปิดกะแล้ว</h1></header><div class="body"><div style="font-size:28px;font-weight:700" class="' + (s.diff < 0 ? 'warn-text' : 'brand-text') + '">' + diffTxt + '</div>' +
@@ -5094,6 +5139,37 @@ function closeShift() {
       $('[data-x=ok]', m).onclick = function () { closeModal(); go('shift'); };
     });
   }).catch(fail);
+}
+
+/** After the blind count: what the system expected. Short / over beyond the setting needs a note. Resolves the note, or null to recount. */
+function shiftRevealModal(counted) {
+  return new Promise(function (resolve) {
+    var s = S.shiftSum;
+    if (!s) { resolve(''); return; }
+    var diff = round2(counted - s.expectedCash);
+    var lim = Number(S.settings.shiftNoteOver === undefined || S.settings.shiftNoteOver === '' ? 20 : S.settings.shiftNoteOver) || 0;
+    var even = Math.abs(diff) < 0.005, big = Math.abs(diff) > lim + 0.004, done = false;
+    var head = even ? 'เงินพอดี' : diff < 0 ? 'เงินขาด ฿' + money(-diff) : 'เงินเกิน ฿' + money(diff);
+    var m = openModal('<header><h1>เทียบยอดเงินในลิ้นชัก</h1></header><div class="body col" style="gap:12px">' +
+      '<div class="reveal-head ' + (even ? 'ok' : 'bad') + '">' + head + '</div>' +
+      moneyStrip([['นับได้', '฿' + money(counted)], ['ระบบคาดว่ามี', '฿' + money(s.expectedCash)], ['ส่วนต่าง', (diff > 0 ? '+' : '') + money(diff), even ? '' : 'warn-text']]) +
+      '<div class="ss-grp tint"><b class="ss-title">ยอดที่ควรมีมาจาก</b>' +
+      [['เงินทอนตั้งต้น', s.openingCash], ['+ ขายเงินสด', s.cashSales], ['+ เงินเข้า', s.cashIn], ['− เงินออก', s.cashOut], ['− คืนเงินลูกค้า', s.cashRefunds]].map(function (r) {
+        return '<div class="ss-row"><span>' + r[0] + '</span><span class="num">' + money(r[1] || 0) + '</span></div>'; }).join('') + '</div>' +
+      '<div class="field"><label for="rv-note">หมายเหตุ ' + (big && !even ? '<b class="warn-text">ต้องใส่ — ต่างเกิน ฿' + money(lim) + '</b>' : '<span class="muted">(ถ้ามี)</span>') + '</label>' +
+      '<input id="rv-note" placeholder="เช่น ทอนเกินลูกค้า, ลืมกดเงินออก"></div></div>' +
+      '<footer><button class="btn" data-x="back">กลับไปนับใหม่</button><button class="btn primary" data-x="ok">ยืนยัน · แบ่งเงิน</button></footer>',
+      { onClose: function () { if (!done) resolve(null); } });
+    var finish = function (v) { done = true; closeModal(); resolve(v); };
+    $('[data-x=back]', m).onclick = function () { closeModal(); };
+    $('[data-x=ok]', m).onclick = function () {
+      var n = $('#rv-note', m).value.trim();
+      if (big && !even && !n) { $('#rv-note', m).focus(); return toast('เงินต่างเกิน ฿' + money(lim) + ' — ใส่หมายเหตุสั้นๆ ว่าเกิดจากอะไร', true); }
+      finish(n);
+    };
+    $('#rv-note', m).onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); $('[data-x=ok]', m).click(); } };
+    setTimeout(function () { var i = $('#rv-note', m); if (i) i.focus(); }, 30);
+  });
 }
 
 
@@ -5393,7 +5469,19 @@ function kpiCard(label, val, note, cls) {
   return '<div class="card acc-kpi' + (cls ? ' ' + cls : '') + '"><span>' + label + '</span><b class="num">' + val + '</b><small>' + (note || '') + '</small></div>';
 }
 function rowLine(k, v, cls) { return '<div class="acc-line"><span>' + k + '</span><span class="num' + (cls ? ' ' + cls : '') + '">' + v + '</span></div>'; }
-function accPct(a, b) { return b ? (a / b * 100).toFixed(1) + '%' : '–'; }
+/** Share of sales. Blank when sales are nil or too small to compare (a 3584% line helps nobody). */
+function accPct(a, b) { return b > 0 && Math.abs(a / b) <= 9.99 ? (a / b * 100).toFixed(1) + '%' : '—'; }
+
+/** Stacked bar; a segment too narrow for its words keeps them as a tooltip instead of showing "สินค้". */
+function accSplit(parts) {
+  var tot = parts.reduce(function (a, p) { return a + Math.max(0, p[0]); }, 0) || 1;
+  return '<div class="acc-split">' + parts.filter(function (p) { return p[0] > 0; }).map(function (p) {
+    var share = p[0] / tot, txt = esc(p[1]);
+    return '<i style="flex:' + p[0] + ';background:' + p[2] + (p[3] ? ';color:' + p[3] : '') + '" title="' + txt + '">' + (share >= 0.2 ? txt : share >= 0.09 ? txt.split(' ')[0] : '') + '</i>';
+  }).join('') + '</div>' +
+    '<div class="acc-split-key">' + parts.filter(function (p) { return p[0] > 0 && p[0] / tot < 0.2; }).map(function (p) {
+      return '<span><i style="background:' + p[2] + '"></i>' + esc(p[1]) + '</span>'; }).join('') + '</div>';
+}
 
 function catBars(byCat, cats, total) {
   var keys = Object.keys(byCat).sort(function (a, b) { return byCat[b] - byCat[a]; });
@@ -5425,10 +5513,12 @@ function drawAccOverview(d) {
     kpiCard('รายจ่าย + ของเสีย', m0(loss), 'รวมของขาดจากตรวจนับ', 'flat') + '<i class="op">=</i>' +
     kpiCard('กำไรสุทธิ', m0(f.net), 'ไม่รวมเงินถอนใช้ส่วนตัว', 'flat hero ' + (f.net >= 0 ? 'good' : 'warn')) + '</div>' +
     '<div class="card pad"><div class="acc-h"><b>ที่มากำไรสุทธิ</b><a href="#" data-act="accTab" data-t="pl">ดูงบกำไรขาดทุน ›</a></div>' +
-    (f.netSales > 0 ? '<div class="acc-split"><i style="flex:' + Math.max(0, f.cogs) + ';background:#D9DDD8">ต้นทุนสินค้า ' + m0(f.cogs) + '</i><i style="flex:' + Math.max(0, loss) + ';background:#F6C7A8">รายจ่าย</i>' +
-      (f.net > 0 ? '<i style="flex:' + f.net + ';background:var(--brand);color:var(--brand-ink)">กำไร</i>' : '') + '</div>' +
-      '<div class="muted" style="font-size:13px;margin-top:8px">ขายได้ 100 บาท → ต้นทุนของ ' + Math.round(f.cogs / f.netSales * 100) + ' · รายจ่ายร้าน ' + Math.round(loss / f.netSales * 100) +
-      ' · เหลือเป็นกำไร <b class="brand-text">' + Math.round(f.net / f.netSales * 100) + ' บาท</b></div>' : '<div class="muted">ยังไม่มียอดขายในช่วงนี้</div>') + '</div>' +
+    (f.netSales > 0 ? accSplit([[f.cogs, 'ต้นทุนสินค้า ' + m0(f.cogs), '#D9DDD8', ''], [loss, 'รายจ่าย ' + m0(loss), '#F6C7A8', ''], [f.net, 'กำไร ' + m0(f.net), 'var(--brand)', 'var(--brand-ink)']]) +
+      '<div class="muted" style="font-size:13px;margin-top:8px">' + (Math.abs(f.net) <= f.netSales && f.cogs + loss <= f.netSales * 2
+        ? 'ขายได้ 100 บาท → ต้นทุนของ ' + Math.round(f.cogs / f.netSales * 100) + ' · รายจ่ายร้าน ' + Math.round(loss / f.netSales * 100) +
+          ' · ' + (f.net >= 0 ? 'เหลือเป็นกำไร <b class="brand-text">' : 'ขาดทุน <b class="warn-text">') + Math.abs(Math.round(f.net / f.netSales * 100)) + ' บาท</b>'
+        : 'รายจ่ายมากกว่ายอดขายหลายเท่า — ' + (f.net >= 0 ? 'กำไร ' : 'ขาดทุน <b class="warn-text">') + m0(Math.abs(f.net)) + (f.net >= 0 ? '' : '</b>') + ' · ยังเทียบต่อ 100 บาทไม่ได้') + '</div>'
+      : '<div class="muted">ยังไม่มียอดขายในช่วงนี้</div>') + '</div>' +
     '<div class="acc-two"><div class="card pad"><b class="acc-t">รายจ่ายแยกหมวด</b>' + catBars(Object.assign({}, f.byCat, f.waste ? { 'ของเสีย / หมดอายุ': f.waste } : {}, f.storeUse ? { 'เบิกใช้ในร้าน': f.storeUse } : {}, f.shrink > 0 ? { 'ของขาดจากตรวจนับ': f.shrink } : {}), d.cats, loss) +
     '<div class="acc-line tot"><span>รวม</span><span class="num">' + money(loss) + '</span></div></div>' +
     '<div class="card pad"><b class="acc-t">รับเงินจากช่องทางไหน</b>' + [['เงินสด', f.cash, '#B8901C'], ['QR พร้อมเพย์', f.qr, 'var(--brand)'], ['โอน', f.transfer, '#2F6DB5'], ['ค้างจ่าย (เชื่อ)', f.credit, 'var(--warn)']].filter(function (x) { return x[1]; }).map(function (x) {
@@ -5477,7 +5567,7 @@ function drawAccPL(d) {
     (f.shrink ? L('หัก ของขาดจากตรวจนับ', -f.shrink, 1, 'warn-text') : '') +
     L('หัก รายจ่ายร้าน', -f.expenses, 1, 'warn-text') + catKeys.map(function (k) { return L(esc(k), -f.byCat[k], 2); }).join('') +
     (f.cashDiff ? L('เงินขาด / เกินจากกะ', f.cashDiff, 1, f.cashDiff < 0 ? 'warn-text' : '') : '') +
-    '<div class="pl-net"><span>กำไรสุทธิ</span><span class="num ' + (f.net >= 0 ? 'brand-text' : 'warn-text') + '">' + money(f.net) + '</span><small>' + accPct(f.net, f.netSales) + '</small></div>' +
+    '<div class="pl-net' + (f.net < 0 ? ' loss' : '') + '"><span>' + (f.net < 0 ? 'ขาดทุนสุทธิ' : 'กำไรสุทธิ') + '</span><span class="num ' + (f.net >= 0 ? 'brand-text' : 'warn-text') + '">' + money(f.net) + '</span><small>' + accPct(f.net, f.netSales) + '</small></div>' +
     '<div class="acc-line muted" style="padding:10px 4px 0"><span>เจ้าของถอนใช้ส่วนตัว <small>(ไม่ใช่รายจ่ายร้าน)</small></span><span class="num purple">' + money(f.draws) + '</span></div></div>' +
     '<aside class="col" style="gap:16px"><div class="card pad"><div class="acc-h"><b>' + (d.byMonth ? 'รายเดือน' : 'รายวัน') + '</b><span class="muted"><i class="dot" style="background:#D9DDD8"></i> ยอดขาย <i class="dot" style="background:var(--brand)"></i> กำไรขั้นต้น</span></div>' + chart + '</div>' +
     '<div class="card pad"><div class="acc-h"><b>สต็อกช่วงนี้</b><span class="muted">ราคาทุน</span></div>' +
@@ -6982,6 +7072,9 @@ function renderSettings() {
     '<div class="field"><label for="s-syncMinutes">ซิงก์ข้อมูลอัตโนมัติ</label><select id="s-syncMinutes" data-skey="syncMinutes">' +
       [['0', 'ปิด (ซิงก์เมื่อเปิดโปรแกรมเท่านั้น)'], ['1', 'ทุก 1 นาที'], ['3', 'ทุก 3 นาที'], ['5', 'ทุก 5 นาที'], ['10', 'ทุก 10 นาที'], ['15', 'ทุก 15 นาที'], ['30', 'ทุก 30 นาที'], ['60', 'ทุก 1 ชั่วโมง']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.syncMinutes === undefined || st.syncMinutes === '' ? '5' : st.syncMinutes) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
+    '<div class="field"><label for="s-shiftNoteOver">ปิดกะ: เงินขาด/เกินเกินเท่านี้ ต้องใส่หมายเหตุ</label><select id="s-shiftNoteOver" data-skey="shiftNoteOver">' +
+      [['0', 'ทุกครั้งที่ไม่พอดี'], ['10', '฿10'], ['20', '฿20'], ['50', '฿50'], ['100', '฿100']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (String(st.shiftNoteOver === undefined || st.shiftNoteOver === '' ? '20' : st.shiftNoteOver) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
     '<div class="field"><label for="s-autoLockMinutes">ล็อกหน้าจอเมื่อไม่มีใครใช้ (ต้องใส่ PIN ใหม่)</label><select id="s-autoLockMinutes" data-skey="autoLockMinutes">' +
       [['0', 'ไม่ล็อก'], ['5', '5 นาที'], ['10', '10 นาที'], ['15', '15 นาที'], ['30', '30 นาที'], ['60', '1 ชั่วโมง'], ['120', '2 ชั่วโมง']].map(function (o) {
         return '<option value="' + o[0] + '"' + (String(st.autoLockMinutes === undefined ? '5' : st.autoLockMinutes) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +

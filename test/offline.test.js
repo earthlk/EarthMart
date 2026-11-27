@@ -94,7 +94,7 @@ const server = http.createServer((req, res) => {
   await page.click('.modal [data-x=ok]');
   await page.waitForSelector('#scan');
   await page.fill('#scan', '8850000000011'); await page.keyboard.press('Enter');
-  await page.waitForSelector('.toast:has-text("ขนมปัง หมดแล้ว")');
+  await page.waitForSelector('.line .stock-tag:has-text("สต็อก 0")');   // out of stock: amber tag on the line, sale goes on
   await page.keyboard.press('F12');
   await page.click('#kp [data-k="2"]'); await page.click('#kp [data-k="0"]');
   await page.click('[data-x=ok]');
@@ -160,7 +160,7 @@ const server = http.createServer((req, res) => {
   const sum = call('shiftSummary', T.replace(/.*/, call('login', mewId, '5678', DEV).token));
   assert.deepStrictEqual([sum.cashSales, sum.cashOut, sum.expectedCash], [27, 20, 507], 'shift adds up: 500 + 15 + 12 - 20');
   await page.click('nav button[data-v=shift]');
-  await page.waitForSelector('#shiftsum:has-text("ต้องมีในลิ้นชัก")');
+  await page.waitForSelector('#shiftsum .ss-blind');   // blind count: no drawer target shown
   await shot('o4-back-online');
 
   assert.deepStrictEqual(errors, [], 'no page errors');

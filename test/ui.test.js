@@ -201,6 +201,10 @@ call('importProducts', T, [
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__serialWrites.length === 2);
   await page.keyboard.press('Escape');
+  assert.ok(!(await page.$('.topbar [data-act=cashMoveModal]')) && await page.$('.cart-acts [data-act=cashMoveModal], .lines ~ * [data-act=cashMoveModal], [data-act=cashMoveModal]'), 'เงินเข้า/ออก in the cart bar, not the header');
+  const navH = await page.$eval('.topbar', el => el.scrollHeight);
+  assert.ok(navH <= 56, 'header stays one row at 1366 with a shift open (' + navH + ')');
+  await page.click('nav button[data-v=shift]');
   await page.click('[data-act=noSale]');
   await page.waitForFunction(() => window.__serialWrites.length === 3);
 
@@ -513,8 +517,10 @@ call('importProducts', T, [
   assert.strictEqual(after.products.find(p => p.name === 'ชุดน้ำแข็ง+ฝา').onHand, 0, 'recipe has no own stock');
 
   // 9b. Receive goods: pack scanned twice, line total typed, item added by name, expiry set
-  await page.click('nav button[data-v=receive]');
+  await page.click('nav button[data-v=stock]');
+  await page.click('.subnav [data-v=receive]');
   await page.waitForSelector('#rscan');
+  assert.ok(await page.$('nav button[data-v=stock].on'), 'สต็อก lit on รับสินค้า');
   await page.fill('#rc-sup', 'แม็คโคร');
   await page.fill('#rscan', '8851234567906'); await page.keyboard.press('Enter');
   await page.fill('#rscan', '8851234567906'); await page.keyboard.press('Enter');
@@ -585,7 +591,8 @@ call('importProducts', T, [
   await page.waitForSelector('#xrows .exp-grid');
   assert.strictEqual(await page.locator('#xrows .exp-grid').count(), 2, 'two lots to handle');
   assert.match(await page.textContent('#xrows'), /หมดอายุ · เก็บออกจากชั้น[\s\S]*ใกล้หมดอายุ · ลดราคา/);
-  assert.strictEqual((await page.textContent('nav button[data-v=expiry] .badge')).trim(), '2');
+  assert.strictEqual((await page.textContent('.subnav [data-v=expiry] .badge')).trim(), '2');
+  assert.strictEqual((await page.textContent('nav button[data-v=stock] .badge')).trim(), '2', 'expiry count on the สต็อก tab');
   await page.click('#xrows .exp-grid:has-text("น้ำดื่ม") [data-a=MARKDOWN]');
   await page.fill('#xq', '4');
   await page.click('[data-act=expPct][data-p="30"]');
@@ -597,7 +604,7 @@ call('importProducts', T, [
   await page.fill('#xq', '2');
   await page.click('[data-act=expSave]');
   await page.waitForSelector('#xrows .empty');
-  assert.strictEqual((await page.textContent('nav button[data-v=expiry] .badge')).trim(), '');
+  assert.strictEqual((await page.textContent('.subnav [data-v=expiry] .badge')).trim(), '');
   await page.click('[data-act=expTab][data-t=done]');
   await page.waitForFunction(() => document.querySelectorAll('#xrows .exp-grid').length === 2);
   await shot('09o-expiry-done');
@@ -884,7 +891,27 @@ call('importProducts', T, [
   await page.fill('#ccoin', '62.80');
   if (process.env.SIZES) for (const [w, h] of [[1920, 1080], [1280, 1024], [1024, 768]]) { await page.setViewportSize({ width: w, height: h }); await shot('sz-' + w); }
   await page.setViewportSize({ width: 1366, height: 800 });
+  // blind count: the target is nowhere on the page until the count is confirmed
+  assert.ok(!(await page.textContent('.shift-page')).includes('ต้องมีในลิ้นชัก') && !(await page.textContent('.shift-page')).includes('ระบบคาดว่ามี'), 'expected cash hidden while counting');
+  await page.fill('#ccoin', '0');
   await page.click('[data-act=closeShift]');
+  await page.waitForSelector('.modal h1:has-text("ยังนับไม่ครบ")');
+  await page.click('.modal [data-x=yes]');
+  await page.waitForSelector('.modal h1:has-text("เทียบยอด")');
+  assert.match(await page.textContent('.modal .reveal-head'), /เงินขาด ฿62\.80/, 'reveal shows short');
+  await page.click('.modal [data-x=ok]');
+  await page.waitForSelector('.toast:has-text("ใส่หมายเหตุ")');
+  await shot('10b2-reveal');
+  await page.click('.toast.err');
+  await page.waitForSelector('.modal h1:has-text("ข้อผิดพลาดล่าสุด")');
+  assert.ok(await page.isVisible('.err-log li:has-text("ใส่หมายเหตุ")'), 'error kept in the log');
+  await page.locator('.modal [data-x=ok]').last().click();
+  await page.click('.modal [data-x=back]');
+  await page.fill('#ccoin', '62.80');
+  await page.click('[data-act=closeShift]');
+  await page.click('.modal [data-x=yes]');
+  await page.waitForSelector('.modal .reveal-head:has-text("เงินพอดี")');
+  await page.click('.modal [data-x=ok]');
   await page.waitForSelector('#dp-keep');
   await page.fill('#dp-keep', '300'); await page.dispatchEvent('#dp-keep', 'input');
   await shot('10c-deposit');

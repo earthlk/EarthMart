@@ -107,7 +107,7 @@ const server = http.createServer((req, res) => {
   await page.click('.tabbar [data-v=home]');
   await page.click('.mtile[data-v=bills]');
   await page.waitForSelector('#bills tr');
-  assert.ok(await page.$('.tabbar [data-v=home].on'), 'บิล lights the หน้าหลัก tab');
+  assert.ok(!(await page.$('.tabbar button.on')) && await page.$('.mtop .mback'), 'บิล: no tab lit, back arrow to หน้าหลัก');
   await shot('m8-bills');
   // Accounting sits under รายงาน as a second segment
   await page.click('.tabbar [data-v=acct]');

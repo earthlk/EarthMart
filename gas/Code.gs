@@ -93,7 +93,8 @@ var DEFAULT_SETTINGS = {
   openingActive: '',
   reorderDays: '7',
   syncMinutes: '5',
-  accStartAssets: ''
+  accStartAssets: '',
+  shiftNoteOver: '20'
 };
 
 /* ------------------------------------------------------------------ */

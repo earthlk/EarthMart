@@ -38,7 +38,7 @@
 /* ===== Base ===== */
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
-body{background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans Thai',system-ui,sans-serif;font-size:15px;line-height:1.4}
+body{background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans Thai',system-ui,sans-serif;font-size:15px;line-height:1.5}
 button,input,select,textarea{font:inherit;color:inherit}
 input,select,textarea{background:var(--surface);color:var(--ink);border:1px solid var(--line-strong);border-radius:8px;height:40px;padding:0 10px;min-width:0}
 textarea{height:auto;padding:10px;resize:vertical}
@@ -82,8 +82,9 @@ a{color:var(--brand-text)}
 /* ===== Layout ===== */
 #app{height:100%;display:flex;flex-direction:column}
 .topbar{height:56px;flex:0 0 56px;padding:0 16px;display:flex;align-items:center;gap:16px;background:var(--header);color:var(--header-ink)}
-.topbar .brand{font-size:19px;font-weight:700}
-.topbar nav{display:flex;gap:2px;flex-wrap:wrap}
+.topbar .brand{font-size:19px;font-weight:700;white-space:nowrap}
+.topbar nav{display:flex;gap:2px;flex-wrap:nowrap;min-width:0}
+.topbar nav button{white-space:nowrap}
 .topbar nav button{height:34px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:var(--header-muted);cursor:pointer}
 .topbar nav button.on{background:var(--header-active);color:var(--header-ink);font-weight:600}
 .topbar .meta{font-size:13px;color:var(--header-muted);white-space:nowrap}
@@ -280,8 +281,14 @@ a{color:var(--brand-text)}
 .modal header h1{margin:0;font-size:20px}
 .modal .body{padding:18px 22px;display:flex;flex-direction:column;gap:12px}
 .modal footer{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
-.toast{position:fixed;left:50%;top:68px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:10px;z-index:60;max-width:90vw;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.toast{position:fixed;right:20px;top:68px;background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:10px;z-index:60;max-width:min(460px,calc(100vw - 40px));line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.25);cursor:pointer;animation:toastIn .18s cubic-bezier(.2,.8,.2,1)}
 .toast.err{background:var(--warn);color:#fff}
+@keyframes toastIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.toast{animation:none}}
+.stock-tag{display:inline-block;margin-top:3px;margin-right:6px;padding:1px 7px;border-radius:6px;font-size:12px;line-height:1.5;background:var(--warn-soft,#FBEFE6);color:var(--warn);border:1px solid var(--warn-line,#F0C9A8)}
+.err-log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.err-log li{display:grid;grid-template-columns:52px 1fr;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-soft,var(--line));line-height:1.55}
+.err-log time{color:var(--muted)}
 .seg{display:flex;gap:6px}
 .seg button{flex:1;height:50px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);cursor:pointer;font-size:16px}
 .seg button.on{background:var(--chip-on);color:var(--chip-on-ink);border-color:var(--chip-on);font-weight:600}
@@ -342,7 +349,7 @@ a{color:var(--brand-text)}
 @media (max-width:1100px){ .rep-sel{grid-template-columns:repeat(3,1fr)} .rep-f{flex-direction:column;align-items:stretch} }
 
 /* Return dialog: lines that do not go back to stock */
-.su-line.nostock{background:var(--tag-amber-bg);border-left:4px solid var(--tag-amber)}
+.su-line.nostock{background:var(--tag-amber-bg)}
 .rt-stock{display:flex;gap:8px;flex-wrap:wrap}
 .rt-stock:empty{display:none}
 
@@ -1155,3 +1162,41 @@ a{color:var(--brand-text)}
 #app.m .acc-tools>.btn{width:auto;flex:0 0 auto;height:38px;padding:0 12px}
 #app.m .acc-tools>.seg-sm{flex:1 1 100%;overflow-x:auto}
 #app.m #skpi .v+.muted,#app.m #bkpi .v+.muted,#app.m #xkpi .v+.muted{display:none}
+/* Shift close: blind count, then the reveal */
+.ss-blind p{margin:6px 0 0;font-size:14px;line-height:1.6;color:var(--ink-2,var(--muted))}
+.reveal-head{font-size:30px;font-weight:700;line-height:1.2}
+.reveal-head.ok{color:var(--brand-text)}.reveal-head.bad{color:var(--warn)}
+#app.m~.toast{top:auto;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));max-width:none}
+/* Stock group sub-bar (สต็อกคงเหลือ · รับสินค้า · หมดอายุ) */
+.subnav{display:flex;gap:4px;padding:8px 16px 0;background:transparent}
+.subnav button{height:36px;padding:0 14px;border:1px solid var(--line);border-radius:18px;background:var(--surface);color:var(--ink);cursor:pointer;font:inherit;font-size:14px;white-space:nowrap}
+.subnav button.on{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:600}
+.subnav .badge{display:inline-block;min-width:18px;height:18px;line-height:18px;padding:0 5px;margin-left:6px;border-radius:9px;background:var(--warn);color:#fff;font-size:11px;font-weight:700;text-align:center}
+.subnav .badge:empty{display:none}
+.acc-split-key{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:12px;color:var(--muted)}
+.acc-split-key:empty{display:none}
+.acc-split-key i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:0}
+.pl-net.loss{background:var(--warn-soft);color:var(--warn)}
+/* ===== Phone: thumb-sized targets, scroll hints, back arrow ===== */
+#app.m .mback{width:44px;height:44px;margin-left:-10px;border:0;background:transparent;color:var(--header-ink);display:flex;align-items:center;justify-content:center;cursor:pointer}
+#app.m .mback svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#app.m .mwho{min-height:44px}
+#app.m .mseg button{min-height:44px}
+/* small chips keep their look but get a 44px hit area (the strip's padding holds the extra) */
+#app.m .chip,#app.m .acc-tabs button,#app.m .seg-sm button,#app.m .stk-grid .btn.sm,#app.m .rep-gran button{position:relative}
+#app.m .chip::before,#app.m .acc-tabs button::before,#app.m .seg-sm button::before,#app.m .stk-grid .btn.sm::before,#app.m .rep-gran button::before{content:'';position:absolute;left:0;right:0;top:50%;height:44px;transform:translateY(-50%)}
+#app.m .chips{padding-top:6px;padding-bottom:6px}
+#app.m .acc-step{height:44px}
+#app.m .acc-step button{min-width:44px;height:44px}
+#app.m .acc-page a[data-act]{display:inline-flex;align-items:center;min-height:44px}
+#app.m .stk-tools label.row{min-height:44px}
+#app.m .stk-tools input[type=checkbox]{width:22px;height:22px}
+/* fade the side of a swipe strip that still has more */
+#app.m .more-r{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 36px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 36px),transparent)}
+#app.m .more-l{-webkit-mask-image:linear-gradient(to right,transparent,#000 36px);mask-image:linear-gradient(to right,transparent,#000 36px)}
+#app.m .more-l.more-r{-webkit-mask-image:linear-gradient(to right,transparent,#000 36px,#000 calc(100% - 36px),transparent);mask-image:linear-gradient(to right,transparent,#000 36px,#000 calc(100% - 36px),transparent)}
+/* Keyboard focus on every button and link, not just chips and switches */
+.btn:focus-visible,button:focus-visible,a:focus-visible,[data-act]:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+/* Thai tone marks need room in small text */
+small,.sub,.muted{line-height:1.55}
+.ed-foot .ed-del{margin-right:auto}
